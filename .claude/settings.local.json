@@ -4,7 +4,8 @@
   },
   "permissions": {
     "allow": [
-      "WebSearch"
+      "WebSearch",
+      "Skill(update-config)"
     ],
     "tools": "dontAsk",
     "commands": "dontAsk",
@@ -14,30 +15,13 @@
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun run build",
-            "if": "Bash(*build*)"
-          },
-          {
-            "type": "command",
-            "command": "bun test",
-            "if": "Bash(*test*)"
-          }
-        ]
+        "hooks": []
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "git push",
-            "if": "Bash(git commit *)"
-          }
-        ]
+        "hooks": []
       }
     ]
   },
@@ -49,5 +33,14 @@
     "/c": "/clear",
     "/m": "/memory",
     "/s": "/status"
+  },
+  "mcpServers": {
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    }
   }
 }

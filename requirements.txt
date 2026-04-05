@@ -1,0 +1,31 @@
+# AI Trading System Dependencies
+# Phase 2 - Agent Battle System MVP
+
+# Core ML/RL libraries
+numpy>=1.21.0
+torch>=1.9.0
+stable-baselines3>=1.7.0
+
+# Data processing
+pandas>=1.3.0
+scikit-learn>=1.0.0
+
+# Trading/Finance
+ccxt>=3.0.0
+freqtrade>=2022.10.0
+
+# Additional utilities
+matplotlib>=3.5.0
+seaborn>=0.11.0
+scipy>=1.7.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=3.0.0
+
+# Development
+black>=22.0.0
+flake8>=4.0.0
+mypy>=0.910
+
+# Note: FreqAI dependencies are handled by Freqtrade
