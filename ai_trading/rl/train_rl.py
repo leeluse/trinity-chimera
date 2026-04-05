@@ -1,4 +1,4 @@
-"""PPO Reinforcement Learning Training Script for NIM-TRADE.
+"""PPO Reinforcement Learning Training Script for TRINITY-CHIMERY.
 
 This module implements PPO training for trading agents using stable-baselines3.
 Handles training, evaluation, checkpointing, and monitoring.

@@ -1,4 +1,4 @@
-# NIM-TRADE Dashboard - Phase 1 완료 보고
+# TRINITY-CHIMERY Dashboard - Phase 1 완료 보고
 
 ## 작성자: Coline (UI/UX Design)
 ## 완료일: 2026-04-05

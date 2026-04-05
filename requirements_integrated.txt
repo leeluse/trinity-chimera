@@ -1,4 +1,4 @@
-# NIM-TRADE 통합 의존성 목록
+# TRINITY-CHIMERY 통합 의존성 목록
 # Phase 1 + Phase 2 통합 시스템
 
 # Core Python

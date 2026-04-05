@@ -1,4 +1,4 @@
-# NIM-TRADE UI 컴포넌트 명세서
+# TRINITY-CHIMERY UI 컴포넌트 명세서
 
 ## 문서 정보
 - **작성자:** Coline (UI/UX Design)
@@ -11,7 +11,7 @@
 ## 1. 개요
 
 ### 1.1 목적
-NIM-TRADE 트레이딩 시스템의 실시간 모니터링 및 데이터 시각화를 위한 React 기반 UI 컴포넌트 명세서입니다.
+TRINITY-CHIMERY 트레이딩 시스템의 실시간 모니터링 및 데이터 시각화를 위한 React 기반 UI 컴포넌트 명세서입니다.
 
 ### 1.2 범위
 - Phase 2 구현된 시스템 기반 시각화

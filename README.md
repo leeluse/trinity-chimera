@@ -1,4 +1,4 @@
-# NIM-TRADE: 페르소나 기반 멀티-에이전트 트레이딩 시스템
+# TRINITY-CHIMERY: 페르소나 기반 멀티-에이전트 트레이딩 시스템
 
 > 자율 에이전트들이 각자 전략을 스스로 생성하고, 서로 경쟁하며 자본을 배분받는 AI 트레이딩 시스템
 
@@ -17,8 +17,8 @@
 
 ```bash
 # 저장소 클론
-git clone https://github.com/your-org/nim-trade.git
-cd nim-trade
+git clone https://github.com/leeluse/trinity-chimery.git
+cd trinity-chimery
 
 # 의존성 설치
 pip install -r requirements.txt
@@ -114,7 +114,7 @@ python -m dashboard.server
 ## 📁 프로젝트 구조
 
 ```
-nim-trade/
+trinity-chimery/
 ├── ai_trading/                 # 코어 AI 트레이딩 모듈
 │   ├── core/                   # 공유 퍼셉션 레이어
 │   │   ├── hmm_regime.py       # HMM 시장 regime 분류
@@ -260,8 +260,8 @@ pytest ai_trading/tests/test_hmm.py::test_hmm_accuracy -v
 
 프로젝트 관련 문의 또는 버그 리포트:
 - 이슈 트래커: GitHub Issues
-- 이메일: project@nim-trade.com
+- 이메일: project@trinity-chimery.com
 
 ---
 
-**NIM-TRADE 팀** | Phase 1 완료: 2026-04-05 | 다음 단계: Phase 2 (에이전트 배틀 시스템)
+**TRINITY-CHIMERY 팀** | Phase 1 완료: 2026-04-05 | 다음 단계: Phase 2 (에이전트 배틀 시스템)

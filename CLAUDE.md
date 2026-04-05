@@ -3,7 +3,7 @@
 - 하나의 Phase가 끝나고 난 뒤 리더는 최종 점검 진행 후 다음 Phase로 넘어갈지, 아니면 현재 Phase에서 개선할 점이 있는지 판단해야 합니다.
 
 
-# NIM-TRADE 프로젝트 진행 상황
+# TRINITY-CHIMERY 프로젝트 진행 상황
 ## 중요: Phase 1부터 시행해야 함
 **현재 상태: Phase 2가 완료되었으나 Phase 1이 건너뛰어짐**
 - 올바른 접근법: Phase 1 → Phase 2 → Phase 3 → Phase 4 순차적 진행 필요

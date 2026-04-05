@@ -1,5 +1,5 @@
 /**
- * NIM-TRADE Dashboard Type Definitions
+ * TRINITY-CHIMERY Dashboard Type Definitions
  */
 
 /** 개별 에이전트 성과 지표 */

@@ -9,7 +9,7 @@
 
 ## 1. 실행 요약
 
-NIM-TRADE Phase 1의 트레이딩 시스템을 기반으로 한 실시간 모니터링 및 데이터 시각화 컴포넌트를 설계 완료했습니다. React + TypeScript 기반의 UI/UX 아키텍처와 구체적인 컴포넌트 명세를 완료했습니다.
+TRINITY-CHIMERY Phase 1의 트레이딩 시스템을 기반으로 한 실시간 모니터링 및 데이터 시각화 컴포넌트를 설계 완료했습니다. React + TypeScript 기반의 UI/UX 아키텍처와 구체적인 컴포넌트 명세를 완료했습니다.
 
 ### 핵심 산출물 ✅ 완료
 - [x] 모니터링 요구사항 분석
@@ -108,7 +108,7 @@ class PortfolioState:
 ├─────────────────────────────────────────────────────────────┤
 │                    Zustand State Store                      │
 ├─────────────────────────────────────────────────────────────┤
-│  NIM-TRADE Backend (arena.py, portfolio.py, text_dashboard.py) │
+│  TRINITY-CHIMERY Backend (arena.py, portfolio.py, text_dashboard.py) │
 └─────────────────────────────────────────────────────────────┘
 ```
 
