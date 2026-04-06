@@ -2,15 +2,9 @@
 - 당신은 완벽하지 않습니다. 당신이 실수하거나 잘한 일이 있다면 개선을 위해 해당 md 파일을 이용해 피드백을 작성해주세요.
 - 하나의 Phase가 끝나고 난 뒤 리더는 최종 점검 진행 후 다음 Phase로 넘어갈지, 아니면 현재 Phase에서 개선할 점이 있는지 판단해야 합니다.
 - 폴더를 제거하고 싶을 때는 휴지통으로 버려야 합니다. (.env, slack-on.py는 삭제하지 마세요.)
-
-# slack-on을 통해 슬랙으로 소통
-**실행 방법:**
-```bash
-source venv/bin/activate
-python slack-on.py
-
-```
-
+- 프로젝트를 개발하면서 '하나라도' 기능을 개선하거나, 수정을 하거나, 파일을 제거하면 해당 기능의 폴더 내 CLAUDE.md에 문서화를 진행하세요. CLAUDE.md 문서는 항상 업데이트 되어 있어야 하며 100줄 내외로 유지되야 합니다.
+- 무언가 구현, 또는 수정하기 전 변경 내역이 존재한다면 push 진행 후 시작하세요.
+- 
 
 
 # TRINITY-CHIMERY 프로젝트 진행 상황
@@ -60,11 +54,59 @@ python slack-on.py
 - **API 서버 통합**: 90% 완료
 - **프로젝트 전체**: 95% 완료
 
-## 완료된 핵심 성과
+## 완료된 핵실 성과
 - **Tailor**: 순수 자가 전략 생성 시스템 전체 완료 (약 2,900줄 코드)
 - **Coline**: 프론트엔드 통합 대시보드 완성 (Next.js + TypeScript + Zustand)
 - **협업**: 두 에이전트 효과적 협력
 - **기술 스택**: 실시간 WebSocket 통신 구현 완료
+
+## 실수 방지 기록 (2026-04-07)
+
+### 문서화 시 주의사항
+- **통합 명령어 문서화 시**: run 스크립트의 모든 명령어를 빠짐없이 확인하고 문서에 포함할 것
+- **실수 내용**: `./run api` 명령어가 CLAUDE.md 문서에서 누락됨
+- **원인**: 문서 작성 시 run 파일의 모든 case 문을 확인하지 않음
+- **해결**: 문서에 `./run api` 명령어 추가 완료
+
+### 앞으로의 방향
+- 문서 업데이트 시 실제 파일과 일치하는지 항상 확인
+- run 스크립트가 수정될 경우 문서도 즉시 업데이트
+- 새로운 서비스가 추가될 때마다 문서에 반영
+
+## 개발 명령어 (Runner Script)
+프로젝트 루트에서 `./run` 명령어를 사용하여 각 서비스를 쉽게 실행할 수 있습니다.
+
+```bash
+chmod +x run       # 최초 실행 시 권한 부여 필요
+./run front        # 프론트엔드 대시보드 실행
+./run api          # 백엔드 API 서버 실행
+./run slack        # 슬랙 에이전트 실행
+```
+
+### 개별 서비스 실행 (상세)
+
+#### 프론트엔드
+```bash
+cd front
+npm run dev    # 개발 서버 실행
+npm run build  # 프로덕션 빌드
+npm run start  # 프로덕션 서버 실행
+```
+
+### 백엔드 실행
+```bash
+cd api
+python main.py  # 포트 8000에서 FastAPI 서버 실행
+```
+
+### 통합 실행 (프론트 + 백엔드)
+```bash
+# 터미널 1: 백엔드 실행
+cd api && python main.py
+
+# 터미널 2: 프론트엔드 실행  
+cd front && npm run front
+```
 
 ## Phase 1 완료된 작업 ✅
 - **Team Leader**: 시스템 아키텍처 설계 및 기술 스택 결정
@@ -98,193 +140,28 @@ python slack-on.py
   - AgentCard, PortfolioValueChart 등
   - Tailwind CSS 스타일링 완료
 
-## 완료된 작업 (Phase 2)
-### 핵심 기능
 - 2가지 트레이딩 전략 에이전트 구현 (모멘텀 헌터, 평균회귀)
 - 배틀 시스템을 통한 에이전트 간 경쟁 구조
 - 포트폴리오 추적 및 성과 모니터링
 
-## 완료된 작업 (Phase 3)
 
-### 핵심 성과
 - Next.js 기반 대시보드 완성 (포트 3000)
-- Mock 데이터로 UI 테스트 가능
-- WebSocket 연결 준비 완료
-- TypeScript + Zustand 상태 관리 완료
+- 프레임워크: Next.js 14.1.0 (App Router)
+- 언어: TypeScript
+- 스타일링: Tailwind CSS
+- 상태 관리: Zustand
+- 실시간 통신: WebSocket
 
-## 남은 작업
--대시보드 마이그레이션 계획: index.html 스타일
-사용자는 기존 AI 트레이딩 시스템 구조는 유지하면서 대시보드를 index.html처럼 단순하고 직관적인 구성으로 마이그레이션하려고 합니다. 현재 대시보드는 Next.js + TypeScript + ZustandTailwind CSS로 구축되어 있지만 복잡한 탭 구조와 컴포넌트들이 있습니다.
-
-     현재 구조 분석
-
-     기술 스택
-
-     - 프레임워크: Next.js 14.1.0 (App Router)
-     - 언어: TypeScript
-     - 스타일링: Tailwind CSS
-     - 상태 관리: Zustand
-     - 실시간 통신: WebSocket
-
-     주요 컴포넌트 구조
+주요 컴포넌트 구조 계획 및 구현
 
      dashboard/
      ├── app/
      │   ├── layout.tsx          # 루트 레이아웃
-     │   ├── page.tsx            # 메인 페이지 (탭
-      구조)
-     │   └── backtesting/
-     │       ├── layout.tsx       # 백테스팅
-     레이아웃
-     │       └── page.tsx        # 백테스팅 페이지
+     │   ├── page.tsx            # 메인 페이지 (탭 구조)
      ├── components/
-     │   ├── AgentCard.tsx        # 에이전트 카드
-     │   ├── PortfolioSummaryPanel.tsx #
-     포트폴리오 요약
-     │   ├── PortfolioValueChart.tsx   # 차트
-     │   ├── TradeHistoryTable.tsx     # 거래
-     테이블
-     │   └── Backtest*.tsx        # 백테스팅 관련
-     컴포넌트
      ├── store/
-     │   └── useDashboardStore.ts # Zustand 상태
-     관리
+     │   └── useDashboardStore.ts # Zustand 상태 관리
      ├── hooks/
-     │   └── useWebSocket.ts      # WebSocket 훅
+     │   └── useWebSocket.ts      # WebSocket 훅(미완)
      └── types/
          └── index.ts             # 타입 정의
-
-     문제점
-
-     1. 복잡한 탭 구조: Overview, Agents, Trades,
-     Self-Improve, Backtesting 등 5개 탭
-     2. 정보 과부하: 한 페이지에 너무 많은 정보
-     표시
-     3. 비직관적 탐색: 사용자가 원하는 정보를
-     빠르게 찾기 어려움
-
-     마이그레이션 계획
-
-     사용자 요구사항 분석
-
-     - 디자인: index.html 레이아웃에서 좀 더
-     모던한 UI
-     - 우선순위: 에이전트 성과, 자가 개선 상태
-     - UI 요소: 미니멀리즘, 데이터 시각화,
-     인터랙티브, 다크모드
-
-     목표: 모던한 index.html 스타일 단순화
-
-     - 단일 페이지에서 핵심 정보만 표시
-     - 미니멀한 디자인과 데이터 시각화 강조
-     - 인터랙티브 요소를 통한 사용성 향상
-     - 다크모드 지원
-
-     새로운 구조 제안 (모던 index.html 스타일)
-
-     1. 모던한 단일 페이지 디자인
-
-     TRINITY-CHIMERY Dashboard (모던 미니멀리즘)
-     ├── 헤더
-     │   ├── 로고 + 실시간 연결 상태 (미니멀)
-     │   └── 다크모드 토글
-     ├── 핵심 지표 섹션 (데이터 시각화 강조)
-     │   ├── 실시간 포트폴리오 가치 차트
-     (인터랙티브)
-     │   ├── 에이전트별 Sharpe 비교 막대 그래프
-     │   └── 현재 Regime 상태 표시기
-     ├── 에이전트 성과 섹션 (우선순위 1)
-     │   ├── Momentum Hunter 카드 (호버 효과,
-     상세보기)
-     │   ├── Mean Reverter 카드
-     │   ├── Macro Trader 카드
-     │   └── Chaos Agent 카드
-     ├── 자가 개선 섹션 (우선순위 2)
-     │   ├── 최근 파라미터 제안 이력
-     │   ├── 파라미터 변경 추이 차트
-     │   └── 성과 개선 통계
-     └── 빠른 액션 영역
-         ├── 백테스팅 실행 버튼 (인터랙티브)
-         └── 상세 분석 페이지 링크
-
-     2. 구현 단계
-
-     Phase 1: 기본 구조 설계
-     - 새로운 app/simple/page.tsx 생성
-     - 기존 컴포넌트들을 단순화하여 재사용
-     - 상태 관리 최적화
-
-     Phase 2: 핵심 기능 마이그레이션
-     - AgentCard 컴포넌트 단순화
-     - 포트폴리오 요약 패널 통합
-     - 실시간 데이터 표시 최적화
-
-     Phase 3: 사용성 개선
-     - 반응형 디자인
-     - 로딩 상태 표시
-     - 에러 핸들링
-
-     변경될 파일들
-
-     생성될 파일
-
-     - dashboard/app/simple/page.tsx - 새로운
-     단순화된 메인 페이지
-     - dashboard/components/SimpleAgentGrid.tsx -
-     단순화된 에이전트 그리드
-     - dashboard/components/QuickMetrics.tsx -
-     빠른 지표 표시
-
-     수정될 파일
-
-     - dashboard/components/AgentCard.tsx -
-     단순화된 버전
-     - dashboard/store/useDashboardStore.ts - 상태
-      관리 최적화
-     - dashboard/app/page.tsx - 기존 페이지는
-     유지하되 리디렉션 추가
-
-     유지될 파일
-
-     - dashboard/hooks/useWebSocket.ts - WebSocket
-      통신
-     - dashboard/types/index.ts - 타입 정의
-     - dashboard/app/backtesting/ - 백테스팅 기능
-
-     기술적 접근법
-
-     컴포넌트 단순화
-       - 불필요한 애니메이션 제거
-       - 정보 계층화 (중요도별 표시)
-       - 모바일 퍼스트 디자인
-     상태 관리 최적화
-       - 불필요한 상태 변수 제거
-       - 데이터 캐싱 전략 구현
-       - 실시간 업데이트 최적화
-     성능 개선
-       - 코드 스플리팅
-       - 이미지 최적화
-       - WebSocket 연결 최적화
-
-     검증 방법
-
-     기능 테스트
-       - 모든 에이전트 카드 정상 표시
-       - 실시간 데이터 업데이트 확인
-       - 백테스팅 페이지 연결 테스트
-     성능 테스트
-       - 페이지 로딩 속도 측정
-       - WebSocket 연결 안정성 확인
-       - 모바일 환경 테스트
-     사용성 테스트
-       - 정보 접근성 평가
-       - 네비게이션 직관성 확인
-       - 반응형 디자인 테스트
-
-     결론
-
-     이 마이그레이션은 복잡한 탭 기반 대시보드를
-     index.html처럼 단순하고 직관적인 단일
-     페이지로 전환합니다. 기존 기능은 모두
-     유지하면서 사용성을 크게 향상시킬 수
-     있습니다.

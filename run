@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Trinity Project Runner
+
+COMMAND=$1
+
+case $COMMAND in
+  "front")
+    echo "🚀 Starting Trinity Frontend (Next.js)..."
+    cd front && npm run dev
+    ;;
+  "slack")
+    echo "🤖 Starting Slack Agent..."
+    if [ -d "venv" ]; then
+      source venv/bin/activate
+    fi
+    python slack-on.py
+    ;;
+  "api")
+    echo "⚙️ Starting FastAPI Backend..."
+    cd api && python main.py
+    ;;
+  *)
+    echo "Usage: ./run [front|slack|api]"
+    echo "  front: Start the Next.js dashboard"
+    echo "  slack: Start the Slack AI agent"
+    echo "  api:   Start the FastAPI backend server"
+    exit 1
+    ;;
+esac
