@@ -257,7 +257,7 @@ export const AgentPerformanceChart: React.FC<AgentPerformanceChartProps> = ({
               const barWidth = chartWidth / comparisonData.length * 0.6;
               const barX = padding.left + (i + 0.5) * (chartWidth / comparisonData.length) - barWidth / 2;
               const isPositive = d.value >= 0;
-              const barHeight = Math.abs(d.value) * barScale * chartHeight / 2 / (Math.max(comparisonData.map(x => Math.abs(x.value))) || 1);
+              const barHeight = Math.abs(d.value) * barScale * chartHeight / 2 / (Math.max(...comparisonData.map(x => Math.abs(x.value))) || 1);
               const barY = isPositive
                 ? padding.top + chartHeight / 2 - barHeight
                 : padding.top + chartHeight / 2;

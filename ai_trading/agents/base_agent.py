@@ -255,25 +255,61 @@ class BaseAgent(ABC):
         # Subclass implements training setup
         raise NotImplementedError("Training implemented in train_rl.py")
 
-    def self_improve(
+    async def self_improve(
         self,
         recent_performance: dict[str, float],
         regime: str,
         params: dict[str, Any],
+        strategy_generator: Optional[Any] = None,
     ) -> dict[str, Any]:
         """Request parameter adjustment via LLM.
+
+        Uses StrategyGenerator to propose new parameters based on
+        recent performance and current market regime.
 
         Args:
             recent_performance: Recent metrics
             regime: Current market regime
             params: Current parameters
+            strategy_generator: Optional StrategyGenerator instance
 
         Returns:
             Proposed new parameters or empty dict if no change
         """
-        # Phase 3: LLM integration
-        # For now, return empty (no self-improvement)
-        return {}
+        if strategy_generator is None:
+            # No strategy generator available, skip self-improvement
+            return {}
+
+        try:
+            from ai_trading.arbiter.strategy_generator import StrategyGenerator
+
+            if not isinstance(strategy_generator, StrategyGenerator):
+                logger.warning("Invalid strategy_generator provided")
+                return {}
+
+            # Get persona from class docstring
+            persona = self.__class__.__doc__ or self.PERSONA or "Trading agent"
+
+            # Generate strategy proposal
+            proposal = await strategy_generator.generate_strategy(
+                agent_name=self.name,
+                persona=persona,
+                current_params=params,
+                recent_performance=recent_performance,
+                current_regime=regime,
+            )
+
+            # Log the proposal
+            logger.info(
+                f"Strategy proposal for {self.name}: {proposal.expected_improvement}"
+            )
+
+            # Return proposed parameters
+            return proposal.params
+
+        except Exception as e:
+            logger.error(f"Self-improvement failed: {e}")
+            return {}
 
     def update_portfolio_history(self, state: dict[str, Any]) -> None:
         """Record portfolio state for metrics computation.

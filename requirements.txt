@@ -28,4 +28,18 @@ black>=22.0.0
 flake8>=4.0.0
 mypy>=0.910
 
+# Slack AI 팀 에이전트 의존성
+slack-sdk>=3.21.0
+slack-bolt>=1.18.0
+python-dotenv>=1.0.0
+anthropic>=0.25.0
 # Note: FreqAI dependencies are handled by Freqtrade
+
+# Slack AI 팀 에이전트 의존성
+slack-bolt>=1.18.0
+slack-sdk>=3.26.0
+python-dotenv>=1.0.0
+
+# Phase 3 - LLM Arbiter API
+aiohttp>=3.9.0
+aiohttp-cors>=0.7.0

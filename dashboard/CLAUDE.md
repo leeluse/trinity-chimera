@@ -1,8 +1,8 @@
-# TRINITY-CHIMERY Dashboard - Phase 1 완료 보고
+# TRINITY-CHIMERY Dashboard - Phase 2+ 진행 중
 
 ## 작성자: Coline (UI/UX Design)
-## 완료일: 2026-04-05
-## 상태: ✅ Phase 1 완료
+## 업데이트일: 2026-04-06
+## 상태: 🔄 Phase 2+ 진행 중 (Next.js 앱 구조 완료)
 
 ---
 
@@ -204,4 +204,88 @@ interface WebSocketEvent {
 
 ---
 
-**Phase 1 완료. Phase 2 통합 준비 대기 중.**
+## Phase 2+ 진행 상황 (2026-04-06)
+
+### ✅ 새로 완료된 작업
+
+#### Next.js 앱 라우터 구조
+- `app/layout.tsx` - 루트 레이아웃 (dark 모드 기본값)
+- `app/page.tsx` - 메인 대시보드 (4개 탭: Overview, Agents, Trades, Arbiter)
+- `app/globals.css` - Tailwind 설정 + 커스텀 CSS 변수
+
+#### 설정 파일
+- `package.json` - Next.js 14 + React 18 + Zustand
+- `next.config.js` - API/WebSocket 프록시 설정
+- `tailwind.config.js` - 다크모드 + 테마 설정
+- `postcss.config.js` - Tailwind 처리
+- `tsconfig.json` - TypeScript 설정
+
+#### WebSocket 통합
+- `useWebSocket` hook을 메인 페이지에 연결
+- 실시간 연결 상태, 지연 시간 표시
+- WebSocket 이벤트 타입별 핸들러 구현
+
+#### 업데이트된 컴포넌트
+- `PortfolioSummaryPanel` - 새로운 props 구조 (개별 값 전달)
+
+### 📁 업데이트된 디렉토리 구조
+
+```
+dashboard/
+├── app/                      # ✅ Next.js 14 App Router
+│   ├── layout.tsx           # 루트 레이아웃
+│   ├── page.tsx             # 메인 대시보드 (WebSocket 연결됨)
+│   └── globals.css          # 스타일
+├── components/              # 10개 컴포넌트 준비됨
+├── hooks/
+│   └── useWebSocket.ts      # WebSocket 연결
+├── store/
+│   └── useDashboardStore.ts # Zustand 상태 관리
+├── types/
+│   └── index.ts             # TypeScript 타입
+├── next.config.js           # ✅ API 프록시
+├── tailwind.config.js       # ✅ 테마 설정
+├── postcss.config.js       # ✅ 추가됨
+├── package.json            # ✅ 추가됨
+├── tsconfig.json           # ✅ 설정 완료
+└── CLAUDE.md               # ✅ 업데이트됨
+```
+
+### 🎯 실행 방법
+
+```bash
+cd dashboard
+npm install        # 의존성 설치
+npm run dev        # 개발 서버 실행
+# → http://localhost:3000
+```
+
+### 📊 메인 대시보드 구성
+
+**Header:**
+- TRINITY-CHIMERY 로고
+- 탭 네비게이션 (Overview, Agents, Trades, Arbiter)
+- 실시간 연결 상태 표시기
+
+**Overview 탭:**
+- PortfolioSummaryPanel (총 자본, PnL 요약)
+- PortfolioValueChart (포트폴리오 가치 추적)
+- AgentCard 그리드 (활성 에이전트)
+- TradeHistoryTable (최근 거래)
+- ArbiterDecisionLog (최근 재배분 결정)
+
+### 🔄 현재 진행 중
+
+1. **Tailor 대기 중** - Phase 3 LLM Arbiter 인터페이스 정의
+2. **WebSocket 백엔드 연결** - API 서버 완료 후 테스트
+
+### 📋 다음 작업 예정
+
+- [ ] Phase 3용 LLM Arbiter 확장 컴포넌트
+- [ ] 자가 전략 생성 결과 UI
+- [ ] 시장 분석 인사이트 패널
+- [ ] 실제 WebSocket 데이터 연동 테스트
+
+---
+
+**Phase 1 완료 → Phase 2+ 진행 중. Next.js 앱 구조 완료, WebSocket 통합 완료.**

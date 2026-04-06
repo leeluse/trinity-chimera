@@ -7,14 +7,23 @@ import React from 'react';
 import type { PortfolioState } from '../types';
 
 interface PortfolioSummaryPanelProps {
-  state: PortfolioState;
-  previousState?: PortfolioState;
-  refreshInterval?: number;
+  totalCapital: number;
+  totalPnl24h: number;
+  totalPnl7d: number;
+  totalPnlTotal: number;
+  agentCount?: number;
+  activeAgents?: number;
+  timestamp?: string;
 }
 
 export const PortfolioSummaryPanel: React.FC<PortfolioSummaryPanelProps> = ({
-  state,
-  previousState,
+  totalCapital,
+  totalPnl24h,
+  totalPnl7d,
+  totalPnlTotal,
+  agentCount = 2,
+  activeAgents = 2,
+  timestamp = new Date().toISOString(),
 }) => {
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('en-US', {
@@ -57,9 +66,8 @@ export const PortfolioSummaryPanel: React.FC<PortfolioSummaryPanelProps> = ({
     return 'bg-gray-50 dark:bg-gray-800/50';
   };
 
-  const activeAgents = Object.values(state.agent_metrics).filter(
-    (m) => m.allocation > 0
-  ).length;
+  // activeAgents는 props로 받은 값을 사용
+  const actualActiveAgents = activeAgents;
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
@@ -77,14 +85,14 @@ export const PortfolioSummaryPanel: React.FC<PortfolioSummaryPanelProps> = ({
               Portfolio Summary
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Last updated: {formatTimestamp(state.timestamp)}
+              Last updated: {formatTimestamp(timestamp)}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <span className="flex h-2 w-2 animate-pulse rounded-full bg-emerald-500"></span>
           <span className="text-sm font-medium text-gray-600 dark:text-gray-400">
-            {activeAgents} Active
+            {actualActiveAgents} Active
           </span>
         </div>
       </div>
@@ -93,47 +101,47 @@ export const PortfolioSummaryPanel: React.FC<PortfolioSummaryPanelProps> = ({
       <div className="mb-6">
         <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Total Capital</p>
         <p className="text-4xl font-bold text-gray-900 dark:text-white">
-          {formatCurrency(state.total_capital)}
+          {formatCurrency(totalCapital)}
         </p>
       </div>
 
       {/* PnL 카드 그리드 */}
       <div className="grid grid-cols-3 gap-4">
         {/* 24h PnL */}
-        <div className={`rounded-lg border p-4 ${getTrendBg(state.total_pnl_24h)} dark:border-gray-700/50`}>
+        <div className={`rounded-lg border p-4 ${getTrendBg(totalPnl24h)} dark:border-gray-700/50`}>
           <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">PnL (24h)</p>
           <div className="flex items-center gap-2">
-            <span className={`text-2xl font-bold ${getTrendColor(state.total_pnl_24h)}`}>
-              {formatPercent(state.total_pnl_24h)}
+            <span className={`text-2xl font-bold ${getTrendColor(totalPnl24h)}`}>
+              {formatPercent(totalPnl24h)}
             </span>
-            <span className={`text-lg ${getTrendColor(state.total_pnl_24h)}`}>
-              {getTrendIcon(state.total_pnl_24h)}
+            <span className={`text-lg ${getTrendColor(totalPnl24h)}`}>
+              {getTrendIcon(totalPnl24h)}
             </span>
           </div>
         </div>
 
         {/* 7d PnL */}
-        <div className={`rounded-lg border p-4 ${getTrendBg(state.total_pnl_7d)} dark:border-gray-700/50`}>
+        <div className={`rounded-lg border p-4 ${getTrendBg(totalPnl7d)} dark:border-gray-700/50`}>
           <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">PnL (7d)</p>
           <div className="flex items-center gap-2">
-            <span className={`text-2xl font-bold ${getTrendColor(state.total_pnl_7d)}`}>
-              {formatPercent(state.total_pnl_7d)}
+            <span className={`text-2xl font-bold ${getTrendColor(totalPnl7d)}`}>
+              {formatPercent(totalPnl7d)}
             </span>
-            <span className={`text-lg ${getTrendColor(state.total_pnl_7d)}`}>
-              {getTrendIcon(state.total_pnl_7d)}
+            <span className={`text-lg ${getTrendColor(totalPnl7d)}`}>
+              {getTrendIcon(totalPnl7d)}
             </span>
           </div>
         </div>
 
         {/* Total PnL */}
-        <div className={`rounded-lg border p-4 ${getTrendBg(state.total_pnl_total)} dark:border-gray-700/50`}>
+        <div className={`rounded-lg border p-4 ${getTrendBg(totalPnlTotal)} dark:border-gray-700/50`}>
           <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">PnL (Total)</p>
           <div className="flex items-center gap-2">
-            <span className={`text-2xl font-bold ${getTrendColor(state.total_pnl_total)}`}>
-              {formatPercent(state.total_pnl_total)}
+            <span className={`text-2xl font-bold ${getTrendColor(totalPnlTotal)}`}>
+              {formatPercent(totalPnlTotal)}
             </span>
-            <span className={`text-lg ${getTrendColor(state.total_pnl_total)}`}>
-              {getTrendIcon(state.total_pnl_total)}
+            <span className={`text-lg ${getTrendColor(totalPnlTotal)}`}>
+              {getTrendIcon(totalPnlTotal)}
             </span>
           </div>
         </div>
@@ -144,7 +152,7 @@ export const PortfolioSummaryPanel: React.FC<PortfolioSummaryPanelProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-4 text-sm">
           <div className="flex items-center gap-4">
             <span className="text-gray-500 dark:text-gray-400">
-              Active Agents: <span className="font-medium text-gray-900 dark:text-white">{activeAgents}</span>
+              Active Agents: <span className="font-medium text-gray-900 dark:text-white">{actualActiveAgents}</span>
             </span>
             <span className="text-gray-500 dark:text-gray-400">
               Allocation: <span className="font-medium text-gray-900 dark:text-white">100%</span>
@@ -152,16 +160,7 @@ export const PortfolioSummaryPanel: React.FC<PortfolioSummaryPanelProps> = ({
           </div>
 
           {/* 변화율 (이전 데이터와 비교) */}
-          {previousState && (
-            <div className="text-right">
-              <span className="text-gray-500 dark:text-gray-400">vs previous:</span>
-              <span className={`ml-2 font-medium ${
-                state.total_capital > previousState.total_capital ? 'text-emerald-500' : 'text-red-500'
-              }`}>
-                {((state.total_capital - previousState.total_capital) / previousState.total_capital * 100).toFixed(2)}%
-              </span>
-            </div>
-          )}
+          {/* 이전 상태 비교는 구현되지 않음 */}
         </div>
       </div>
     </div>

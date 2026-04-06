@@ -79,18 +79,77 @@ export interface BattleStep {
   net_signal: number;
 }
 
-/** WebSocket 이벤트 타입 */
+/** Phase 3: LLM Arbiter 확장 */
+export interface LLMArbiterAnalysis {
+  timestamp: string;
+  regime: MarketRegime;
+  analysis: string;
+  confidence: number;
+  risk_assessment: {
+    level: 'low' | 'medium' | 'high';
+    factors: string[];
+  };
+  recommendations: string[];
+}
+
+/** Phase 3: 자가 전략 생성 */
+export interface GeneratedStrategy {
+  id: string;
+  name: string;
+  description: string;
+  code: string;
+  parameters: Record<string, any>;
+  backtest_results?: {
+    sharpe: number;
+    win_rate: number;
+    max_drawdown: number;
+    total_return: number;
+  };
+  status: 'draft' | 'testing' | 'deployed' | 'rejected';
+  created_at: string;
+}
+
+/** Phase 3: 시장 분석 결과 */
+export interface MarketAnalysis {
+  timestamp: string;
+  regime: MarketRegime;
+  volatility: number;
+  correlation_matrix: Record<string, Record<string, number>>;
+  trend_strength: number;
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+  key_levels: {
+    support: number[];
+    resistance: number[];
+  };
+}
+
+/** Phase 3: 확장 Arbiter 결정 */
+export interface EnhancedArbiterDecision extends ArbiterDecision {
+  confidence: number;
+  market_analysis: MarketAnalysis;
+  llm_reasoning: string;
+  expected_outcome: {
+    projected_return: number;
+    risk_adjusted_return: number;
+    probability_distribution: Record<string, number>;
+  };
+}
+
+/** WebSocket 이벤트 타입 - Phase 3 */
 export type WebSocketEventType =
   | 'portfolio'
   | 'battle_step'
   | 'arbiter_decision'
   | 'new_trade'
-  | 'agent_update';
+  | 'agent_update'
+  | 'market_analysis'
+  | 'strategy_generated'
+  | 'llm_analysis';
 
 /** WebSocket 이벤트 */
 export interface WebSocketEvent {
   type: WebSocketEventType;
-  data: PortfolioState | BattleStep | ArbiterDecision | Trade | AgentMetrics;
+  data: PortfolioState | BattleStep | ArbiterDecision | Trade | AgentMetrics | MarketAnalysis | GeneratedStrategy | LLMArbiterAnalysis;
 }
 
 /** 포트폴리오 가치 데이터 포인트 */

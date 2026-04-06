@@ -11,6 +11,9 @@ import type {
   ArbiterDecision,
   BattleStep,
   WebSocketEvent,
+  MarketAnalysis,
+  GeneratedStrategy,
+  LLMArbiterAnalysis,
 } from '../types';
 
 interface DashboardState {
@@ -20,6 +23,11 @@ interface DashboardState {
   trades: Trade[];
   decisions: ArbiterDecision[];
   battleHistory: BattleStep[];
+
+  // Phase 3 data
+  marketAnalysis: MarketAnalysis | null;
+  generatedStrategies: GeneratedStrategy[];
+  llmAnalysis: LLMArbiterAnalysis | null;
 
   // Connection state
   isConnected: boolean;
@@ -35,6 +43,13 @@ interface DashboardActions {
   addTrade: (trade: Trade) => void;
   addDecision: (decision: ArbiterDecision) => void;
   addBattleStep: (step: BattleStep) => void;
+
+  // Phase 3 actions
+  setMarketAnalysis: (analysis: MarketAnalysis) => void;
+  addGeneratedStrategy: (strategy: GeneratedStrategy) => void;
+  setLLMAnalysis: (analysis: LLMArbiterAnalysis) => void;
+
+  // Connection state
   setConnectionState: (connected: boolean) => void;
   setLatency: (latency: number) => void;
   setLastUpdate: (timestamp: string) => void;
@@ -52,10 +67,13 @@ const initialState: DashboardState = {
   trades: [],
   decisions: [],
   battleHistory: [],
+  marketAnalysis: null,
+  generatedStrategies: [],
+  llmAnalysis: null,
   isConnected: false,
   lastUpdate: null,
   latency: 0,
-};
+} as DashboardState;
 
 export const useDashboardStore = create<DashboardState & DashboardActions>((set, get) => ({
   ...initialState,
@@ -145,6 +163,25 @@ export const useDashboardStore = create<DashboardState & DashboardActions>((set,
         break;
     }
   },
+
+  // Phase 3 액션들
+  setMarketAnalysis: (marketAnalysis) =>
+    set({
+      marketAnalysis,
+      lastUpdate: new Date().toISOString(),
+    }),
+
+  addGeneratedStrategy: (strategy) =>
+    set((state) => ({
+      generatedStrategies: [strategy, ...state.generatedStrategies].slice(0, 50),
+      lastUpdate: new Date().toISOString(),
+    })),
+
+  setLLMAnalysis: (llmAnalysis) =>
+    set({
+      llmAnalysis,
+      lastUpdate: new Date().toISOString(),
+    }),
 
   // 상태 초기화
   reset: () => set(initialState),
