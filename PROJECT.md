@@ -50,7 +50,7 @@
 │       └─────────────┴──────────────┴──────────────┘             │
 │                             │                                   │
 │                    ┌────────▼────────┐                          │
-│                    │  ARBITER (LLM)  │                          │
+│                    │  배틀 오케스트레이터  │                          │
 │                    │  성과 심판 +     │                          │
 │                    │  자본 재배분    │                          │
 │                    └────────┬────────┘                          │
@@ -109,11 +109,6 @@ ai_trading/
 │   ├── macro_trader.py            # ✅ 매크로/regime 기반 에이전트
 │   ├── chaos_agent.py             # ✅ 반상관 contrarian 에이전트
 │   │
-│   ├── arbiter.py                 # LLM 심판 + 자본 재배분
-│   │                              #   - 성과 집계
-│   │                              #   - Claude API 호출
-│   │                              #   - 배분 결정 + 로깅
-│   │
 │   └── history/                   # 에이전트 자가 개선 이력
 │       ├── momentum_hunter/
 │       ├── mean_reverter/
@@ -127,6 +122,7 @@ ai_trading/
 │   │                              #   - 주기적 재배분 트리거
 │   │                              #   - 충돌 해소 (가중 투표)
 │   │                              #   - 최종 주문 생성
+│   │                              #   - 성과 심판 + 자본 재배분
 │   │
 │   ├── portfolio.py               # ✅ 가상 포트폴리오 + 자본 추적
 │   └── logger.py                  # 배틀 이력 기록 (JSON + SQLite)
@@ -152,14 +148,12 @@ ai_trading/
 │
 ├── logs/                          # 실행 로그
 │   ├── battle/
-│   ├── arbiter/
 │   └── rl/
 │
 ├── tests/                         # 🔲 미구현
 │   ├── test_hmm.py
 │   ├── test_triple_barrier.py
-│   ├── test_agents.py
-│   └── test_arbiter.py
+│   └── test_agents.py
 │
 ├── notebooks/                     # 분석 노트북
 │   ├── 01_regime_analysis.ipynb
@@ -216,8 +210,8 @@ ai_trading/
   5. Freqtrade → CCXT → 거래소 주문
 
 매주 월요일 00:00 UTC:
-  6. Arbiter.weekly_review()
-       └→ 성과 집계 → Claude API 호출
+  6. 배틀 오케스트레이터.weekly_review()
+       └→ 성과 집계 → 재배분 결정
        └→ 신규 allocation → Arena 반영
 
 매 14일:
@@ -246,8 +240,7 @@ ai_trading/
 에이전트 배틀 시스템 골격
 
 **목표:** 4개 에이전트가 각자의 RL 모델로 독립적으로 행동하고
-Arbiter가 자본을 재배분하는 배틀 루프 완성.
-LLM 연동 없이 규칙 기반 Arbiter로 먼저 검증.
+배틀 오케스트레이터가 자본을 재배분하는 배틀 루프 완성.
 
 - [ ] `agents/base_agent.py` — 공통 인터페이스
   - `__init__(config, rl_model_path)`
@@ -266,13 +259,11 @@ LLM 연동 없이 규칙 기반 Arbiter로 먼저 검증.
   - 에이전트 초기화 + 자본 배분 상태 관리
   - `step(market_obs) → final_action`
   - 가중 투표 충돌 해소
-  - 매 N스텝 Arbiter 호출
+  - 매 N스텝 재배분 트리거
 
 - [ ] `battle/portfolio.py` — 자본 추적
   - 에이전트별 가상 계좌
   - 전체 포트폴리오 PnL 집계
-
-- [ ] `agents/arbiter.py` (규칙 기반 v1)
   - Sharpe + Drawdown 기반 점수 계산
   - 배분 규칙 하드코딩 (min 5%, max 50%)
 
@@ -281,19 +272,12 @@ LLM 연동 없이 규칙 기반 Arbiter로 먼저 검증.
 ---
 
 ### Phase 3 — 이후 🔲
-LLM Arbiter + 자가 전략 생성
+자가 전략 생성
 
-**목표:** Arbiter가 Claude API를 써서 성과를 분석하고,
-에이전트들이 스스로 파라미터를 조정한다.
-
-- [ ] `agents/arbiter.py` (LLM v2)
-  - Claude API 연동
-  - 성과 분석 프롬프트 설계
-  - JSON 출력 파싱 + 배분 결정
-  - 결정 근거 로깅
+**목표:** 에이전트들이 스스로 파라미터를 조정한다.
 
 - [ ] `agents/base_agent.py` → `self_improve()` 메서드
-  - Claude API로 파라미터 제안
+  - 파라미터 제안
   - 샌드박스 백테스트 자동 실행
   - 채택/기각 로직
 
@@ -333,16 +317,14 @@ Mean Reversion 기회는 드물기 때문에 SAC가 더 적합하다.
 
 ---
 
-### ADR-002 Arbiter에 LLM을 쓰는 이유
+### ADR-002 배틀 오케스트레이터의 재배분 방식
 
-**결정:** 규칙 기반 v1으로 검증 후 LLM v2로 교체.
+**결정:** 규칙 기반 재배분 시스템 사용.
 
 **근거:**
 단순 Sharpe 기반 재배분은 구현이 쉽고 디버깅이 쉽다.
-그러나 "지금 regime이 바뀌고 있는데 Macro Agent 비중을 일시적으로 올려야 한다"같은
-맥락 의존 판단은 규칙으로 표현하기 어렵다.
-LLM은 자연어로 표현된 시장 컨텍스트를 추론에 활용할 수 있다.
-단, LLM 결정은 항상 하드 제약(min 5%, max 50%)을 통과해야 한다.
+규칙 기반 시스템은 투명하고 예측 가능하며 안정적이다.
+성능 기반 자동 재배분으로 에이전트 간 경쟁을 유도한다.
 
 ---
 

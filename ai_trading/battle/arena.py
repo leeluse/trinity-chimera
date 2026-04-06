@@ -9,7 +9,7 @@ import logging
 import numpy as np
 
 from .portfolio import Portfolio
-from ai_trading.arbiter.llm_arbiter import AgentPerformance, LLMArbiter
+from ai_trading.agents.base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
@@ -36,16 +36,13 @@ class Arena:
         self,
         agents: Optional[List] = None,
         total_capital: float = 100.0,
-        rebalance_interval: int = 7,
         agent_allocations: Optional[Dict[str, float]] = None,
-        enable_llm_arbiter: bool = False,
     ):
         self.agents: Dict[str, Any] = {}
         self.is_base_agent: Dict[str, bool] = {}
         self.portfolio = Portfolio(total_capital=total_capital)
-        self.rebalance_interval = rebalance_interval
-        self.enable_llm_arbiter = enable_llm_arbiter
 
+        # 고정 자본 배분 - 재분배 없음
         default_allocations = {
             "momentum_hunter": 0.30,
             "mean_reverter": 0.30,
@@ -54,17 +51,6 @@ class Arena:
         }
         self.allocations = agent_allocations or default_allocations
         self.agent_portfolio_states: Dict[str, dict] = {}
-
-        # Initialize LLM Arbiter if enabled
-        self.llm_arbiter: Optional[LLMArbiter] = None
-        if enable_llm_arbiter:
-            try:
-                self.llm_arbiter = LLMArbiter(
-                    rebalance_interval=rebalance_interval
-                )
-                logger.info("LLM Arbiter enabled")
-            except Exception as e:
-                logger.warning(f"Failed to initialize LLM Arbiter: {e}")
 
         if agents:
             for agent in agents:
@@ -75,6 +61,34 @@ class Arena:
                 self.portfolio.add_agent(name, ratio)
 
         logger.info(f"Arena initialized with {len(self.agents)} agents")
+
+    def register_agent(self, agent, name: Optional[str] = None) -> None:
+        """Register an agent in the arena.
+
+        Args:
+            agent: Agent instance to register
+            name: Optional custom name for the agent
+        """
+        if name is None:
+            if hasattr(agent, 'name'):
+                name = agent.name
+            elif hasattr(agent, '__name__'):
+                name = agent.__name__
+            else:
+                name = f"agent_{len(self.agents)}"
+
+        self.agents[name] = agent
+        self.is_base_agent[name] = isinstance(agent, BaseAgent)
+
+        # Initialize portfolio state
+        self.agent_portfolio_states[name] = {
+            "position": 0.0,
+            "pnl": 0.0,
+            "hold_bars": 0,
+            "cash": self.allocations.get(name, 0.0) * self.portfolio.total_capital
+        }
+
+        logger.info(f"Registered agent: {name}")
 
     def step(
         self,
@@ -172,19 +186,9 @@ class Arena:
             self.portfolio.record_portfolio_state(name, state)
 
     def update_allocations(self, new_allocations: Dict[str, float]):
-        """재배분 실행 (min 5%, max 50%)"""
-        constrained = {}
-        for name, ratio in new_allocations.items():
-            if name in self.agents:
-                constrained[name] = np.clip(ratio, 0.05, 0.50)
-
-        total = sum(constrained.values())
-        if total > 0:
-            constrained = {k: v / total for k, v in constrained.items()}
-            self.allocations = constrained
-            self.portfolio.set_allocation(constrained)
-            self.portfolio.mark_rebalanced(constrained)
-            logger.info(f"Allocations updated: {constrained}")
+        """자본 배분 업데이트 (재분배 없음)"""
+        # 재분배 기능 제거 - 고정 배분만 유지
+        logger.info("재분배 기능이 비활성화되었습니다. 배분 변경 무시")
 
     def get_agent_metrics(self) -> Dict[str, dict]:
         """모든 에이전트 메트릭 (BaseAgent.compute_metrics 사용)"""
@@ -248,73 +252,7 @@ class Arena:
 
         return self._weighted_vote(votes)
 
-    async def run_llm_rebalance(
-        self,
-        current_regime: str,
-        market_context: Optional[Dict[str, Any]] = None
-    ) -> Optional[Dict[str, Any]]:
-        """Run LLM-based rebalancing.
-
-        Args:
-            current_regime: Current market regime
-            market_context: Additional market context
-
-        Returns:
-            Rebalance result or None if not enabled
-        """
-        if not self.llm_arbiter:
-            logger.warning("LLM Arbiter not enabled")
-            return None
-
-        # Get agent metrics and convert to AgentPerformance
-        metrics = self.get_agent_metrics()
-        performances: List[AgentPerformance] = []
-
-        for name, agent_metrics in metrics.items():
-            if name in self.agents:
-                perf = AgentPerformance(
-                    name=name,
-                    sharpe_7d=agent_metrics.get("sharpe_7d", 0.0),
-                    max_drawdown=agent_metrics.get("max_drawdown", 0.0),
-                    win_rate=agent_metrics.get("win_rate", 0.0),
-                    avg_hold_bars=agent_metrics.get("avg_hold_bars", 0.0),
-                    regime_fit=agent_metrics.get("regime_fit", 0.5),
-                    diversity_score=agent_metrics.get("diversity_score", 0.5),
-                    overfit_score=agent_metrics.get("overfit_score", 0.0),
-                    current_allocation=self.allocations.get(name, 0.0),
-                    total_pnl=agent_metrics.get("total_pnl", 0.0),
-                    trades_count=agent_metrics.get("trades_count", 0),
-                )
-                performances.append(perf)
-
-        try:
-            # Call LLM Arbiter
-            decision = await self.llm_arbiter.analyze_performance(
-                performances,
-                current_regime,
-                market_context
-            )
-
-            # Update allocations
-            self.update_allocations(decision.allocations)
-
-            logger.info(f"LLM rebalanced: {decision.allocations}, "
-                       f"confidence={decision.confidence:.2f}")
-
-            return {
-                "allocations": decision.allocations,
-                "reasoning": decision.reasoning,
-                "warnings": decision.warnings,
-                "confidence": decision.confidence,
-                "regime_recommendation": decision.regime_recommendation,
-            }
-
-        except Exception as e:
-            logger.error(f"LLM rebalancing failed: {e}")
-            return None
-
     def needs_rebalance(self, days_since_last: int) -> bool:
-        """Check if rebalance is needed."""
-        if self.llm_arbiter:
-            return self.llm_arbiter.needs_rebalance(days_since_last)
-        return days_since_last >= self.rebalance_interval
+        """재분배 기능 비활성화됨"""
+        logger.info("재분배 기능이 비활성화되었습니다")
+        return False
