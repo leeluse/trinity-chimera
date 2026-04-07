@@ -122,7 +122,7 @@ export class APIClient {
     return response.json();
   }
 
-  static async getAgentPerformance(agentId: string): Promise<AgentPerformance> {
+  static async getAgentPerformance(agentId: string): Promise<any> {
     const response = await fetch(`${API_BASE_URL}/agents/${agentId}/performance`);
 
     if (!response.ok) {

@@ -11,12 +11,14 @@
   },
   "dependencies": {
     "chart.js": "^4.5.1",
+    "lucide-react": "^1.7.0",
     "next": "16.2.2",
     "react": "19.2.4",
+    "react-chartjs-2": "^5.3.1",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
+    "@tailwindcss/postcss": "^4.0.0-alpha.26",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -24,7 +26,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "postcss": "^8.5.8",
-    "tailwindcss": "^3.4.19",
+    "tailwindcss": "^4.0.0-alpha.26",
     "typescript": "^5"
   }
 }

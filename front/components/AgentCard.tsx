@@ -32,28 +32,27 @@ export default function AgentCard({
   return (
     <div
       onClick={onClick}
-      className={`relative overflow-hidden cursor-pointer rounded-2xl transition-all duration-500 hover:-translate-y-1 p-4 ${
-        isActive 
-          ? "bg-white/[0.08] backdrop-blur-2xl border-white/20 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.3)]" 
+      className={`relative overflow-hidden cursor-pointer rounded-xl transition-all duration-300 hover:-translate-y-1 p-[14px] border ${isActive
+          ? "bg-white/[0.08] backdrop-blur-2xl border-white/20"
           : "bg-white/[0.02] backdrop-blur-md border-white/[0.05] hover:bg-white/[0.06] hover:border-white/10"
-      } border`}
-      style={{ 
-        boxShadow: isActive ? `0 15px 35px -5px color-mix(in srgb, ${color}, transparent 80%)` : 'none'
+        }`}
+      style={{
+        boxShadow: isActive ? `0 15px 35px -5px color-mix(in srgb, ${color}, transparent 80%), 0 20px 40px -15px rgba(0,0,0,0.3)` : 'none'
       }}
     >
       {/* Accent Glass Glow */}
       {isActive && (
-        <div 
+        <div
           className="absolute inset-x-0 top-0 h-24 opacity-20 pointer-events-none blur-3xl rounded-full"
           style={{ background: `radial-gradient(circle at 50% 0%, ${color}, transparent 70%)` }}
         />
       )}
 
       <div className="flex items-center gap-2 mb-3">
-        <div 
+        <div
           className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold"
-          style={{ 
-            backgroundColor: `color-mix(in srgb, ${color}, transparent 85%)`, 
+          style={{
+            backgroundColor: `color-mix(in srgb, ${color}, transparent 85%)`,
             color: color,
             border: `1px solid color-mix(in srgb, ${color}, transparent 80%)`
           }}

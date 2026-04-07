@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "backtesting-trading-strategies": {
+      "source": "jeremylongshore/claude-code-plugins-plus-skills",
+      "sourceType": "github",
+      "computedHash": "d3d31dfb5a2234936d56f9097f5f5636a0a2469b7a21ce1cfc2909f9cafbf699"
+    },
+    "prompt-engineering-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "53ca5b03a78c3d0c8117eaf330b73d83d06ed0d66789490ca8a263ce92849d22"
+    }
+  }
+}

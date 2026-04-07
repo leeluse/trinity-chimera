@@ -29,8 +29,8 @@ export default function LogCard({
   params,
 }: LogCardProps) {
   return (
-    <div className="bg-white/[0.03] backdrop-blur-md border border-white/[0.05] rounded-2xl overflow-hidden transition-all duration-300 hover:bg-white/[0.05] hover:border-white/10 shrink-0 mb-4 shadow-xl group">
-      <div className="flex items-center justify-between px-3.5 py-4">
+    <div className="bg-white/[0.03] backdrop-blur-md border border-white/[0.05] rounded-2xl overflow-hidden transition-all duration-300 hover:bg-white/[0.05] hover:border-white/10 shrink-0 shadow-xl group">
+      <div className="flex items-center justify-between px-4 py-3 sm:py-4">
         <div className="flex items-center gap-2">
           <div
             className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-bold"
@@ -43,21 +43,21 @@ export default function LogCard({
         <span className="text-[11px] text-[#4a5a7a] font-mono">{time}</span>
       </div>
 
-      <div className="px-3.5 pb-4 space-y-4">
-        <div className="space-y-1.5">
-          <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c] border-b border-white/[0.03] pb-1.5 mb-2">현재 전략 분석</div>
-          <p className="text-[12.5px] leading-relaxed text-[#94a3b8] [&_span]:text-white [&_span]:font-semibold" dangerouslySetInnerHTML={{ __html: analysis }} />
+      <div className="px-4 pb-4 space-y-3 sm:space-y-4">
+        <div className="space-y-2">
+          <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c] border-b border-white/[0.03] pb-2">현재 전략 분석</div>
+          <p className="text-[12.5px] leading-relaxed text-[#94a3b8] [&_span]:text-white [&_span]:font-semibold pt-1" dangerouslySetInnerHTML={{ __html: analysis }} />
         </div>
 
         {params && params.length > 0 && (
-          <div className="space-y-3 pt-1">
+          <div className="space-y-3 pt-3 sm:pt-4 border-t border-white/[0.03]">
             <div className="flex items-center gap-2">
               <div className="w-1 h-3.5 bg-blue-400/50 rounded-full" />
               <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c]">파라미터 변경 내역</div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {params.map((p, idx) => (
-                <div key={idx} className="bg-white/5 border border-white/5 rounded-lg p-2.5 hover:bg-white/[0.07] transition-colors flex flex-col gap-1.5">
+                <div key={idx} className="bg-white/5 border border-white/5 rounded-lg py-1.5 px-2.5 hover:bg-white/[0.07] transition-colors flex flex-col gap-1">
                   <div className="text-[10px] font-bold text-[#4a5a7a] font-mono tracking-tight">{p.name}</div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 font-mono text-[11px]">
