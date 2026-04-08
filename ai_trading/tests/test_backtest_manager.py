@@ -246,6 +246,17 @@ class TestCalculateTrinityScore(unittest.TestCase):
         self.assertAlmostEqual(score, round(expected, 4), places=4)
 
 
+class ZeroReturnStrategy(StrategyInterface):
+    """Mock strategy that buys at index 0 and sells at index 1 with same price."""
+    def generate_signal(self, data: pd.DataFrame) -> int:
+        idx = len(data) - 1
+        if idx == 0: return 1
+        if idx == 1: return -1
+        return 0
+    def get_params(self) -> dict:
+        return {"name": "ZeroReturnStrategy"}
+
+
 class TestBacktestManagerIntegration(unittest.TestCase):
     """Integration tests for the complete BacktestManager."""
 
@@ -275,6 +286,18 @@ class TestBacktestManagerIntegration(unittest.TestCase):
         self.assertIn('mdd', result)
         self.assertIn('trinity_score', result)
         self.assertIn('trades', result)
+
+    def test_costs_impact_on_return(self):
+        """Verify that a zero-profit strategy becomes loss-making with costs."""
+        # Data with same price for buy and sell
+        dates = pd.date_range(start='2024-01-01', periods=2, freq='h')
+        data = pd.DataFrame({'close': [100.0, 100.0]}, index=dates)
+        strategy = ZeroReturnStrategy()
+
+        results = self.manager.run_backtest(strategy, data)
+
+        # Return should be negative due to fees and slippage
+        self.assertLess(results['return'], 0, f"Return should be negative, got {results['return']}")
 
 
 if __name__ == '__main__':
