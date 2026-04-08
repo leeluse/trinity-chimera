@@ -20,7 +20,7 @@
 
 ### Phase 3: Robust Backtesting Engine 🚧 (Next)
 - [ ] Implement In-Sample / Out-of-Sample splitting to prevent overfitting.
-- [ ] Apply conservative slippage and fee models.
+- [x] Apply conservative slippage and fee models.
 - [ ] Integrate final Trinity Score calculation and Supabase storage.
 
 ---
