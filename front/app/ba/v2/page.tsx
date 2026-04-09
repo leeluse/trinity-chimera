@@ -6,6 +6,7 @@ import Head from "next/head";
 import { APIClient, AGENT_MAPPING, type AgentName } from "@/lib/api";
 import AgentCard from "@/components/AgentCard";
 import LogCard from "@/components/LogCard";
+import CodeEditor from "@/components/CodeEditor";
 import { supabase } from "@/lib/supabase";
 
 // ─────────────────────────────────────────────────────────
@@ -739,10 +740,8 @@ export default function Dashboard() {
                     <span className="text-[11px] font-bold text-blue-400 uppercase tracking-widest">Latest Strategy Code</span>
                     <span className="text-[9px] text-slate-500 font-mono">Version {latestStrategy.version}</span>
                   </div>
-                  <div className="bg-[#111720] border border-[#1e293b] rounded-xl p-4 overflow-hidden">
-                    <pre className="text-[11px] text-slate-300 font-mono leading-relaxed whitespace-pre-wrap overflow-x-auto">
-                      {latestStrategy.code}
-                    </pre>
+                  <div className="bg-[#111720] border border-[#1e293b] rounded-xl overflow-hidden h-[500px]">
+                    <CodeEditor code={latestStrategy.code} />
                   </div>
                   <div className="text-[9px] text-slate-500">
                     Generated: {new Date(latestStrategy.created_at).toLocaleString()}
