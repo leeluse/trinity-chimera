@@ -157,6 +157,36 @@ const getAgentName = (agentId: string) => {
   return agentMapping[agentId] || 'Unknown Agent';
 };
 
+// Helper function to update agent status
+const updateStatus = (current: AgentStatus[], updatedAgent: AgentStatus) => {
+  const updatedStatus = [...current];
+
+  // Find agent by ID or create new entry
+  const agentIndex = updatedStatus.findIndex(a => a.id === updatedAgent.id);
+
+  if (agentIndex === -1) {
+    // Add new agent status
+    updatedStatus.push({
+      id: updatedAgent.id,
+      name: getAgentName(updatedAgent.id),
+      status: updatedAgent.status,
+      current_strategy_id: updatedAgent.current_strategy_id,
+      last_active: updatedAgent.last_active,
+      created_at: updatedAgent.created_at
+    });
+  } else {
+    // Update existing agent status
+    updatedStatus[agentIndex] = {
+      ...updatedStatus[agentIndex],
+      status: updatedAgent.status,
+      current_strategy_id: updatedAgent.current_strategy_id,
+      last_active: updatedAgent.last_active
+    };
+  }
+
+  return updatedStatus;
+};
+
 const hintMap = {
   score: '수식: Return×0.4 + Sharpe×25×0.35 + (1+MDD)×100×0.25',
   return: '누적 일별 수익률 (%)',
@@ -166,6 +196,25 @@ const hintMap = {
 };
 
 type MetricKey = keyof typeof hintMap;
+
+// Interface for Strategy data
+interface Strategy {
+  id: string;
+  agent_id: string;
+  code: string;
+  version: string;
+  created_at: string;
+}
+
+// Interface for Agent status data
+interface AgentStatus {
+  id: string;
+  name: string;
+  status: string;
+  current_strategy_id?: string;
+  last_active: string;
+  created_at: string;
+}
 
 export default function Dashboard() {
   const chartRef = useRef<HTMLCanvasElement | null>(null);
@@ -178,6 +227,8 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(false);
   const [labelPositions, setLabelPositions] = useState<Array<{x: number, y: number, label: string, color: string, value: number, change: number, percent: number, avatar: string}>>([]);
   const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
+  const [latestStrategy, setLatestStrategy] = useState<Strategy | null>(null);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus[]>([]);
 
   // Supabase real-time subscription for backtest results
   useEffect(() => {
@@ -188,6 +239,42 @@ export default function Dashboard() {
         (payload) => {
           // Update agent performance state with new backtest result
           setAgentPerformance(prev => updatePerformance(prev, payload.new as BacktestResult));
+        }
+      )
+      .subscribe()
+
+    return () => {
+      subscription.unsubscribe();
+    }
+  }, []);
+
+  // Supabase real-time subscription for strategies table
+  useEffect(() => {
+    const subscription = supabase
+      .channel('strategy-updates')
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'strategies' },
+        (payload) => {
+          // Update strategy code display
+          setLatestStrategy(payload.new as Strategy);
+        }
+      )
+      .subscribe()
+
+    return () => {
+      subscription.unsubscribe();
+    }
+  }, []);
+
+  // Supabase real-time subscription for agent status updates
+  useEffect(() => {
+    const subscription = supabase
+      .channel('agent-status')
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'agents' },
+        (payload) => {
+          // Update agent status indicators
+          setAgentStatus(prev => updateStatus(prev, payload.new as AgentStatus));
         }
       )
       .subscribe()
@@ -226,6 +313,65 @@ export default function Dashboard() {
     };
 
     loadInitialBacktestResults();
+  }, []);
+
+  // Load initial strategies data from Supabase
+  useEffect(() => {
+    const loadInitialStrategies = async () => {
+      try {
+        const { data: strategies, error } = await supabase
+          .from('strategies')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1); // Load most recent strategy
+
+        if (error) {
+          console.error('Error loading strategies:', error);
+          return;
+        }
+
+        if (strategies && strategies.length > 0) {
+          setLatestStrategy(strategies[0] as Strategy);
+        }
+      } catch (error) {
+        console.error('Error loading initial strategies:', error);
+      }
+    };
+
+    loadInitialStrategies();
+  }, []);
+
+  // Load initial agent status from Supabase
+  useEffect(() => {
+    const loadInitialAgentStatus = async () => {
+      try {
+        const { data: agents, error } = await supabase
+          .from('agents')
+          .select('*')
+          .order('last_active', { ascending: false });
+
+        if (error) {
+          console.error('Error loading agent status:', error);
+          return;
+        }
+
+        if (agents && agents.length > 0) {
+          const initialStatus: AgentStatus[] = agents.map(agent => ({
+            id: agent.id,
+            name: getAgentName(agent.id),
+            status: agent.status,
+            current_strategy_id: agent.current_strategy_id,
+            last_active: agent.last_active,
+            created_at: agent.created_at
+          }));
+          setAgentStatus(initialStatus);
+        }
+      } catch (error) {
+        console.error('Error loading initial agent status:', error);
+      }
+    };
+
+    loadInitialAgentStatus();
   }, []);
 
   // API 데이터 로드
@@ -465,30 +611,25 @@ export default function Dashboard() {
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 p-4 mt-2">
-            <AgentCard
-              id="minara" name="MINARA V2" avatar="M" strategy="Donchian Breakout"
-              sharpe="2.41" mdd="-12.3%" winRate="67.4%" color="var(--agent-1)"
-              isActive={activeAgent === "MINARA V2"}
-              onClick={() => setActiveAgent("MINARA V2")}
-            />
-            <AgentCard
-              id="arbiter" name="ARBITER V1" avatar="A" strategy="Grid + Mean Rev"
-              sharpe="1.87" mdd="-8.1%" winRate="71.2%" color="var(--agent-2)"
-              isActive={activeAgent === "ARBITER V1"}
-              onClick={() => setActiveAgent("ARBITER V1")}
-            />
-            <AgentCard
-              id="nimalpha" name="NIM-ALPHA" avatar="N" strategy="Trend Following"
-              sharpe="1.23" mdd="-18.9%" winRate="52.1%" color="var(--agent-3)"
-              isActive={activeAgent === "NIM-ALPHA"}
-              onClick={() => setActiveAgent("NIM-ALPHA")}
-            />
-            <AgentCard
-              id="chimera" name="CHIMERA-β" avatar="C" strategy="Scalping ATR"
-              sharpe="-0.31" mdd="-24.7%" winRate="44.8%" color="var(--agent-4)"
-              isActive={activeAgent === "CHIMERA-β"}
-              onClick={() => setActiveAgent("CHIMERA-β")}
-            />
+            {['minara', 'arbiter', 'nimalpha', 'chimera'].map(agentId => {
+              const agentData = agentStatus.find(a => a.id === agentId);
+              const agentName = getAgentName(agentId);
+
+              return (
+                <AgentCard
+                  key={agentId}
+                  id={agentId}
+                  name={agentName}
+                  avatar={agentName.charAt(0)}
+                  strategy={agentData?.status === 'active' ? 'Active' : 'Idle'}
+                  status={agentData?.status || 'idle'}
+                  lastActive={agentData?.last_active}
+                  sharpe="-" mdd="-" winRate="-" color={`var(--agent-${['minara', 'arbiter', 'nimalpha', 'chimera'].indexOf(agentId) + 1})`}
+                  isActive={activeAgent === agentName}
+                  onClick={() => setActiveAgent(agentName)}
+                />
+              );
+            })}
           </div>
 
           <div className="flex-1 px-4 py-3 flex flex-col min-h-0">
@@ -591,31 +732,68 @@ export default function Dashboard() {
           </div>
 
           <div className="flex-1 overflow-y-auto min-h-0 bg-[#060912]/30 custom-scrollbar px-4 py-4 flex flex-col gap-5">
-            <LogCard
-              agentName="MINARA V2" avatar="M" avatarBg="rgba(56,189,248,0.1)" color="var(--agent-1)" time="04/06 · 15:00"
-              analysis="BTC가 범위 제한 국면에 진입했습니다. <span class='text-white font-medium'>$64,191 ~ $69,540</span> 사이에서 진동 중이며, 이는 횡보 구간임을 시사합니다. Donchian 채널 돌파 필터(ATR 2.0×)를 통과하여 <span class='text-white font-medium'>그리드 전략(41레벨)</span> 을 배포합니다."
-              reason="이전 추세추종 전략이 연속 3회 손절 후 <span class='text-white font-medium'>샤프지수 1.12 → 2.41로 개선</span> 이 필요했습니다. 백테스트 결과 횡보 구간에서 평균복귀 전략 수익률이 38% 높았습니다."
-              params={[
-                { name: "donchian_len", oldVal: "20", newVal: "15", trend: "neutral" },
-                { name: "atr_mult", oldVal: "1.5", newVal: "2.0", trend: "up" },
-                { name: "sl_atr", oldVal: "1.5×", newVal: "2.0×", trend: "neutral" },
-                { name: "tp_atr", oldVal: "3.0×", newVal: "4.0×", trend: "up" },
-              ]}
-            />
-            <LogCard
-              agentName="MINARA V2" avatar="M" avatarBg="rgba(56,189,248,0.1)" color="var(--agent-1)" time="04/06 · 13:15"
-              analysis="시장 국면이 전환되었습니다. <span class='text-white font-medium'>$64,117 ~ $69,460</span> 범위 구조가 붕괴되었으며(41 그리드 레벨 무력화), 방향성 추세 이동 준비가 필요합니다."
-              reason="범위 제한→추세 국면 전환으로 현재 그리드 전략의 <span class='text-white font-medium'>예상 손실이 +4.2% 악화</span> 될 것으로 판단, 모든 포지션 정리 후 방향성 전략으로 전환합니다."
-            />
-            <LogCard
-              agentName="ARBITER V1" avatar="A" avatarBg="rgba(167,139,250,0.1)" color="var(--agent-2)" time="04/06 · 11:30"
-              analysis="1H RSI가 <span class='text-white font-medium'>72.3 (과매수)</span> 에 도달했습니다. 볼린저 밴드 상단 돌파 후 반전 신호가 감지됩니다. 평균복귀 확률 68% 추정."
-              reason=""
-              params={[
-                { name: "rsi_ob", oldVal: "70", newVal: "72", trend: "down" },
-                { name: "grid_levels", oldVal: "20", newVal: "15", trend: "neutral" },
-              ]}
-            />
+            {activeTab === 'strategy' ? (
+              latestStrategy ? (
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-blue-400 uppercase tracking-widest">Latest Strategy Code</span>
+                    <span className="text-[9px] text-slate-500 font-mono">Version {latestStrategy.version}</span>
+                  </div>
+                  <div className="bg-[#111720] border border-[#1e293b] rounded-xl p-4 overflow-hidden">
+                    <pre className="text-[11px] text-slate-300 font-mono leading-relaxed whitespace-pre-wrap overflow-x-auto">
+                      {latestStrategy.code}
+                    </pre>
+                  </div>
+                  <div className="text-[9px] text-slate-500">
+                    Generated: {new Date(latestStrategy.created_at).toLocaleString()}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-slate-500 text-[11px]">
+                  No strategy code available yet
+                </div>
+              )
+            ) : activeTab === 'params' ? (
+              <LogCard
+                agentName="MINARA V2" avatar="M" avatarBg="rgba(56,189,248,0.1)" color="var(--agent-1)" time="04/06 · 15:00"
+                analysis="BTC가 범위 제한 국면에 진입했습니다. <span class='text-white font-medium'>$64,191 ~ $69,540</span> 사이에서 진동 중이며, 이는 횡보 구간임을 시사합니다. Donchian 채널 돌파 필터(ATR 2.0×)를 통과하여 <span class='text-white font-medium'>그리드 전략(41레벨)</span> 을 배포합니다."
+                reason="이전 추세추종 전략이 연속 3회 손절 후 <span class='text-white font-medium'>샤프지수 1.12 → 2.41로 개선</span> 이 필요했습니다. 백테스트 결과 횡보 구간에서 평균복귀 전략 수익률이 38% 높았습니다."
+                params={[
+                  { name: "donchian_len", oldVal: "20", newVal: "15", trend: "neutral" },
+                  { name: "atr_mult", oldVal: "1.5", newVal: "2.0", trend: "up" },
+                  { name: "sl_atr", oldVal: "1.5×", newVal: "2.0×", trend: "neutral" },
+                  { name: "tp_atr", oldVal: "3.0×", newVal: "4.0×", trend: "up" },
+                ]}
+              />
+            ) : (
+              <>
+                <LogCard
+                  agentName="MINARA V2" avatar="M" avatarBg="rgba(56,189,248,0.1)" color="var(--agent-1)" time="04/06 · 15:00"
+                  analysis="BTC가 범위 제한 국면에 진입했습니다. <span class='text-white font-medium'>$64,191 ~ $69,540</span> 사이에서 진동 중이며, 이는 횡보 구간임을 시사합니다. Donchian 채널 돌파 필터(ATR 2.0×)를 통과하여 <span class='text-white font-medium'>그리드 전략(41레벨)</span> 을 배포합니다."
+                  reason="이전 추세추종 전략이 연속 3회 손절 후 <span class='text-white font-medium'>샤프지수 1.12 → 2.41로 개선</span> 이 필요했습니다. 백테스트 결과 횡보 구간에서 평균복귀 전략 수익률이 38% 높았습니다."
+                  params={[
+                    { name: "donchian_len", oldVal: "20", newVal: "15", trend: "neutral" },
+                    { name: "atr_mult", oldVal: "1.5", newVal: "2.0", trend: "up" },
+                    { name: "sl_atr", oldVal: "1.5×", newVal: "2.0×", trend: "neutral" },
+                    { name: "tp_atr", oldVal: "3.0×", newVal: "4.0×", trend: "up" },
+                  ]}
+                />
+                <LogCard
+                  agentName="MINARA V2" avatar="M" avatarBg="rgba(56,189,248,0.1)" color="var(--agent-1)" time="04/06 · 13:15"
+                  analysis="시장 국면이 전환되었습니다. <span class='text-white font-medium'>$64,117 ~ $69,460</span> 범위 구조가 붕괴되었으며(41 그리드 레벨 무력화), 방향성 추세 이동 준비가 필요합니다."
+                  reason="범위 제한→추세 국면 전환으로 현재 그리드 전략의 <span class='text-white font-medium'>예상 손실이 +4.2% 악화</span> 될 것으로 판단, 모든 포지션 정리 후 방향성 전략으로 전환합니다."
+                />
+                <LogCard
+                  agentName="ARBITER V1" avatar="A" avatarBg="rgba(167,139,250,0.1)" color="var(--agent-2)" time="04/06 · 11:30"
+                  analysis="1H RSI가 <span class='text-white font-medium'>72.3 (과매수)</span> 에 도달했습니다. 볼린저 밴드 상단 돌파 후 반전 신호가 감지됩니다. 평균복귀 확률 68% 추정."
+                  reason=""
+                  params={[
+                    { name: "rsi_ob", oldVal: "70", newVal: "72", trend: "down" },
+                    { name: "grid_levels", oldVal: "20", newVal: "15", trend: "neutral" },
+                  ]}
+                />
+              </>
+            )}
           </div>
 
           <div className="p-4 border-t border-white/[0.04] bg-[#060912]/90 shrink-0 backdrop-blur-lg">
