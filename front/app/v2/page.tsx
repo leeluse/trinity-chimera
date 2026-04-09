@@ -125,7 +125,7 @@ export default function Dashboard() {
   };
 
   const buildDatasets = (agentPerformance: AgentPerformance[], metric: MetricKey) => {
-    // If no real data, fallback to mock data
+    // Return empty dataset if no real data available
     if (!agentPerformance || agentPerformance.length === 0) {
       return [];
     }
