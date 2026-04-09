@@ -230,8 +230,136 @@ export default function Dashboard() {
   const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
   const [latestStrategy, setLatestStrategy] = useState<Strategy | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus[]>([]);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const subscriptionRefs = useRef<{[key: string]: any}>({});
+  const retryCountRef = useRef(0);
+  const maxRetries = 5;
 
-  // Supabase real-time subscription for backtest results
+  // Reconnection function with exponential backoff
+  const handleReconnect = async (channelName: string) => {
+    if (retryCountRef.current >= maxRetries) {
+      console.error(`Max retry attempts reached for ${channelName}`);
+      return;
+    }
+
+    const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30000);
+    console.log(`Reconnecting ${channelName} in ${delay}ms (attempt ${retryCountRef.current + 1})`);
+
+    setTimeout(() => {
+      retryCountRef.current++;
+
+      // Re-subscribe the channel
+      if (subscriptionRefs.current[channelName]) {
+        subscriptionRefs.current[channelName].unsubscribe();
+        delete subscriptionRefs.current[channelName];
+      }
+
+      // Recreate subscription based on channel name
+      if (channelName === 'agent-performance') {
+        const subscription = supabase
+          .channel(channelName)
+          .on('postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'backtest_results' },
+            (payload) => {
+              setAgentPerformance(prev => updatePerformance(prev, payload.new as BacktestResult));
+            }
+          )
+          .on('system', { event: 'ERROR' }, (err) => {
+            console.error('Agent performance reconnection error:', err);
+            setSubscriptionError('Real-time connection failed - attempting reconnection');
+          })
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              console.log(`${channelName} reconnected successfully`);
+              setSubscriptionError(null);
+              retryCountRef.current = 0;
+            } else if (status === 'CHANNEL_ERROR') {
+              setSubscriptionError('Reconnection failed');
+              handleReconnect(channelName);
+            }
+          });
+
+        subscriptionRefs.current[channelName] = subscription;
+      }
+      // Similar logic for other channels...
+    }, delay);
+  };
+
+  // Manual reconnection function for all subscriptions
+  const handleManualReconnect = () => {
+    console.log('Manual reconnection triggered');
+    retryCountRef.current = 0;
+    setSubscriptionError(null);
+
+    // Reset and reload all data
+    setIsLoadingData(true);
+    setAgentPerformance([]);
+    setLatestStrategy(null);
+    setAgentStatus([]);
+
+    // Re-subscribe all channels
+    Object.keys(subscriptionRefs.current).forEach(channelName => {
+      if (subscriptionRefs.current[channelName]) {
+        subscriptionRefs.current[channelName].unsubscribe();
+        delete subscriptionRefs.current[channelName];
+      }
+    });
+
+    // Reload initial data
+    Promise.all([
+      // Re-fetch backtest results
+      supabase
+        .from('backtest_results')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50)
+        .then(({ data, error }) => {
+          if (!error && data && data.length > 0) {
+            let initialPerformance: AgentPerformance[] = [];
+            data.forEach(result => {
+              initialPerformance = updatePerformance(initialPerformance, result);
+            });
+            setAgentPerformance(initialPerformance);
+          }
+        }),
+
+      // Re-fetch latest strategy
+      supabase
+        .from('strategies')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .then(({ data, error }) => {
+          if (!error && data && data.length > 0) {
+            setLatestStrategy(data[0] as Strategy);
+          }
+        }),
+
+      // Re-fetch agent status
+      supabase
+        .from('agents')
+        .select('*')
+        .order('last_active', { ascending: false })
+        .then(({ data, error }) => {
+          if (!error && data && data.length > 0) {
+            const initialStatus: AgentStatus[] = data.map(agent => ({
+              id: agent.id,
+              name: getAgentName(agent.id),
+              status: agent.status,
+              current_strategy_id: agent.current_strategy_id,
+              last_active: agent.last_active,
+              created_at: agent.created_at
+            }));
+            setAgentStatus(initialStatus);
+          }
+        })
+    ]).finally(() => {
+      setIsLoadingData(false);
+    });
+  };
+
+  // Supabase real-time subscription for backtest results with error handling
   useEffect(() => {
     const subscription = supabase
       .channel('agent-performance')
@@ -242,14 +370,28 @@ export default function Dashboard() {
           setAgentPerformance(prev => updatePerformance(prev, payload.new as BacktestResult));
         }
       )
-      .subscribe()
+      .on('system', { event: 'ERROR' }, (err) => {
+        console.error('Agent performance subscription error:', err);
+        setSubscriptionError('Real-time connection failed');
+        handleReconnect('agent-performance');
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setSubscriptionError(null);
+        } else if (status === 'CHANNEL_ERROR') {
+          setSubscriptionError('Subscription connection error');
+          handleReconnect('agent-performance');
+        }
+      })
+
+    subscriptionRefs.current['agent-performance'] = subscription;
 
     return () => {
       subscription.unsubscribe();
     }
   }, []);
 
-  // Supabase real-time subscription for strategies table
+  // Supabase real-time subscription for strategies table with error handling
   useEffect(() => {
     const subscription = supabase
       .channel('strategy-updates')
@@ -260,14 +402,28 @@ export default function Dashboard() {
           setLatestStrategy(payload.new as Strategy);
         }
       )
-      .subscribe()
+      .on('system', { event: 'ERROR' }, (err) => {
+        console.error('Strategy updates subscription error:', err);
+        setSubscriptionError('Strategy updates connection failed');
+        handleReconnect('strategy-updates');
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setSubscriptionError(null);
+        } else if (status === 'CHANNEL_ERROR') {
+          setSubscriptionError('Strategy subscription connection error');
+          handleReconnect('strategy-updates');
+        }
+      })
+
+    subscriptionRefs.current['strategy-updates'] = subscription;
 
     return () => {
       subscription.unsubscribe();
     }
   }, []);
 
-  // Supabase real-time subscription for agent status updates
+  // Supabase real-time subscription for agent status updates with error handling
   useEffect(() => {
     const subscription = supabase
       .channel('agent-status')
@@ -278,17 +434,32 @@ export default function Dashboard() {
           setAgentStatus(prev => updateStatus(prev, payload.new as AgentStatus));
         }
       )
-      .subscribe()
+      .on('system', { event: 'ERROR' }, (err) => {
+        console.error('Agent status subscription error:', err);
+        setSubscriptionError('Agent status connection failed');
+        handleReconnect('agent-status');
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setSubscriptionError(null);
+        } else if (status === 'CHANNEL_ERROR') {
+          setSubscriptionError('Agent status subscription connection error');
+          handleReconnect('agent-status');
+        }
+      })
+
+    subscriptionRefs.current['agent-status'] = subscription;
 
     return () => {
       subscription.unsubscribe();
     }
   }, []);
 
-  // Load initial backtest results from Supabase
+  // Load initial backtest results from Supabase with loading state
   useEffect(() => {
     const loadInitialBacktestResults = async () => {
       try {
+        setIsLoadingData(true);
         const { data: results, error } = await supabase
           .from('backtest_results')
           .select('*')
@@ -297,6 +468,7 @@ export default function Dashboard() {
 
         if (error) {
           console.error('Error loading backtest results:', error);
+          setSubscriptionError('Failed to load initial backtest results');
           return;
         }
 
@@ -310,16 +482,20 @@ export default function Dashboard() {
         }
       } catch (error) {
         console.error('Error loading initial backtest results:', error);
+        setSubscriptionError('Failed to load initial backtest results');
+      } finally {
+        setIsLoadingData(false);
       }
     };
 
     loadInitialBacktestResults();
   }, []);
 
-  // Load initial strategies data from Supabase
+  // Load initial strategies data from Supabase with loading state
   useEffect(() => {
     const loadInitialStrategies = async () => {
       try {
+        setIsLoadingData(true);
         const { data: strategies, error } = await supabase
           .from('strategies')
           .select('*')
@@ -328,6 +504,7 @@ export default function Dashboard() {
 
         if (error) {
           console.error('Error loading strategies:', error);
+          setSubscriptionError('Failed to load strategy data');
           return;
         }
 
@@ -336,16 +513,20 @@ export default function Dashboard() {
         }
       } catch (error) {
         console.error('Error loading initial strategies:', error);
+        setSubscriptionError('Failed to load strategy data');
+      } finally {
+        setIsLoadingData(false);
       }
     };
 
     loadInitialStrategies();
   }, []);
 
-  // Load initial agent status from Supabase
+  // Load initial agent status from Supabase with loading state
   useEffect(() => {
     const loadInitialAgentStatus = async () => {
       try {
+        setIsLoadingData(true);
         const { data: agents, error } = await supabase
           .from('agents')
           .select('*')
@@ -353,6 +534,7 @@ export default function Dashboard() {
 
         if (error) {
           console.error('Error loading agent status:', error);
+          setSubscriptionError('Failed to load agent status');
           return;
         }
 
@@ -369,6 +551,9 @@ export default function Dashboard() {
         }
       } catch (error) {
         console.error('Error loading initial agent status:', error);
+        setSubscriptionError('Failed to load agent status');
+      } finally {
+        setIsLoadingData(false);
       }
     };
 
@@ -561,10 +746,25 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-6">
+          {subscriptionError && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-red-500/10 rounded-full border border-red-500/20">
+              <div className="w-1.5 h-1.5 rounded-full bg-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)] animate-pulse"></div>
+              <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider">
+                {subscriptionError}
+              </span>
+              <button
+                onClick={handleManualReconnect}
+                className="ml-2 px-2 py-1 text-[8px] bg-red-500/20 hover:bg-red-500/30 rounded-full border border-red-500/30 transition-all"
+              >
+                Reconnect
+              </button>
+            </div>
+          )}
           <div className="flex items-center gap-2 px-3 py-1 bg-green-500/10 rounded-full border border-green-500/20">
             <div className="w-1.5 h-1.5 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)] animate-pulse"></div>
             <span className="text-[10px] font-bold text-green-400 uppercase tracking-wider">
-              {isLoading ? '로딩 중...' :
+              {isLoadingData ? '로딩 중...' :
+               isLoading ? '로딩 중...' :
                 dashboardProgress ?
                   `${dashboardProgress.active_improvements}개 개선 진행` :
                   'System Live'}
@@ -612,25 +812,40 @@ export default function Dashboard() {
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 p-4 mt-2">
-            {['minara', 'arbiter', 'nimalpha', 'chimera'].map(agentId => {
-              const agentData = agentStatus.find(a => a.id === agentId);
-              const agentName = getAgentName(agentId);
+            {isLoadingData ? (
+              // Loading state for agent cards
+              Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="bg-white/[0.03] border border-white/[0.05] rounded-2xl p-4 flex flex-col gap-2 animate-pulse">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-700/50"></div>
+                    <div className="flex-1">
+                      <div className="h-4 bg-slate-700/50 rounded mb-1"></div>
+                      <div className="h-3 bg-slate-700/30 rounded w-3/4"></div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              ['minara', 'arbiter', 'nimalpha', 'chimera'].map(agentId => {
+                const agentData = agentStatus.find(a => a.id === agentId);
+                const agentName = getAgentName(agentId);
 
-              return (
-                <AgentCard
-                  key={agentId}
-                  id={agentId}
-                  name={agentName}
-                  avatar={agentName.charAt(0)}
-                  strategy={agentData?.status === 'active' ? 'Active' : 'Idle'}
-                  status={agentData?.status || 'idle'}
-                  lastActive={agentData?.last_active}
-                  sharpe="-" mdd="-" winRate="-" color={`var(--agent-${['minara', 'arbiter', 'nimalpha', 'chimera'].indexOf(agentId) + 1})`}
-                  isActive={activeAgent === agentName}
-                  onClick={() => setActiveAgent(agentName)}
-                />
-              );
-            })}
+                return (
+                  <AgentCard
+                    key={agentId}
+                    id={agentId}
+                    name={agentName}
+                    avatar={agentName.charAt(0)}
+                    strategy={agentData?.status === 'active' ? 'Active' : 'Idle'}
+                    status={agentData?.status || 'idle'}
+                    lastActive={agentData?.last_active}
+                    sharpe="-" mdd="-" winRate="-" color={`var(--agent-${['minara', 'arbiter', 'nimalpha', 'chimera'].indexOf(agentId) + 1})`}
+                    isActive={activeAgent === agentName}
+                    onClick={() => setActiveAgent(agentName)}
+                  />
+                );
+              })
+            )}
           </div>
 
           <div className="flex-1 px-4 py-3 flex flex-col min-h-0">
@@ -643,8 +858,16 @@ export default function Dashboard() {
               ))}
             </div>
             <div className="flex-1 relative w-full h-[300px] lg:h-full min-h-[350px]">
-              <div className="absolute inset-0 glass rounded-xl shadow-2xl">
-                <canvas id="perfChart" ref={chartRef} className="w-full h-full z-10 relative"></canvas>
+              {isLoadingData ? (
+                <div className="absolute inset-0 flex items-center justify-center glass rounded-xl shadow-2xl">
+                  <div className="text-center">
+                    <div className="w-8 h-8 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto"></div>
+                    <div className="text-[11px] text-slate-500 mt-4 font-medium">Loading performance data...</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="absolute inset-0 glass rounded-xl shadow-2xl">
+                  <canvas id="perfChart" ref={chartRef} className="w-full h-full z-10 relative"></canvas>
 
                 {/* Floating End-of-Line Labels */}
                 {labelPositions.map((pos, i) => (
@@ -701,7 +924,8 @@ export default function Dashboard() {
                     </div>
                   </div>
                 ))}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -734,7 +958,12 @@ export default function Dashboard() {
 
           <div className="flex-1 overflow-y-auto min-h-0 bg-[#060912]/30 custom-scrollbar px-4 py-4 flex flex-col gap-5">
             {activeTab === 'strategy' ? (
-              latestStrategy ? (
+              isLoadingData ? (
+                <div className="flex flex-col items-center justify-center h-[500px] text-slate-500">
+                  <div className="w-8 h-8 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
+                  <div className="text-[11px] mt-4 font-medium">Loading strategy code...</div>
+                </div>
+              ) : latestStrategy ? (
                 <div className="flex flex-col gap-4">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold text-blue-400 uppercase tracking-widest">Latest Strategy Code</span>
