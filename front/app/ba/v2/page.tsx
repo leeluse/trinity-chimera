@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Chart from "chart.js/auto";
 import Head from "next/head";
 import { APIClient, AGENT_MAPPING, type AgentName } from "@/lib/api";
@@ -12,27 +12,6 @@ import { supabase } from "@/lib/supabase";
 // ─────────────────────────────────────────────────────────
 // Trinity Score 합성 지수 공식
 // ─────────────────────────────────────────────────────────
-const DAYS = 96;
-const labels: string[] = [];
-const startDate = new Date('2026-01-01');
-for (let i = 0; i < DAYS; i++) {
-  const d = new Date(startDate);
-  d.setDate(d.getDate() + i);
-  labels.push(d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }));
-}
-// 선이 끝까지 닿지 않도록 빈 레이블 추가
-for (let i = 0; i < 5; i++) {
-  labels.push("");
-}
-
-const COLORS = [
-  '#4acde2', // Sophisticated Aqua Blue (Focus)
-  '#c678dd', // One Dark Purple
-  '#98c379', // One Dark Green
-  '#9f7aea', // Vibrant Purple (final fix)
-  '#5c6370'  // One Dark Gray (Benchmark)
-];
-const NAMES = ['MINARA V2', 'ARBITER V1', 'NIM-ALPHA', 'CHIMERA-β', 'BTC BnH'];
 
 // Real-time data from Supabase
 interface BacktestResult {
@@ -63,130 +42,6 @@ interface AgentPerformance {
     win?: number[];
   };
 }
-
-function buildDatasets(agentPerformance: AgentPerformance[], metric: MetricKey) {
-  // If no real data, fallback to mock data
-  if (!agentPerformance || agentPerformance.length === 0) {
-    return [];
-  }
-
-  return agentPerformance.map((agent: AgentPerformance, i: number) => {
-    let data: number[] = [];
-
-    switch (metric) {
-      case 'score':
-        data = agent.timeseries?.score || Array(DAYS).fill(0).map(() => 100 + Math.random() * 20);
-        break;
-      case 'return':
-        data = agent.timeseries?.return || Array(DAYS).fill(0).map(() => Math.random() * 100 - 50);
-        break;
-      case 'sharpe':
-        data = agent.timeseries?.sharpe || Array(DAYS).fill(0).map(() => Math.random() * 4 - 1);
-        break;
-      case 'mdd':
-        data = agent.timeseries?.mdd || Array(DAYS).fill(0).map(() => Math.random() * -50);
-        break;
-      case 'win':
-        data = agent.timeseries?.win || Array(DAYS).fill(0).map(() => Math.random() * 100);
-        break;
-    }
-
-    return {
-      label: agent.name || NAMES[i],
-      data,
-      borderColor: COLORS[i],
-      backgroundColor: i === 0 ? `color-mix(in srgb, ${COLORS[0]}, transparent 98%)` : 'transparent',
-      borderWidth: i === 0 ? 1.4 : (i === 4 ? 0.8 : 1),
-      pointRadius: 0,
-      tension: 0.42,
-      fill: i === 0,
-      borderDash: i === 3 ? [5, 4] : (i === 4 ? [1, 5] : []),
-      clip: false as const,
-    };
-  });
-}
-
-// Helper function to update performance data
-const updatePerformance = (current: AgentPerformance[], newResult: BacktestResult) => {
-  const updatedPerformance = [...current];
-
-  // Find agent by ID or create new entry
-  const agentIndex = updatedPerformance.findIndex(a => a.id === newResult.agent_id);
-
-  if (agentIndex === -1) {
-    // Add new agent performance
-    updatedPerformance.push({
-      id: newResult.agent_id,
-      name: getAgentName(newResult.agent_id),
-      return_percentage: newResult.return_percentage,
-      sharpe_ratio: newResult.sharpe_ratio,
-      max_drawdown: newResult.max_drawdown,
-      win_rate: newResult.win_rate,
-      trinity_score: newResult.trinity_score,
-      timeseries: {
-        score: Array(DAYS).fill(0).map(() => newResult.trinity_score + Math.random() * 10 - 5),
-        return: Array(DAYS).fill(0).map(() => newResult.return_percentage + Math.random() * 10 - 5),
-        sharpe: Array(DAYS).fill(0).map(() => newResult.sharpe_ratio + Math.random() * 0.5 - 0.25),
-        mdd: Array(DAYS).fill(0).map(() => newResult.max_drawdown + Math.random() * 5 - 2.5),
-        win: Array(DAYS).fill(0).map(() => newResult.win_rate + Math.random() * 10 - 5)
-      }
-    });
-  } else {
-    // Update existing agent performance
-    updatedPerformance[agentIndex] = {
-      ...updatedPerformance[agentIndex],
-      return_percentage: newResult.return_percentage,
-      sharpe_ratio: newResult.sharpe_ratio,
-      max_drawdown: newResult.max_drawdown,
-      win_rate: newResult.win_rate,
-      trinity_score: newResult.trinity_score,
-      timeseries: updatedPerformance[agentIndex].timeseries
-    };
-  }
-
-  return updatedPerformance;
-};
-
-// Helper function to get agent name from ID
-const getAgentName = (agentId: string) => {
-  const agentMapping: {[key: string]: string} = {
-    'minara': 'MINARA V2',
-    'arbiter': 'ARBITER V1',
-    'nimalpha': 'NIM-ALPHA',
-    'chimera': 'CHIMERA-β'
-  };
-  return agentMapping[agentId] || 'Unknown Agent';
-};
-
-// Helper function to update agent status
-const updateStatus = (current: AgentStatus[], updatedAgent: AgentStatus) => {
-  const updatedStatus = [...current];
-
-  // Find agent by ID or create new entry
-  const agentIndex = updatedStatus.findIndex(a => a.id === updatedAgent.id);
-
-  if (agentIndex === -1) {
-    // Add new agent status
-    updatedStatus.push({
-      id: updatedAgent.id,
-      name: getAgentName(updatedAgent.id),
-      status: updatedAgent.status,
-      current_strategy_id: updatedAgent.current_strategy_id,
-      last_active: updatedAgent.last_active,
-      created_at: updatedAgent.created_at
-    });
-  } else {
-    // Update existing agent status
-    updatedStatus[agentIndex] = {
-      ...updatedStatus[agentIndex],
-      status: updatedAgent.status,
-      current_strategy_id: updatedAgent.current_strategy_id,
-      last_active: updatedAgent.last_active
-    };
-  }
-
-  return updatedStatus;
-};
 
 const hintMap = {
   score: '수식: Return×0.4 + Sharpe×25×0.35 + (1+MDD)×100×0.25',
@@ -232,12 +87,157 @@ export default function Dashboard() {
   const [agentStatus, setAgentStatus] = useState<AgentStatus[]>([]);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [isLoadingData, setIsLoadingData] = useState(true);
-  const subscriptionRefs = useRef<{[key: string]: any}>({});
+  const subscriptionRefs = useRef<{[key: string]: ReturnType<typeof supabase.channel>}>({});
   const retryCountRef = useRef(0);
   const maxRetries = 5;
 
+  // Chart labels and constants
+  const DAYS = 96;
+  const labels: string[] = [];
+  const startDate = new Date('2026-01-01');
+  for (let i = 0; i < DAYS; i++) {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + i);
+    labels.push(d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }));
+  }
+  // 선이 끝까지 닿지 않도록 빈 레이블 추가
+  for (let i = 0; i < 5; i++) {
+    labels.push("");
+  }
+
+  const COLORS = [
+    '#4acde2', // Sophisticated Aqua Blue (Focus)
+    '#c678dd', // One Dark Purple
+    '#98c379', // One Dark Green
+    '#9f7aea', // Vibrant Purple (final fix)
+    '#5c6370'  // One Dark Gray (Benchmark)
+  ];
+  const NAMES = ['MINARA V2', 'ARBITER V1', 'NIM-ALPHA', 'CHIMERA-β', 'BTC BnH'];
+
+  // Helper functions
+  const getAgentName = (agentId: string) => {
+    const agentMapping: {[key: string]: string} = {
+      'minara': 'MINARA V2',
+      'arbiter': 'ARBITER V1',
+      'nimalpha': 'NIM-ALPHA',
+      'chimera': 'CHIMERA-β'
+    };
+    return agentMapping[agentId] || 'Unknown Agent';
+  };
+
+  const buildDatasets = (agentPerformance: AgentPerformance[], metric: MetricKey) => {
+    // If no real data, fallback to mock data
+    if (!agentPerformance || agentPerformance.length === 0) {
+      return [];
+    }
+
+    return agentPerformance.map((agent: AgentPerformance, i: number) => {
+      let data: number[] = [];
+
+      switch (metric) {
+        case 'score':
+          data = agent.timeseries?.score || Array(DAYS).fill(0).map(() => 100 + Math.random() * 20);
+          break;
+        case 'return':
+          data = agent.timeseries?.return || Array(DAYS).fill(0).map(() => Math.random() * 100 - 50);
+          break;
+        case 'sharpe':
+          data = agent.timeseries?.sharpe || Array(DAYS).fill(0).map(() => Math.random() * 4 - 1);
+          break;
+        case 'mdd':
+          data = agent.timeseries?.mdd || Array(DAYS).fill(0).map(() => Math.random() * -50);
+          break;
+        case 'win':
+          data = agent.timeseries?.win || Array(DAYS).fill(0).map(() => Math.random() * 100);
+          break;
+      }
+
+      return {
+        label: agent.name || NAMES[i],
+        data,
+        borderColor: COLORS[i],
+        backgroundColor: i === 0 ? `color-mix(in srgb, ${COLORS[0]}, transparent 98%)` : 'transparent',
+        borderWidth: i === 0 ? 1.4 : (i === 4 ? 0.8 : 1),
+        pointRadius: 0,
+        tension: 0.42,
+        fill: i === 0,
+        borderDash: i === 3 ? [5, 4] : (i === 4 ? [1, 5] : []),
+        clip: false as const,
+      };
+    });
+  };
+
+  const updatePerformance = (current: AgentPerformance[], newResult: BacktestResult) => {
+    const updatedPerformance = [...current];
+
+    // Find agent by ID or create new entry
+    const agentIndex = updatedPerformance.findIndex(a => a.id === newResult.agent_id);
+
+    if (agentIndex === -1) {
+      // Add new agent performance
+      updatedPerformance.push({
+        id: newResult.agent_id,
+        name: getAgentName(newResult.agent_id),
+        return_percentage: newResult.return_percentage,
+        sharpe_ratio: newResult.sharpe_ratio,
+        max_drawdown: newResult.max_drawdown,
+        win_rate: newResult.win_rate,
+        trinity_score: newResult.trinity_score,
+        timeseries: {
+          score: Array(DAYS).fill(0).map(() => newResult.trinity_score + Math.random() * 10 - 5),
+          return: Array(DAYS).fill(0).map(() => newResult.return_percentage + Math.random() * 10 - 5),
+          sharpe: Array(DAYS).fill(0).map(() => newResult.sharpe_ratio + Math.random() * 0.5 - 0.25),
+          mdd: Array(DAYS).fill(0).map(() => newResult.max_drawdown + Math.random() * 5 - 2.5),
+          win: Array(DAYS).fill(0).map(() => newResult.win_rate + Math.random() * 10 - 5)
+        }
+      });
+    } else {
+      // Update existing agent performance
+      updatedPerformance[agentIndex] = {
+        ...updatedPerformance[agentIndex],
+        return_percentage: newResult.return_percentage,
+        sharpe_ratio: newResult.sharpe_ratio,
+        max_drawdown: newResult.max_drawdown,
+        win_rate: newResult.win_rate,
+        trinity_score: newResult.trinity_score,
+        timeseries: updatedPerformance[agentIndex].timeseries
+      };
+    }
+
+    return updatedPerformance;
+  };
+
+  const updateStatus = (current: AgentStatus[], updatedAgent: AgentStatus) => {
+    const updatedStatus = [...current];
+
+    // Find agent by ID or create new entry
+    const agentIndex = updatedStatus.findIndex(a => a.id === updatedAgent.id);
+
+    if (agentIndex === -1) {
+      // Add new agent status
+      updatedStatus.push({
+        id: updatedAgent.id,
+        name: getAgentName(updatedAgent.id),
+        status: updatedAgent.status,
+        current_strategy_id: updatedAgent.current_strategy_id,
+        last_active: updatedAgent.last_active,
+        created_at: updatedAgent.created_at
+      });
+    } else {
+      // Update existing agent status
+      updatedStatus[agentIndex] = {
+        ...updatedStatus[agentIndex],
+        status: updatedAgent.status,
+        current_strategy_id: updatedAgent.current_strategy_id,
+        last_active: updatedAgent.last_active
+      };
+    }
+
+    return updatedStatus;
+  };
+
   // Reconnection function with exponential backoff
-  const handleReconnect = async (channelName: string) => {
+  const handleReconnect = useCallback(async (channelName: string) => {
     if (retryCountRef.current >= maxRetries) {
       console.error(`Max retry attempts reached for ${channelName}`);
       return;
@@ -284,10 +284,10 @@ export default function Dashboard() {
       }
       // Similar logic for other channels...
     }, delay);
-  };
+  }, [maxRetries]);
 
   // Manual reconnection function for all subscriptions
-  const handleManualReconnect = () => {
+  const handleManualReconnect = useCallback(() => {
     console.log('Manual reconnection triggered');
     retryCountRef.current = 0;
     setSubscriptionError(null);
@@ -357,7 +357,7 @@ export default function Dashboard() {
     ]).finally(() => {
       setIsLoadingData(false);
     });
-  };
+  }, []);
 
   // Supabase real-time subscription for backtest results with error handling
   useEffect(() => {
