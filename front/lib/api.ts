@@ -1,4 +1,5 @@
 // API 클라이언트 유틸리티
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const API_BASE_URL = '/api';
 
@@ -154,20 +155,12 @@ export class APIClient {
   }
 }
 
-// 에이전트 이름 매핑
-export const AGENT_MAPPING = {
-  'MINARA V2': 'momentum_hunter',
-  'ARBITER V1': 'mean_reverter',
-  'NIM-ALPHA': 'macro_trader',
-  'CHIMERA-β': 'chaos_agent'
-} as const;
-
-export type AgentName = keyof typeof AGENT_MAPPING;
-
-// 프론트엔드 에이전트 이름으로 백엔드 ID 변환
-export function getAgentBackendId(frontendName: AgentName): string {
-  return AGENT_MAPPING[frontendName];
-}
+export const AGENT_IDS = [
+  'momentum_hunter',
+  'mean_reverter',
+  'macro_trader',
+  'chaos_agent'
+] as const;
 
 // Trinity Score 계산 함수 (백엔드와 동일한 로직)
 export function calculateTrinityScore(

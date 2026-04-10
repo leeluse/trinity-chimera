@@ -1,91 +1,29 @@
 # Session Checkpoint - 2026-04-10
 
-## 🎉 PROJECT COMPLETION SESSION
+## 완료된 항목
+- [x] `trn`의 tmux 구조를 현재 프로젝트 디렉터리 기준으로 재설계
+- [x] `front`/`api` 실행 경로를 `run` 스크립트와 맞춤
+- [x] `ai_trading` 전용 작업 창 유지
+- [x] 계획 문서 체크리스트 갱신
+- [x] 현재 상태 기록 문서 생성
+- [x] 실제 tmux 세션 생성 검증 완료
+- [x] `trn stop` 및 `trn kill` 동작 검증 완료
+- [x] `api/main.py` 환경변수 로딩 수정
+- [x] `SUPABASE_URL`/`SUPABASE_KEY` 누락으로 인한 API 부팅 실패 해결
+- [x] `api` import/부팅 경로 재검증 완료
+- [x] `run`에 `front`/`api` 포트 중복 실행 방지 로직 추가
+- [x] `trn` tmux 패인을 `zsh -f`로 띄워 셸 경고 제거
+- [x] 에이전트 코드를 `ai_trading/agents/`로 이동하고 `api/services/`는 래퍼로 정리
+- [x] `api.main`과 `SelfImprovementService`를 새 canonical 경로로 연결
+- [x] `ai_trading.agents` 패키지 import 검증 완료
+- [x] `PROJECT.md`를 현재 아키텍처 기준으로 상세 재작성
+- [x] 에이전트 이름 매핑 제거 및 `agent_id` 기준 통일
+- [x] `PROJECT.md`를 전략 개선 운영 기준서로 재작성하고 Claude/Codex 협업 원칙 명시
 
-### Session Overview
-- **Date**: 2026-04-10
-- **Duration**: Deployment validation and finalization
-- **Status**: 🚀 PROJECT COMPLETED SUCCESSFULLY
+## 진행 중인 사항
+- 현재 보류 중인 수정 없음
 
-## ✅ Completed Work
-
-### Final Deployment Tasks
-1. **Deployment Testing Scripts Created**
-   - `scripts/deploy_test.py`: Comprehensive production readiness test
-   - `scripts/deploy_test_simple.py`: Simplified version for quick validation
-
-2. **Production Validation Completed**
-   - All environment configurations verified
-   - Integration tests passing ✅
-   - System architecture validated
-   - Security measures confirmed
-
-3. **Final Documentation**
-   - `production-validation.md`: Deployment readiness report
-   - `final-project-summary.md`: Comprehensive project completion summary
-   - Final git commits marking project completion
-
-### Key Deliverables
-- **Deployment Readiness Report**: Production validation complete
-- **Final Project Summary**: All MVP features documented
-- **Git Commits**: Final commits marking project completion
-- **Session Checkpoint**: This completion documentation
-
-## 🏆 Project Completion Status
-
-### Final System Status
-- **MVP Features**: ✅ ALL COMPLETED
-- **Testing**: ✅ ALL TESTS PASSING
-- **Documentation**: ✅ COMPREHENSIVE
-- **Deployment**: ✅ READY FOR PRODUCTION
-
-### Technical Validation
-- **Backend API**: FastAPI server fully functional
-- **Frontend Dashboard**: Real-time monitoring operational
-- **Database Integration**: Supabase connectivity verified
-- **Security**: AST sandboxing and timeout protection active
-
-### Business Validation
-- **Autonomous Evolution**: Multi-level trigger system working
-- **Strategy Performance**: IS/OOS validation prevents overfitting
-- **Cost Management**: Conservative transaction cost modeling implemented
-- **Real-time Monitoring**: Live dashboard with performance metrics
-
-## 📊 Final Metrics
-
-### Implementation Statistics
-- **Total Tasks Completed**: 20
-- **Integration Tests Passing**: 100%
-- **Code Coverage**: Comprehensive
-- **Security Validation**: Multiple layers confirmed
-
-### Deployment Readiness
-- **Environment**: ✅ Validated
-- **Infrastructure**: ✅ Ready
-- **Monitoring**: ✅ Implemented
-- **Documentation**: ✅ Complete
-
-## 🚀 Next Session Goals
-
-Since this session marks **project completion**, there are no additional implementation tasks.
-
-### Future Considerations
-1. **Production Deployment**: Actual deployment to Supabase
-2. **Performance Monitoring**: Set up production monitoring
-3. **User Testing**: Initial strategy testing
-4. **Scaling Preparation**: Prepare for increased usage
-
-## 🎯 Session Achievement
-
-This session successfully completes the Trinity AI Trading System project:
-
-- ✅ **All MVP objectives achieved**
-- ✅ **Production validation completed**
-- ✅ **Final documentation delivered**
-- ✅ **Project marked complete in git**
-
-**The Trinity AI Trading System is now officially complete and ready for production deployment.**
-
----
-
-*Session concluded successfully - Trinity AI Trading System project completed.*
+## 다음 세션 목표
+1. `run` 또는 `README`의 실행 안내를 `trn` 기준으로 더 맞출지 검토
+2. 필요 시 tmux 창 구성을 미세 조정
+3. 새 요구가 생기면 그때 추가 반영

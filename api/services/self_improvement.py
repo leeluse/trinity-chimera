@@ -13,10 +13,12 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import logging
 
-from ..models.agent import (
+from models.agent import (
     AgentImprovementRequest, BacktestResult, LLMFeedback,
     ImprovementProgress, ImprovementStatus, AgentPerformanceMetrics
 )
+from ai_trading.agents.constants import AGENT_IDS
+from ai_trading.agents.orchestrator import get_evolution_orchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +38,8 @@ class SelfImprovementService:
         current_strategy: Dict[str, Any]
     ) -> Dict[str, Any]:
         """LLM 자가 개선 요청 (EvolutionOrchestrator 연동)"""
-
-        # 1. EvolutionOrchestrator를 통한 진화 프로세스 시작 (비동기)
-        # main.py에서 초기화된 global orchestrator를 사용하거나,
-        # 서비스 내에서 import/초기화하여 사용합니다.
-        # 여기서는 orchestrator를 직접 import 하여 사용합니다.
-        from ..main import evolution_orchestrator
-
-        asyncio.create_task(evolution_orchestrator.run_evolution_cycle(agent_id, force_trigger=True))
+        orchestrator = get_evolution_orchestrator()
+        asyncio.create_task(orchestrator.run_evolution_cycle(agent_id, force_trigger=True))
 
         return {
             "improvement_id": str(uuid.uuid4()),
@@ -231,13 +227,13 @@ class SelfImprovementService:
             ]
         }
 
-    def initialize_agent_performance(self, agent_id: str, name: str):
+    def initialize_agent_performance(self, agent_id: str):
         """에이전트 성과 데이터 초기화"""
 
         # Mock 성과 데이터 생성 (프론트엔드와 동일한 구조)
         self.agent_performance[agent_id] = AgentPerformanceMetrics(
             agent_id=agent_id,
-            name=name,
+            name=agent_id,
 
             # 시계열 데이터 (mock)
             score=[100 + i * 0.5 for i in range(96)],
@@ -263,34 +259,14 @@ class SelfImprovementService:
     async def get_agent_performance(self, agent_id: str) -> AgentPerformanceMetrics:
         """에이전트별 성과 데이터 제공"""
         if agent_id not in self.agent_performance:
-            # 에이전트가 없는 경우 초기화
-            agent_names = {
-                "momentum_hunter": "MINARA V2",
-                "mean_reverter": "ARBITER V1",
-                "macro_trader": "NIM-ALPHA",
-                "chaos_agent": "CHIMERA-β"
-            }
-            self.initialize_agent_performance(
-                agent_id,
-                agent_names.get(agent_id, agent_id)
-            )
+            self.initialize_agent_performance(agent_id)
 
         return self.agent_performance[agent_id]
 
     async def get_agent_timeseries(self, agent_id: str, metric: str) -> List[float]:
         """에이전트별 시계열 데이터 제공"""
         if agent_id not in self.agent_performance:
-            # 에이전트가 없는 경우 초기화
-            agent_names = {
-                "momentum_hunter": "MINARA V2",
-                "mean_reverter": "ARBITER V1",
-                "macro_trader": "NIM-ALPHA",
-                "chaos_agent": "CHIMERA-β"
-            }
-            self.initialize_agent_performance(
-                agent_id,
-                agent_names.get(agent_id, agent_id)
-            )
+            self.initialize_agent_performance(agent_id)
 
         performance = self.agent_performance[agent_id]
 
@@ -307,11 +283,9 @@ class SelfImprovementService:
 
     async def get_dashboard_metrics(self) -> Dict[str, Any]:
         """대시보드용 통합 메트릭 제공"""
-        agent_ids = ["momentum_hunter", "mean_reverter", "macro_trader", "chaos_agent"]
-
         # 모든 에이전트의 성과 데이터 수집
         performances = {}
-        for agent_id in agent_ids:
+        for agent_id in AGENT_IDS:
             if agent_id in self.agent_performance:
                 performances[agent_id] = self.agent_performance[agent_id]
 

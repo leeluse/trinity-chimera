@@ -1,9 +1,11 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { useEffect, useRef, useState } from "react";
 import Chart from "chart.js/auto";
 import Head from "next/head";
-import { APIClient, AGENT_MAPPING, type AgentName } from "../lib/api";
+import { APIClient, AGENT_IDS } from "../lib/api";
 import AgentCard from "@/components/AgentCard";
 import LogCard from "@/components/LogCard";
 
@@ -136,7 +138,7 @@ export default function Dashboard() {
         setDashboardProgress(progress);
 
         // 에이전트별 성과 데이터 로드
-        const agentIds = Object.values(AGENT_MAPPING);
+        const agentIds = AGENT_IDS;
         const performancePromises = agentIds.map(id =>
           APIClient.getAgentPerformance(id).catch(() => null)
         );
@@ -145,7 +147,7 @@ export default function Dashboard() {
 
         // 활성 에이전트의 시계열 데이터 로드
         if (activeAgent !== "전체") {
-          const agentId = AGENT_MAPPING[activeAgent as AgentName];
+          const agentId = activeAgent;
           const metrics = ['score', 'return', 'sharpe', 'mdd', 'win'] as const;
 
           const timeseriesPromises = metrics.map(metric =>
@@ -349,28 +351,28 @@ export default function Dashboard() {
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 p-4 mt-2">
             <AgentCard
-              id="minara" name="MINARA V2" avatar="M" strategy="Donchian Breakout"
+              id="momentum_hunter" name="momentum_hunter" avatar="M" strategy="Donchian Breakout"
               sharpe="2.41" mdd="-12.3%" winRate="67.4%" color="var(--agent-1)"
-              isActive={activeAgent === "MINARA V2"}
-              onClick={() => setActiveAgent("MINARA V2")}
+              isActive={activeAgent === "momentum_hunter"}
+              onClick={() => setActiveAgent("momentum_hunter")}
             />
             <AgentCard
-              id="arbiter" name="ARBITER V1" avatar="A" strategy="Grid + Mean Rev"
+              id="mean_reverter" name="mean_reverter" avatar="A" strategy="Grid + Mean Rev"
               sharpe="1.87" mdd="-8.1%" winRate="71.2%" color="var(--agent-2)"
-              isActive={activeAgent === "ARBITER V1"}
-              onClick={() => setActiveAgent("ARBITER V1")}
+              isActive={activeAgent === "mean_reverter"}
+              onClick={() => setActiveAgent("mean_reverter")}
             />
             <AgentCard
-              id="nimalpha" name="NIM-ALPHA" avatar="N" strategy="Trend Following"
+              id="macro_trader" name="macro_trader" avatar="N" strategy="Trend Following"
               sharpe="1.23" mdd="-18.9%" winRate="52.1%" color="var(--agent-3)"
-              isActive={activeAgent === "NIM-ALPHA"}
-              onClick={() => setActiveAgent("NIM-ALPHA")}
+              isActive={activeAgent === "macro_trader"}
+              onClick={() => setActiveAgent("macro_trader")}
             />
             <AgentCard
-              id="chimera" name="CHIMERA-β" avatar="C" strategy="Scalping ATR"
+              id="chaos_agent" name="chaos_agent" avatar="C" strategy="Scalping ATR"
               sharpe="-0.31" mdd="-24.7%" winRate="44.8%" color="var(--agent-4)"
-              isActive={activeAgent === "CHIMERA-β"}
-              onClick={() => setActiveAgent("CHIMERA-β")}
+              isActive={activeAgent === "chaos_agent"}
+              onClick={() => setActiveAgent("chaos_agent")}
             />
           </div>
 

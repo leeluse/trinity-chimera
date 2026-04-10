@@ -7,6 +7,7 @@ import AgentCard from "@/components/AgentCard";
 import LogCard from "@/components/LogCard";
 import CodeEditor from "@/components/CodeEditor";
 import { supabase } from "@/lib/supabase";
+import { AGENT_IDS } from "@/lib/api";
 
 // ─────────────────────────────────────────────────────────
 // Trinity Score 합성 지수 공식
@@ -111,18 +112,7 @@ export default function Dashboard() {
     '#9f7aea', // Vibrant Purple (final fix)
     '#5c6370'  // One Dark Gray (Benchmark)
   ];
-  const NAMES = ['MINARA V2', 'ARBITER V1', 'NIM-ALPHA', 'CHIMERA-β', 'BTC BnH'];
-
-  // Helper functions
-  const getAgentName = (agentId: string) => {
-    const agentMapping: {[key: string]: string} = {
-      'minara': 'MINARA V2',
-      'arbiter': 'ARBITER V1',
-      'nimalpha': 'NIM-ALPHA',
-      'chimera': 'CHIMERA-β'
-    };
-    return agentMapping[agentId] || 'Unknown Agent';
-  };
+  const NAMES = AGENT_IDS;
 
   const buildDatasets = (agentPerformance: AgentPerformance[], metric: MetricKey) => {
     // Return empty dataset if no real data available
@@ -176,7 +166,7 @@ export default function Dashboard() {
       // Add new agent performance
       updatedPerformance.push({
         id: newResult.agent_id,
-        name: getAgentName(newResult.agent_id),
+        name: newResult.agent_id,
         return_percentage: newResult.return_percentage,
         sharpe_ratio: newResult.sharpe_ratio,
         max_drawdown: newResult.max_drawdown,
@@ -210,7 +200,7 @@ export default function Dashboard() {
       // Add new agent status
       updatedStatus.push({
         id: updatedAgent.id,
-        name: getAgentName(updatedAgent.id),
+        name: updatedAgent.id,
         status: updatedAgent.status,
         current_strategy_id: updatedAgent.current_strategy_id,
         last_active: updatedAgent.last_active,
@@ -338,7 +328,7 @@ export default function Dashboard() {
           if (!error && data && data.length > 0) {
             const initialStatus: AgentStatus[] = data.map(agent => ({
               id: agent.id,
-              name: getAgentName(agent.id),
+              name: agent.id,
               status: agent.status,
               current_strategy_id: agent.current_strategy_id,
               last_active: agent.last_active,
@@ -534,7 +524,7 @@ export default function Dashboard() {
         if (agents && agents.length > 0) {
           const initialStatus: AgentStatus[] = agents.map(agent => ({
             id: agent.id,
-            name: getAgentName(agent.id),
+            name: agent.id,
             status: agent.status,
             current_strategy_id: agent.current_strategy_id,
             last_active: agent.last_active,
@@ -765,7 +755,7 @@ export default function Dashboard() {
             ) : (
               ['minara', 'arbiter', 'nimalpha', 'chimera'].map(agentId => {
                 const agentData = agentStatus.find(a => a.id === agentId);
-                const agentName = getAgentName(agentId);
+                const agentName = agentId;
 
                 return (
                   <AgentCard
@@ -882,12 +872,12 @@ export default function Dashboard() {
           </div>
 
           <div className="flex gap-2 p-4 border-b border-white/[0.02] overflow-x-auto shrink-0 no-scrollbar">
-            {['ALL', ...NAMES].filter(n => n !== 'BTC BnH').map(name => (
-              <button
-                key={name}
-                className={`px-4 py-1.5 rounded-xl text-[10px] font-bold border transition-all whitespace-nowrap ${activeAgent === name ? 'bg-blue-400/20 border-blue-400/30 text-blue-200' : 'bg-white/[0.02] border-white/5 text-slate-500 hover:border-white/20'}`}
-                onClick={() => setActiveAgent(name)}
-              >
+              {['ALL', ...NAMES].map(name => (
+                <button
+                  key={name}
+                  className={`px-4 py-1.5 rounded-xl text-[10px] font-bold border transition-all whitespace-nowrap ${activeAgent === name ? 'bg-blue-400/20 border-blue-400/30 text-blue-200' : 'bg-white/[0.02] border-white/5 text-slate-500 hover:border-white/20'}`}
+                  onClick={() => setActiveAgent(name)}
+                >
                 {name}
               </button>
             ))}
