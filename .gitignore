@@ -9,13 +9,12 @@ __pycache__
 CLAUDE.md
 AGENTS.md
 __init__.py
-# Keep docs and team backups
-venv
-.worktrees
-tmp/*
-!tmp/team-backups/
-!docs/
-!docs/**
+docs/
+logs/
+reaserch.md
+venv/
+.worktrees/
+tmp/
 .mcp.json
 .DS_Store
 .vscode/
