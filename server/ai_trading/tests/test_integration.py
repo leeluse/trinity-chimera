@@ -151,26 +151,76 @@ def test_pipeline_overfitting_detection():
         # If both perform similarly, that's okay for this test
         print("Strategy performs consistently across IS and OOS periods")
 
-def test_supabase_commit_simulation():
-    """
-    Simulates the commitment of results to Supabase.
-    Since we don't want to hit a real DB in integration tests without a test env,
-    we mock the SupabaseManager call.
-    """
-    # Mock Supabase Manager
-    mock_supabase = MagicMock()
-    mock_supabase.save_backtest_result.return_value = {"status": "success", "id": "test-123"}
+class TestMetricsBufferIntegration:
+    """MetricsBuffer와 다른 컴포넌트들의 통합 테스트"""
 
-    # Simulate the data we would send
-    test_results = {
-        "strategy_id": "strat_001",
-        "is_score": 15.5,
-        "oos_score": 12.2,
-        "passed": True,
-        "metrics": {"return": 0.1, "sharpe": 1.5, "mdd": -0.05}
-    }
+    @pytest.fixture
+    def orchestrator(self):
+        """EvolutionOrchestrator 인스턴스 생성"""
+        return EvolutionOrchestrator()
 
-    response = mock_supabase.save_backtest_result(test_results)
+    @pytest.mark.asyncio
+    async def test_metrics_buffer_integration(self, orchestrator):
+        """Test MetricsBuffer integration with orchestrator"""
+        # Simulate metrics push
+        metrics = {"trinity_score": 75.0, "return": 0.15, "sharpe": 2.0}
 
-    assert response["status"] == "success"
-    mock_supabase.save_backtest_result.assert_called_once_with(test_results)
+        # Push multiple entries to trigger buffer
+        for i in range(5):  # Use lower threshold for testing
+            result = await orchestrator.metrics_buffer.push("momentum_hunter", metrics)
+
+        # Should trigger after threshold
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_llm_feedback_flow(self, orchestrator, mocker):
+        """Test complete LLM feedback flow"""
+        # Mock LLM service
+        mock_llm = mocker.MagicMock()
+        mock_llm.generate.return_value = "class evolved_strategy: pass"
+        orchestrator.llm_client.llm_service = mock_llm
+
+        # Mock Supabase
+        mocker.patch.object(orchestrator.supabase, 'get_agent_strategy')
+        mocker.patch.object(orchestrator.supabase, 'save_strategy')
+
+        # Run evolution cycle
+        await orchestrator.run_evolution_cycle("momentum_hunter", force_trigger=True)
+
+        # Verify LLM was called
+        assert mock_llm.generate.called
+
+    @pytest.mark.asyncio
+    async def test_error_handling_integration(self, orchestrator, mocker):
+        """Test error handling in integrated system"""
+        # Mock LLM service to fail
+        mock_llm = mocker.MagicMock()
+        mock_llm.generate.side_effect = Exception("LLM service error")
+        orchestrator.llm_client.llm_service = mock_llm
+
+        # Mock Supabase
+        mocker.patch.object(orchestrator.supabase, 'get_agent_strategy')
+        mocker.patch.object(orchestrator.supabase, 'save_strategy')
+
+        # Run evolution cycle - should handle LLM failure gracefully
+        await orchestrator.run_evolution_cycle("momentum_hunter", force_trigger=True)
+
+        # Verify the system didn't crash
+        assert orchestrator.states.get("momentum_hunter") == "IDLE"
+
+class TestAPIIntegration:
+    @pytest.fixture
+    def orchestrator(self):
+        return EvolutionOrchestrator()
+
+    def test_system_status_endpoint(self, orchestrator):
+        """Test system status API endpoint"""
+        # This would test the actual API endpoint
+        # For now, test the orchestrator's status functionality
+        status = orchestrator.get_all_status()
+
+        assert isinstance(status, dict)
+        assert "momentum_hunter" in status
+        assert "mean_reverter" in status
+        assert "macro_trader" in status
+        assert "chaos_agent" in status
