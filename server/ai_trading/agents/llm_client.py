@@ -1,5 +1,7 @@
 import logging
 import traceback
+import os
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 from server.ai_trading.core.strategy_loader import StrategyLoader, SecurityError
@@ -8,6 +10,19 @@ from server.ai_trading.core.strategy_loader import StrategyLoader, SecurityError
 class LLMUnavailableError(Exception):
     """Raised when LLM service is unavailable"""
     pass
+
+
+def _load_agent_prompt(agent_id: str) -> str:
+    """Load agent-specific prompt template"""
+    prompts_dir = Path(__file__).parent / "prompts"
+    prompt_file = prompts_dir / f"{agent_id}.txt"
+
+    if prompt_file.exists():
+        with open(prompt_file, 'r') as f:
+            return f.read()
+    else:
+        # Fallback to default prompt structure
+        return f"[Evolution Mode: C-MODE - {agent_id.upper()}]\n\nYou are a {agent_id.replace('_', ' ').title()} strategy expert."
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +64,9 @@ class EvolutionLLMClient:
                 raise e
 
     def _assemble_c_mode_context(self, pkg: Dict[str, Any]) -> str:
+        agent_id = pkg.get("agent_id", "unknown")
+        agent_prompt = _load_agent_prompt(agent_id)
+
         current_code = pkg.get("current_strategy_code", "No code provided")
         metrics = pkg.get("metrics", {})
         loss_logs = pkg.get("loss_period_logs", "No specific loss logs available")
@@ -58,7 +76,7 @@ class EvolutionLLMClient:
         regime = pkg.get("market_regime", "Unknown")
         volatility = pkg.get("market_volatility", "Unknown")
 
-        prompt = f"""
+        base_prompt = f"""
 ### [Evolution Mode: C-MODE]
 You are an expert Quantitative Strategy Evolver. Your goal is to evolve the current trading strategy to improve its Trinity Score and robustness.
 
@@ -94,7 +112,7 @@ You are an expert Quantitative Strategy Evolver. Your goal is to evolve the curr
 4. Ensure the code strictly adheres to the `StrategyInterface` and contains no forbidden imports or functions (os, sys, subprocess, etc.).
 5. Output ONLY the valid Python code for the strategy class. Do not include explanations outside the code block.
 """
-        return prompt
+        return f"{agent_prompt}\n\n{base_prompt}"
 
     async def _call_llm(self, prompt: str, error_context: Optional[str] = None) -> str:
         if error_context:
