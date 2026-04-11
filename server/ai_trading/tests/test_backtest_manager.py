@@ -222,6 +222,59 @@ class TestValidateStrategyWorkflow(unittest.TestCase):
             self.assertAlmostEqual(result['ratio'], expected_ratio, places=4)
 
 
+class TestProfitFactorAndWinRate(unittest.TestCase):
+    """Test Profit Factor and Win Rate calculation."""
+
+    def setUp(self):
+        self.manager = BacktestManager()
+
+    def test_profit_factor_calculation(self):
+        """Test Profit Factor calculation with various trade scenarios."""
+
+        # All winning trades
+        trades = [100, 200, 150]
+        result = self.manager._calculate_profit_factor(trades)
+        self.assertEqual(result, float('inf'))
+
+        # Mixed trades
+        trades = [100, -50, 200, -30]
+        result = self.manager._calculate_profit_factor(trades)
+        expected = (100 + 200) / (50 + 30)
+        self.assertEqual(result, expected)
+
+        # All losing trades
+        trades = [-100, -200]
+        result = self.manager._calculate_profit_factor(trades)
+        self.assertEqual(result, 0.0)
+
+        # Empty trades
+        trades = []
+        result = self.manager._calculate_profit_factor(trades)
+        self.assertEqual(result, 0.0)
+
+    def test_win_rate_calculation(self):
+        """Test Win Rate calculation."""
+
+        trades = [100, -50, 200, -30]
+        result = self.manager._calculate_win_rate(trades)
+        self.assertEqual(result, 0.5)  # 2 wins out of 4 trades
+
+        # All winning trades
+        trades = [100, 200, 150]
+        result = self.manager._calculate_win_rate(trades)
+        self.assertEqual(result, 1.0)
+
+        # All losing trades
+        trades = [-100, -200]
+        result = self.manager._calculate_win_rate(trades)
+        self.assertEqual(result, 0.0)
+
+        # Empty trades
+        trades = []
+        result = self.manager._calculate_win_rate(trades)
+        self.assertEqual(result, 0.0)
+
+
 class TestCalculateTrinityScore(unittest.TestCase):
     """Test Trinity Score calculation."""
 

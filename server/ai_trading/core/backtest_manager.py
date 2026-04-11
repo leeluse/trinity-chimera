@@ -87,6 +87,33 @@ class BacktestManager:
         else:  # Sell: Price decreases (side == -1)
             return execution_price * (1 - total_cost_pct)
 
+    def _calculate_profit_factor(self, trades: list) -> float:
+        """Calculate Profit Factor from list of trades"""
+        if not trades:
+            return 0.0
+
+        winning_trades = [t for t in trades if t > 0]
+        losing_trades = [t for t in trades if t < 0]
+
+        if not losing_trades:
+            return float('inf')  # No losses
+
+        total_profit = sum(winning_trades)
+        total_loss = abs(sum(losing_trades))
+
+        if total_loss == 0:
+            return float('inf')
+
+        return total_profit / total_loss
+
+    def _calculate_win_rate(self, trades: list) -> float:
+        """Calculate Win Rate from list of trades"""
+        if not trades:
+            return 0.0
+
+        winning_trades = [t for t in trades if t > 0]
+        return len(winning_trades) / len(trades)
+
     def run_backtest(self, strategy: StrategyInterface, data: pd.DataFrame) -> Dict[str, Any]:
         """
         A simplified backtest loop to integrate costs and returns.
@@ -94,7 +121,7 @@ class BacktestManager:
         """
         balance = 10000.0
         position = 0
-        trades = 0
+        trades = []  # Track individual trade P&L
 
         prices = data['close'].values
         signals = []
@@ -110,14 +137,16 @@ class BacktestManager:
             # Trade execution logic
             if signal == 1 and position == 0: # Buy
                 cost_price = self.apply_trading_costs(prices[i], 1)
-                position = balance / cost_price
+                shares = balance / cost_price
+                position = shares
                 balance = 0
-                trades += 1
             elif signal == -1 and position > 0: # Sell
                 cost_price = self.apply_trading_costs(prices[i], -1)
-                balance = position * cost_price
+                sale_value = position * cost_price
+                trade_pnl = sale_value - 10000.0  # Simplified P&L
+                trades.append(trade_pnl)
+                balance = sale_value
                 position = 0
-                trades += 1
 
             # Track equity curve for MDD calculation
             current_value = balance if position == 0 else position * prices[i]
@@ -126,18 +155,24 @@ class BacktestManager:
         final_value = balance if position == 0 else position * prices[-1]
         total_return = (final_value - 10000.0) / 10000.0
 
-        # Calculate MDD from equity curve
+        # Calculate metrics
         mdd = self._calculate_mdd(equity_curve)
-
-        # Calculate Sharpe ratio (simplified)
         sharpe = self._calculate_sharpe(equity_curve)
+        profit_factor = self._calculate_profit_factor(trades)
+        win_rate = self._calculate_win_rate(trades)
+
+        # Use Trinity Score v2
+        from .scoring import calculate_trinity_score_v2
+        trinity_score = calculate_trinity_score_v2(total_return, sharpe, mdd, profit_factor, win_rate)
 
         return {
             "return": total_return,
             "sharpe": sharpe,
             "mdd": mdd,
-            "trinity_score": self.calculate_trinity_score(total_return, sharpe, mdd),
-            "trades": trades
+            "profit_factor": profit_factor,
+            "win_rate": win_rate,
+            "trinity_score": trinity_score,
+            "trades": len(trades)
         }
 
     def _calculate_mdd(self, equity_curve: list) -> float:
