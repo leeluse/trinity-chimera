@@ -44,7 +44,19 @@ class EvolutionOrchestrator:
         self.trigger_engine = EvolutionTrigger()
         self.supabase = SupabaseManager()
         self.backtest_manager = BacktestManager()
+        self.metrics_buffer = MetricsBuffer()  # 신규 추가
+        self.metrics_buffer.set_callback(self._on_metrics_buffer_trigger)  # 콜백 설정
         self.states: Dict[str, EvolutionState] = {}
+
+    async def _on_metrics_buffer_trigger(self, agent_id: str, metrics_entries: List):
+        """Handle MetricsBuffer trigger"""
+        try:
+            if self.states.get(agent_id) != EvolutionState.IDLE:
+                return  # 이미 진행 중인 에이전트는 건너뜀
+
+            await self.run_evolution_cycle(agent_id, force_trigger=True)
+        except Exception as e:
+            logger.error(f"MetricsBuffer trigger failed for {agent_id}: {e}")
 
     async def get_state(self, agent_id: str) -> Optional[EvolutionState]:
         return self.states.get(agent_id, EvolutionState.IDLE)

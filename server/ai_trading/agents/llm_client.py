@@ -4,6 +4,11 @@ from typing import Dict, Any, Optional
 
 from server.ai_trading.core.strategy_loader import StrategyLoader, SecurityError
 
+
+class LLMUnavailableError(Exception):
+    """Raised when LLM service is unavailable"""
+    pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -93,12 +98,15 @@ You are an expert Quantitative Strategy Evolver. Your goal is to evolve the curr
 
     async def _call_llm(self, prompt: str, error_context: Optional[str] = None) -> str:
         if error_context:
-            prompt += f"\n\n### SELF-CORRECTION REQUIRED\nYour previous attempt failed with the following error:\n```\n{error_context}\n```\n Please fix the code and return the corrected version."
+            prompt += f"\n\n### SELF-CORRECTION REQUIRED\nYour previous attempt failed with:\n```\n{error_context}\n```\nPlease fix the code."
 
-        if self.llm_service:
+        if not self.llm_service:
+            raise LLMUnavailableError("LLM service not configured")
+
+        try:
             return await self.llm_service.generate(prompt)
-
-        return "# Mock Strategy Code\nclass evolved_strategy(StrategyInterface):\n    def generate_signal(self, data):\n        return 1"
+        except Exception as e:
+            raise LLMUnavailableError(f"LLM call failed: {str(e)}")
 
     def _clean_code(self, text: str) -> str:
         if "```python" in text:
