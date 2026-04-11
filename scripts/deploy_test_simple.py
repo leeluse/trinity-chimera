@@ -38,10 +38,10 @@ class SimpleDeploymentTester:
             ("PROJECT.md", "Project specification"),
             ("run", "Project runner script"),
             (".env", "Environment configuration"),
-            ("api/main.py", "Backend server entry point"),
-            ("front/package.json", "Frontend package configuration"),
-            ("ai_trading/core/strategy_loader.py", "Strategy loader"),
-            ("ai_trading/tests/test_integration.py", "Integration tests")
+            ("server/api/main.py", "Backend server entry point"),
+            ("client/package.json", "Frontend package configuration"),
+            ("server/ai_trading/core/strategy_loader.py", "Strategy loader"),
+            ("server/ai_trading/tests/test_integration.py", "Integration tests")
         ]
 
         all_exist = True
@@ -89,9 +89,9 @@ class SimpleDeploymentTester:
 
             # Test core imports
             imports_to_test = [
-                "ai_trading.core.strategy_loader",
-                "ai_trading.core.backtest_manager",
-                "api.services.supabase_client"
+                "server.ai_trading.core.strategy_loader",
+                "server.ai_trading.core.backtest_manager",
+                "server.api.services.supabase_client"
             ]
 
             all_imported = True
@@ -142,7 +142,7 @@ class SimpleDeploymentTester:
         """Run integration tests"""
         test_name = "Integration Tests"
 
-        test_file = self.project_root / "ai_trading" / "tests" / "test_integration.py"
+        test_file = self.project_root / "server" / "ai_trading" / "tests" / "test_integration.py"
         if not test_file.exists():
             self.log_test(test_name, "FAIL", "Integration test file missing")
             return False
@@ -179,12 +179,12 @@ class SimpleDeploymentTester:
             self.log_test(test_name, "FAIL", f"Test execution error: {str(e)}")
             return False
 
-    def test_frontend_build(self):
-        """Test frontend build readiness"""
+    def test_client_build(self):
+        """Test client build readiness"""
         test_name = "Frontend Build"
 
-        frontend_dir = self.project_root / "front"
-        package_json = frontend_dir / "package.json"
+        client_dir = self.project_root / "client"
+        package_json = client_dir / "package.json"
 
         if not package_json.exists():
             self.log_test(test_name, "FAIL", "Frontend package.json missing")
@@ -273,7 +273,7 @@ class SimpleDeploymentTester:
         self.test_python_modules()
         self.test_run_script()
         self.test_integration_tests()
-        self.test_frontend_build()
+        self.test_client_build()
 
         print("\n" + "="*60)
         report = self.generate_report()

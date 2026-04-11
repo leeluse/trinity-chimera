@@ -6,6 +6,17 @@
 ![Python](https://img.shields.io/badge/Python-3.9+-blue)
 ![ML](https://img.shields.io/badge/ML-Reinforcement%20Learning-orange)
 
+## 📚 운영 문서
+- Backtest: [`docs/backtest/README.md`](docs/backtest/README.md)
+- LLM: [`docs/llm/README.md`](docs/llm/README.md)
+- Server Structure: [`docs/server-structure.md`](docs/server-structure.md)
+
+## 🔧 현재 운영 기준 (요약)
+- 백테스트 전략 실행 코드는 Supabase `strategies` 테이블을 우선 사용합니다.
+- `strategies.source`는 `system | agent | user`로 구분합니다.
+- `/api/backtest/chat-run`은 우측 채팅 카드와 좌측 백테스트 패널을 한 번에 동기화합니다.
+- 상세 흐름은 `docs/backtest/README.md`, `docs/llm/README.md`를 기준으로 확인하세요.
+
 ## 🚀 빠른 시작 가이드
 
 ### 시스템 요구사항
@@ -32,11 +43,11 @@ pip install -e .
 #### HMM Regime Classifier 테스트
 ```bash
 # HMM 모델 학습 및 테스트
-python -m pytest ai_trading/tests/test_hmm.py -v
+python -m pytest server/ai_trading/tests/test_hmm.py -v
 
 # 직접 실행 예시
 python -c "
-from ai_trading.core.hmm_regime import HMMRegimeClassifier
+from server.ai_trading.core.hmm_regime import HMMRegimeClassifier
 import pandas as pd
 
 # 샘플 데이터 로드
@@ -51,11 +62,11 @@ print('Regime 분류 결과:', predictions.value_counts())
 #### Triple Barrier Labeler 테스트
 ```bash
 # Triple Barrier 레이블링 테스트
-python -m pytest ai_trading/tests/test_triple_barrier.py -v
+python -m pytest server/ai_trading/tests/test_triple_barrier.py -v
 
 # 직접 실행 예시
 python -c "
-from ai_trading.core.triple_barrier import TripleBarrierLabeler
+from server.ai_trading.core.triple_barrier import TripleBarrierLabeler
 import pandas as pd
 
 # 샘플 OHLCV 데이터 생성
@@ -77,11 +88,11 @@ print('가중치 평균:', weights.mean())
 #### RL 트레이딩 환경 테스트
 ```bash
 # Gymnasium 환경 테스트
-python -m pytest ai_trading/tests/test_trading_env.py -v
+python -m pytest server/ai_trading/tests/test_trading_env.py -v
 
 # 환경 실행 예시
 python -c "
-from ai_trading.rl.trading_env import CryptoTradingEnv
+from server.ai_trading.rl.trading_env import CryptoTradingEnv
 import gymnasium as gym
 
 # 환경 생성 및 테스트
@@ -115,7 +126,7 @@ python -m dashboard.server
 
 ```
 trinity-chimery/
-├── ai_trading/                 # 코어 AI 트레이딩 모듈
+├── server/ai_trading/                 # 코어 AI 트레이딩 모듈
 │   ├── core/                   # 공유 퍼셉션 레이어
 │   │   ├── hmm_regime.py       # HMM 시장 regime 분류
 │   │   └── triple_barrier.py   # Triple Barrier 레이블링
@@ -137,24 +148,24 @@ trinity-chimery/
 
 ### ✅ 핵심 모듈 구현 완료
 
-1. **HMM Regime Classifier** (`ai_trading/core/hmm_regime.py`)
+1. **HMM Regime Classifier** (`server/ai_trading/core/hmm_regime.py`)
    - Hidden Markov Model 기반 시장 regime 분류
    - Bull/Sideways/Bear 3개 regime 분류
    - 15개 단위 테스트 통과
    - 실시간 예측 인터페이스
 
-2. **Triple Barrier Labeler** (`ai_trading/core/triple_barrier.py`)
+2. **Triple Barrier Labeler** (`server/ai_trading/core/triple_barrier.py`)
    - 수익 목표(TP), 손절(SL), 시간 장벽 기반 레이블링
    - ML 학습용 {-1, 0, 1} 레이블 생성
    - 샘플 가중치 계산 (TP/SL: 1.0, 시간 초과: 0.3)
 
-3. **RL Trading Environment** (`ai_trading/rl/trading_env.py`)
+3. **RL Trading Environment** (`server/ai_trading/rl/trading_env.py`)
    - Gymnasium 표준 인터페이스 구현
    - 포지션 관리 및 수수료 모델
    - 26개 단위 테스트 통과
    - 관찰 공간 및 보상 함수 설계
 
-4. **PPO Training Script** (`ai_trading/rl/train_rl.py`)
+4. **PPO Training Script** (`server/ai_trading/rl/train_rl.py`)
    - Proximal Policy Optimization 알고리즘 연구
    - 학습 파이프라인 설계
    - 하이퍼파라미터 튜닝 전략
@@ -196,14 +207,14 @@ git checkout -b phase-2-agent-battle
 ### 코드 컨벤션
 ```bash
 # 코드 포맷팅
-black ai_trading/
-isort ai_trading/
+black server/ai_trading/
+isort server/ai_trading/
 
 # 린팅
-flake8 ai_trading/
+flake8 server/ai_trading/
 
 # 테스트 실행
-pytest ai_trading/tests/ -v --cov=ai_trading
+pytest server/ai_trading/tests/ -v --cov=server/ai_trading
 ```
 
 ### 새로운 모듈 추가
@@ -243,10 +254,10 @@ pip install -r requirements.txt
 **테스트 실패 시:**
 ```bash
 # 테스트 디버깅
-pytest ai_trading/tests/test_hmm.py -v -s
+pytest server/ai_trading/tests/test_hmm.py -v -s
 
 # 특정 테스트만 실행
-pytest ai_trading/tests/test_hmm.py::test_hmm_accuracy -v
+pytest server/ai_trading/tests/test_hmm.py::test_hmm_accuracy -v
 ```
 
 ## 📚 추가 자료

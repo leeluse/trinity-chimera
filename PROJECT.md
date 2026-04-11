@@ -1,149 +1,71 @@
-# PROJECT.md - Trinity Strategy Engine Operating Manual
+# PROJECT.md - Trinity AI Trading System
 
-> 이 문서는 Trinity Chimery를 “전략을 빠르게 찾고, 검증하고, 살아남는 것만 남기는 에이전트 시스템”으로 발전시키기 위한 운영 기준서입니다.
-> 목표는 단순한 백테스트 숫자 자랑이 아니라, 수익률, 수익팩터, 신뢰성, 시간 대비 효율성 모두를 동시에 끌어올리는 것입니다.
+> 이 문서는 현재 코드베이스의 실제 구조와 실행 흐름을 기준으로 정리한 프로젝트 개요입니다.
+> 설계 의도와 구현 위치가 어긋난 부분은 가능한 한 현재 상태를 기준으로 설명합니다.
 
----
+관련 세부 문서:
+- Backtest: [`docs/backtest/README.md`](docs/backtest/README.md)
+- LLM: [`docs/llm/README.md`](docs/llm/README.md)
+- Server Structure: [`docs/server-structure.md`](docs/server-structure.md)
 
-## 1. 프로젝트의 목표
+## 0. 현재 기준 (Backtest/LLM)
 
-우리가 만들고 싶은 것은 다음을 모두 만족하는 전략 발견 엔진입니다.
+백테스트/채팅 결합 구간의 canonical 경로는 아래입니다.
 
-- 높은 수익률
-- 높은 Profit Factor
-- 낮고 통제된 MDD
-- 시장 국면이 바뀌어도 무너지지 않는 안정성
-- 후보 전략을 빨리 만들고 빨리 걸러내는 속도
-- 재현 가능한 결과
-- 운영 중에도 사람이 이해하고 검토할 수 있는 명확한 기록
+- API 진입
+  - `POST /api/backtest/chat-run` (`server/api/routes/chat.py`)
+  - `GET /api/backtest*` (`server/api/routes/backtest.py`)
+- 전략 선택/카드 구성
+  - `server/api/services/backtest_strategy_catalog.py`
+  - `server/api/services/llm/strategy_runner.py`
+- 백테스트 실행
+  - `server/api/services/skill_backtest_runtime.py`
+  - `server/backtesting-trading-strategies/scripts/backtest.py`
+- 전략 코드 저장소 (source of truth)
+  - Supabase `strategies` 테이블 (`source: system|agent|user`, `params.strategy_key` 기준)
 
-핵심은 “한 방짜리 전략”이 아니라 “좋은 전략을 빨리, 반복적으로, 검증 가능하게 찾는 시스템”입니다.
-
----
-
-## 2. 북극성 지표
-
-### 2.1 우선순위
-
-우리는 아래 순서로 전략을 평가합니다.
-
-1. OOS에서 살아남는가
-2. 수익팩터가 충분히 높은가
-3. 수익률과 샤프가 실질적으로 좋은가
-4. MDD가 감내 가능한 수준인가
-5. 여러 시장 국면에서 안정적인가
-6. 후보를 만드는 속도가 빠른가
-
-### 2.2 핵심 평가 항목
-
-- Return: 절대 수익
-- Profit Factor: 손익 비대칭성
-- Sharpe: 위험 대비 효율
-- MDD: 최대 낙폭
-- OOS 성능: 과최적화 방지의 핵심 기준
-- Regime Robustness: 추세장, 횡보장, 고변동장 모두에서 버티는지
-- Time-to-Candidate: 후보 전략을 얼마나 빨리 뽑아내는지
-- Reproducibility: 같은 데이터와 설정에서 같은 결론이 나오는지
-
-### 2.3 합격 기준의 철학
-
-백테스트 최고점만 보고 통과시키지 않습니다.
-
-- IS에서만 좋은 전략은 거릅니다.
-- OOS가 약하면 보류합니다.
-- 거래비용과 슬리피지를 고려하지 않은 성과는 과대평가로 봅니다.
-- 더 복잡한 전략이 항상 더 좋은 전략은 아닙니다.
-- 설명 가능한 개선만 채택합니다.
+즉 현재 백테스트 실행은 파일 직접 호출보다 DB 전략 코드 로드를 우선합니다.
 
 ---
 
-## 3. 운영 원칙
+## 1. 시스템 한눈에 보기
 
-### 3.1 OOS 우선
+Trinity Chimery는 다음 4개 층으로 돌아갑니다.
 
-전략 평가는 항상 OOS 중심으로 봅니다.
+- `client/` - 대시보드와 사용자 인터페이스
+- `server/api/` - FastAPI 기반 실행/오케스트레이션 계층
+- `server/ai_trading/agents/` - 에이전트 오케스트레이션, LLM, 트리거, 에이전트 ID 정의
+- `server/ai_trading/core/` - 전략 검증, 백테스트, 샌드박스, 공용 전략 인터페이스
 
-- IS는 아이디어 확인용입니다.
-- OOS는 실제 생존 가능성 확인용입니다.
-- Walk-forward와 regime split을 우선합니다.
-
-### 3.2 비용 포함
-
-거래비용, 슬리피지, 체결 지연, 과도한 회전율을 반드시 고려합니다.
-
-- 비용을 빼고 좋아 보이는 전략은 위험합니다.
-- 거래가 너무 많아지는 전략은 효율이 떨어질 수 있습니다.
-
-### 3.3 재현 가능성
-
-모든 실험은 다시 돌릴 수 있어야 합니다.
-
-- 데이터 범위
-- 실험 설정
-- 프롬프트 버전
-- 코드 버전
-- 랜덤성 관련 설정
-
-이 다섯 가지가 남지 않으면 결과를 믿지 않습니다.
-
-### 3.4 이름보다 `agent_id`
-
-이 프로젝트에서 에이전트 식별 기준은 항상 `agent_id`입니다.
-
-- 이름 기반 분기는 쓰지 않습니다.
-- 표시용 문구가 필요해도 데이터 경로는 `agent_id`만 사용합니다.
-- 운영상의 혼란을 줄이기 위해 식별자와 UI 표시는 분리합니다.
-
-### 3.5 기획과 구현 분리
-
-작업은 항상 두 단계로 나눕니다.
-
-- 먼저 기획과 검토
-- 그다음 구현
-
-Claude와 Codex가 함께 움직일 때도 이 원칙은 유지합니다.
+현재는 `server/ai_trading/agents/`가 에이전트 로직의 canonical 위치이고, `server/api/services/`는 호환 래퍼와 인프라 코드가 남아 있는 형태입니다.
 
 ---
 
-## 4. 시스템 한눈에 보기
+## 2. 현재 실행 흐름
 
-Trinity Chimery는 다음 층으로 구성됩니다.
-
-- `front/` - 대시보드와 사용자 인터페이스
-- `api/` - FastAPI 기반 실행/오케스트레이션 계층
-- `ai_trading/agents/` - 에이전트 오케스트레이션, LLM, 트리거, ID 정의
-- `ai_trading/core/` - 전략 검증, 백테스트, 공용 전략 인터페이스
-- `docs/` - 계획, 상태, 세션 체크포인트, 연구 기록
-
-현재는 `ai_trading/agents/`가 에이전트 로직의 canonical 위치이고, `api/services/`는 호환 래퍼와 인프라 코드가 남아 있는 형태입니다.
-
----
-
-## 5. 현재 실행 흐름
-
-### 5.1 기본 흐름
+### 2.1 기본 실행 순서
 
 ```text
 사용자/프론트엔드
   -> FastAPI /api 엔드포인트
-  -> ai_trading.agents.EvolutionOrchestrator
+  -> server.ai_trading.agents.EvolutionOrchestrator
   -> EvolutionLLMClient
-  -> ai_trading.core.StrategyLoader / BacktestManager
+  -> server.ai_trading.core.StrategyLoader / BacktestManager
   -> Supabase 저장소
   -> 결과가 다시 프론트엔드로 노출
 ```
 
-### 5.2 실제 서버 구성
+### 2.2 실제 서버 구성
 
-- `./run front` - Next.js 개발 서버 실행
-- `./run api` - FastAPI 서버 실행
-- `./trn` - tmux 세션으로 `front`, `api`, `ai_trading` 작업 창을 동시에 띄움
+- `./run client` - Next.js 개발 서버 실행
+- `./run server` - FastAPI 서버 실행
+- `./trn` - tmux 세션으로 `client`, `server`, `trading` 작업 창을 동시에 띄움
 
 ---
 
-## 6. 에이전트 모델
+## 3. 에이전트 모델
 
-### 6.1 논리적 에이전트 4개
+### 3.1 논리적 에이전트 4개
 
 프로젝트는 아래 4개의 논리적 에이전트 ID를 사용합니다.
 
@@ -152,45 +74,54 @@ Trinity Chimery는 다음 층으로 구성됩니다.
 - `macro_trader`
 - `chaos_agent`
 
-이들은 개별 프로세스가 아니라, 하나의 중앙 오케스트레이터가 다루는 전략 페르소나입니다.
+이들은 현재 개별 프로세스가 아니라, 하나의 중앙 오케스트레이터가 다루는 전략 페르소나입니다.
 
-### 6.2 에이전트가 실제로 하는 일
+### 3.2 에이전트 식별 기준
+
+이전에는 프론트엔드 표시명과 백엔드 `agent_id`를 연결하는 매핑이 있었지만, 지금은 그 계층을 제거했습니다.
+
+- 백엔드와 프론트엔드는 공통으로 `agent_id`를 사용합니다.
+- UI의 일부 예시 텍스트만 사람이 읽기 쉬운 이름을 유지할 수 있지만, 데이터 경로에는 이름 변환이 없습니다.
+
+따라서 에이전트 식별의 기준은 항상 `agent_id`입니다.
+
+### 3.3 에이전트가 실제로 하는 일
 
 에이전트는 별도 서버가 아니라 다음 역할을 수행합니다.
 
-- 현재 전략 코드와 메트릭을 받는다
-- LLM 컨텍스트를 구성한다
-- 새 전략 코드를 생성한다
-- `StrategyLoader`로 검증한다
-- `BacktestManager`로 성능을 재평가한다
-- 통과하면 Supabase에 버전 저장한다
+- 현재 전략 코드와 메트릭을 받아서
+- LLM 컨텍스트를 구성하고
+- 새 전략 코드를 생성하고
+- `StrategyLoader`로 검증하고
+- `BacktestManager`로 성능을 재평가하고
+- 통과하면 Supabase에 버전 저장
 
 즉, “에이전트 = 실행 중인 독립 프로세스”가 아니라 “전략 진화 대상 + 진화 로직”에 가깝습니다.
 
 ---
 
-## 7. Canonical 코드 위치
+## 4. Canonical 코드 위치
 
-### 7.1 에이전트 계층
+### 4.1 에이전트 계층
 
-`ai_trading/agents/`가 현재 canonical 위치입니다.
+`server/ai_trading/agents/`가 현재 canonical 위치입니다.
 
 - `constants.py` - 에이전트 ID 정의
 - `trigger.py` - regime shift, performance decay, competitive pressure, heartbeat 판단
 - `llm_client.py` - C-mode 컨텍스트 조립 및 LLM 코드 생성
 - `orchestrator.py` - 진화 상태 머신과 저장/검증/커밋 흐름
 
-### 7.2 공용 전략 계층
+### 4.2 공용 전략 계층
 
-`ai_trading/core/`는 전략 실행과 검증의 기반입니다.
+`server/ai_trading/core/`는 전략 실행과 검증의 기반입니다.
 
 - `strategy_interface.py` - 모든 전략이 구현해야 하는 인터페이스
 - `strategy_loader.py` - AST 기반 안전성 검증과 동적 로딩
 - `backtest_manager.py` - IS/OOS 분리, 백테스트, Trinity Score 계산
 
-### 7.3 API 계층
+### 4.3 API 계층
 
-`api/`는 외부 진입점과 저장소 연결을 담당합니다.
+`server/api/`는 외부 진입점과 저장소 연결을 담당합니다.
 
 - `main.py` - FastAPI 앱, 스케줄러, 엔드포인트
 - `services/supabase_client.py` - Supabase 읽기/쓰기
@@ -198,143 +129,152 @@ Trinity Chimery는 다음 층으로 구성됩니다.
 
 ---
 
-## 8. 전략 발견 파이프라인
+## 5. 핵심 루프
 
-### 8.1 아이디어 수집
+```text
+시장 데이터 + 현재 전략
+  -> 트리거 판정
+  -> LLM이 C-mode 컨텍스트를 보고 새 코드 생성
+  -> 코드 안전성 검사
+  -> 백테스트 실행
+  -> IS/OOS 또는 성과 게이트 통과 여부 확인
+  -> Supabase에 전략 버전/백테스트/로그 저장
+  -> 상태를 IDLE로 복귀
+```
 
-전략 아이디어는 다음에서 나옵니다.
+### 5.1 스케줄 기반 흐름
 
-- 현재 전략의 약점
+`server/api/main.py`의 `scheduled_evolution_poll()`는 매 시간 4개 에이전트 ID를 순회합니다.
+
+하지만 현재 구현에서는 `force_trigger=False`일 때 내부 트리거가 사실상 비활성이라, 이 스케줄러는 “주기적으로 확인하는 틀”에 가깝습니다.
+
+### 5.2 수동 진화 흐름
+
+`POST /api/agents/{agent_id}/evolve`
+
+- 특정 에이전트에 대해 진화 사이클을 강제로 시작
+- 백그라운드 작업으로 진화 오케스트레이터 실행
+
+### 5.3 자가 개선 요청 흐름
+
+`POST /api/agents/{agent_id}/improve`
+
+- 프론트엔드에서 개선 요청을 보내면
+- `SelfImprovementService`가 `EvolutionOrchestrator`를 `force_trigger=True`로 호출
+- 비동기 진화 사이클이 시작됩니다
+
+---
+
+## 6. LLM 전략 생성 방식
+
+### 6.1 모드 1 - 파라미터 조정
+
+초기 단계에서는 기존 전략 템플릿 안에서 수치만 조정하는 방식입니다.
+
+### 6.2 모드 2 - 자유 생성
+
+목표 단계에서는 LLM이 전략의 구조 자체를 코드로 생성합니다.
+
+구현 방식은 다음과 같습니다.
+
+- 동적 Python 코드 생성
+- `StrategyLoader.validate_code()`로 AST 검증
+- `StrategyLoader.load_strategy()`로 동적 인스턴스화
+- `execute_with_timeout()`으로 실행 시간 제한
+
+### 6.3 C-mode 컨텍스트
+
+`EvolutionLLMClient`는 다음 정보를 묶어서 LLM 프롬프트를 만듭니다.
+
+- 현재 전략 코드
+- Trinity Score, Return, Sharpe, MDD
 - 손실 구간 로그
-- 시장 국면 변화
-- 경쟁 에이전트와의 상대 비교
-- 성과 하락 추세
+- 과거 진화 이력
+- 경쟁 순위
+- 시장 국면과 변동성
 
-### 8.2 후보 생성
-
-`EvolutionLLMClient`가 C-mode 프롬프트를 바탕으로 새 코드를 제안합니다.
-
-### 8.3 정적 검증
-
-생성된 코드는 먼저 안전성과 구문을 검사합니다.
-
-- 금지 import 검사
-- AST 기반 검증
-- 전략 인터페이스 호환성 확인
-
-### 8.4 백테스트와 게이트
-
-검증을 통과한 후보는 백테스트에 들어갑니다.
-
-- IS와 OOS를 분리해서 봅니다
-- Trinity Score를 함께 계산합니다
-- OOS 기준으로 최종 판정을 내립니다
-
-### 8.5 저장과 승격
-
-통과한 전략만 저장하고 다음 후보 탐색으로 넘어갑니다.
-
-- 전략 버전 저장
-- 백테스트 결과 저장
-- 개선 로그 저장
-- 필요하면 프론트로 노출
+현재 구현은 이 구조를 기준으로 프롬프트를 만들고, LLM 서비스가 없으면 mock 전략 코드를 반환합니다.
 
 ---
 
-## 9. Claude와 Codex의 협업 방식
+## 7. Trinity Score
 
-### 9.1 Claude가 잘하는 일
+현재 코드는 다음 공식을 사용합니다.
 
-Claude는 다음 작업에 적합합니다.
+```text
+Trinity Score = Return × 0.40 + Sharpe × 25 × 0.35 + (1 + MDD) × 100 × 0.25
+```
 
-- 구조 설계
-- 아이디어 비교
-- 프롬프트/정책 문안 작성
-- 리스크 분석
-- 문서 리뷰
-- 여러 설계안의 장단점 비교
-
-### 9.2 Codex가 잘하는 일
-
-Codex는 다음 작업에 적합합니다.
-
-- 실제 코드 수정
-- 리팩토링
-- 테스트 실행
-- 경로 정리
-- 문서와 코드 동기화
-- 반복적인 검증과 수리
-
-### 9.3 협업 규칙
-
-함께 개선할 때는 다음 순서를 지킵니다.
-
-1. Claude 또는 Codex가 문제를 정리한다
-2. 짧은 계획을 문서로 만든다
-3. 사람이 승인한다
-4. Codex가 구현한다
-5. 검증한다
-6. 문서를 갱신한다
-7. 세션 체크포인트를 남긴다
-
-이 프로젝트에서는 “생각과 구현을 섞어서 바로 치는 방식”보다, “짧게 합의하고 확실히 고치는 방식”이 우선입니다.
+실제로는 백엔드와 프론트엔드에서 같은 공식을 공유하도록 맞춰져 있습니다.
 
 ---
 
-## 10. 검증 기준
+## 8. 저장소와 메트릭
 
-### 10.1 코드 검증
+### 8.1 Supabase 역할
 
-다음은 최소 검증 항목입니다.
+Supabase는 다음을 저장합니다.
 
-- import 에러 없음
-- 문법 에러 없음
-- lint에서 에러 없음
-- diff에 불필요한 공백 문제 없음
-- 실행 경로가 실제 파일 구조와 일치함
+- 전략 버전
+- 백테스트 결과
+- 개선 로그
+- 에이전트 현재 전략 참조
 
-### 10.2 전략 검증
+### 8.2 현재 저장 계층 분리
 
-전략은 아래 기준을 통과해야 합니다.
+- `SupabaseManager`는 `server/api/services/supabase_client.py`에 유지
+- 에이전트 진화 로직은 `server/ai_trading/agents/orchestrator.py`에 유지
+- API는 둘 사이의 연결점 역할
 
-- OOS에서 의미 있는 성과가 있어야 함
-- 과최적화 징후가 너무 강하면 탈락
-- 거래비용을 포함해도 성과가 유지되어야 함
-- 변동성/횡보/추세 국면을 나눠 봐도 설명 가능해야 함
+### 8.3 로깅 상태
 
-### 10.3 운영 검증
+현재 백엔드는 `logging.basicConfig(level=logging.INFO)`를 사용합니다.
 
-운영상 문제가 없어야 합니다.
+즉, 로그는 기본적으로 프로세스 stdout/stderr로 나가고, `logs/evolution.log`에 자동으로 쓰는 별도 파일 핸들러는 아직 없습니다.
 
-- 환경변수 누락으로 부팅이 죽지 않아야 함
-- 포트 충돌이 나면 중복 실행을 막아야 함
-- tmux 세션은 재진입 가능한 구조여야 함
-- 문서는 실제 파일 구조와 일치해야 함
+그래서 `trn`의 `trading` 창에서 tail 하는 파일은 “로그 파일이 생기면 보여주는 감시창”이고, 실제 파일이 없으면 `Waiting for logs...`가 보이는 것이 정상입니다.
 
 ---
 
-## 11. 문서화 규칙
+## 9. 디렉터리 구조
 
-### 11.1 문서가 먼저다
+```text
+trinity-chimery/
+├── run                # 단일 서비스 실행 스크립트
+├── trn                # tmux 기반 통합 실행 스크립트
+├── client/          # Next.js 프론트엔드
+├── server/           # 백엔드 코드 모음
+│   ├── api/           # FastAPI API 레이어
+│   ├── ai_trading/    # 트레이딩 엔진, 에이전트, 백테스트
+│   │   ├── core/      # 전략 인터페이스, 로더, 백테스트 매니저
+│   │   ├── agents/    # 에이전트 오케스트레이터, LLM, 트리거, 매핑
+│   │   ├── rl/        # 강화학습 실험 코드
+│   │   ├── freqai/    # FreqAI 관련 실험/데이터
+│   │   └── tests/     # 전략/통합/샌드박스 테스트
+│   └── tests/         # API/오케스트레이션 단위 테스트
+└── docs/              # 계획, 상태, 세션 체크포인트
+```
 
-코드를 바꾸면 문서도 같이 바꿉니다.
+---
 
-- `PROJECT.md` - 전체 운영 기준
-- `docs/superpowers/progress/current-state.md` - 현재 상태
-- `docs/superpowers/progress/session-checkpoint-YYYY-MM-DD.md` - 세션 체크포인트
-- `ai_trading/research.md` - 조사 결과와 구조 해설
+## 10. 실행 및 인프라
 
-### 11.2 무엇을 기록하나
+- **Database**: Supabase (PostgreSQL)
+- **Scheduler**: APScheduler
+- **Frontend**: Next.js
+- **Backend**: FastAPI
+- **전략 실행**: `StrategyLoader` + `BacktestManager`
+- **통합 실행**: `./trn`
 
-- 왜 바꿨는지
-- 무엇이 canonical인지
-- 어떤 파일이 호환용인지
-- 어떤 검증을 통과했는지
-- 다음에 무엇을 해야 하는지
+---
 
-### 11.3 기록의 목적
+## 11. 설계 결정
 
-이 문서는 단순한 설명서가 아니라 다음 세션에서 바로 다시 시작할 수 있게 만드는 장치입니다.
+- **ADR-001**: 전략 생성은 템플릿 기반에서 자유 생성으로 점진 확장
+- **ADR-002**: LLM 입력은 백테스트 결과와 실시간 시장 데이터의 조합
+- **ADR-003**: Trinity Score를 최적화 목표 지표로 사용
+- **ADR-006**: IS/OOS 분리와 보수적 비용 모델로 과적합 완화
+- **ADR-007**: 전략 이력과 메트릭은 Supabase에 경량 저장
 
 ---
 
@@ -342,59 +282,14 @@ Codex는 다음 작업에 적합합니다.
 
 이 프로젝트에서 “에이전트”라는 말은 두 가지 의미를 가집니다.
 
-- 첫 번째는 논리적 전략 ID입니다
-- 두 번째는 그 ID를 진화시키는 코드와 루프입니다
+1. UI/설계 관점의 에이전트
+   - 4개의 페르소나
+   - 전략 스타일과 성향을 대표
 
-그리고 현재는 두 번째 의미가 실제 구현의 중심입니다.
+2. 코드 관점의 에이전트
+   - `server/ai_trading/agents/` 안의 오케스트레이터/LLM/트리거 로직
+   - `server/api/main.py`가 주기적으로 혹은 수동으로 호출하는 진화 대상
 
-즉, 이 프로젝트의 핵심은 “페르소나 이름”이 아니라 “전략을 어떻게 빠르고 안정적으로 개선하느냐”입니다.
+현재 코드는 1번의 개념을 2번의 로직으로 구현하는 구조입니다.
 
----
-
-## 13. 단기 로드맵
-
-### 13.1 바로 해야 할 것
-
-- 평가 지표 우선순위를 더 명확히 고정
-- 후보 전략의 기록 포맷 통일
-- 백테스트와 OOS 게이트를 더 엄격하게 정리
-- 자주 깨지는 실행 경로를 줄이기
-
-### 13.2 다음에 해야 할 것
-
-- 전략 개선 이력의 검색성과 비교 기능 강화
-- 국면별 성과 리포트 강화
-- 더 빠른 후보 생성과 더 강한 필터링의 균형 찾기
-- 사람이 읽기 쉬운 운영 대시보드 정리
-
-### 13.3 장기 목표
-
-- 단기 백테스트 승자가 아니라 장기 OOS 생존자가 남는 시스템
-- 자동으로 후보를 만들되, 무의미한 후보는 빠르게 버리는 시스템
-- 사람이 개입할 때도 추적 가능한 시스템
-
----
-
-## 14. 디렉터리 구조
-
-```text
-trinity-chimery/
-├── run                # 단일 서비스 실행 스크립트
-├── trn                # tmux 기반 통합 실행 스크립트
-├── front/             # Next.js 프론트엔드
-├── api/               # FastAPI API 레이어
-├── ai_trading/        # 트레이딩 엔진, 에이전트, 백테스트
-│   ├── core/          # 전략 인터페이스, 로더, 백테스트 매니저
-│   ├── agents/        # 에이전트 오케스트레이터, LLM, 트리거, ID 정의
-│   ├── rl/            # 강화학습 실험 코드
-│   ├── battle/        # 향후 에이전트 경쟁/포트폴리오 관리
-│   ├── freqai/        # FreqAI 관련 실험/데이터
-│   └── tests/         # 전략/통합/샌드박스 테스트
-└── docs/              # 계획, 상태, 세션 체크포인트, 연구 기록
-```
-
----
-
-## 15. 마지막 한 줄
-
-이 프로젝트는 “전략을 잘 만드는 코드”가 아니라 “좋은 전략을 빨리, 반복적으로, 검증 가능하게 찾는 운영 체계”가 되어야 합니다.
+즉, “4개의 독립 AI”가 있는 것이 아니라, 하나의 오케스트레이션 계층이 4개의 전략 페르소나를 관리하는 형태입니다.

@@ -5,7 +5,10 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "Skill(update-config)"
+      "Skill(update-config)",
+      "Bash(tmux send-keys:*)",
+      "Bash(tmux capture-pane:*)",
+      "Bash(tmux list-panes:*)"
     ],
     "tools": "dontAsk",
     "commands": "dontAsk",

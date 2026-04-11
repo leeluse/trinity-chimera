@@ -1,0 +1,89 @@
+#!/bin/bash
+
+# ==============================================================================
+# Trinity Chimera Project - Robust Management Script (trn)
+# 현재 저장소 구조(client/server/ai_trading) 기준 tmux 실행기
+# ==============================================================================
+
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SESSION_NAME="trinity"
+VENV_PATH="$PROJECT_ROOT/venv/bin/activate"
+SERVER_PYTHONPATH="$PROJECT_ROOT"
+TMUX_SHELL="zsh -f"
+
+COMMAND=$1
+WINDOW_NAME_PATTERN='#{window_name}'
+
+# --- 명령어 처리 (Kill) ---
+if [ "$COMMAND" == "kill" ]; then
+    echo "💀 Deleting session: $SESSION_NAME"
+    tmux kill-session -t "$SESSION_NAME" 2>/dev/null
+    exit 0
+fi
+
+# --- 명령어 처리 (Stop) ---
+if [ "$COMMAND" == "stop" ]; then
+    echo "🛑 Stopping servers in $SESSION_NAME (Safe Mode)..."
+
+    if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+        echo "ℹ️ No active session named $SESSION_NAME."
+        exit 0
+    fi
+
+    # 각 서비스 창의 첫 번째 패인(실행 패인)에 Ctrl+C 전송
+    tmux list-windows -t "$SESSION_NAME" -F "$WINDOW_NAME_PATTERN" | while read win; do
+        case "$win" in
+            client|server|trading|front|api|ai_trading)
+                TARGET_PANE=$(tmux list-panes -t "$SESSION_NAME:$win" -F '#{pane_id}' | head -n 1)
+                if [ -n "$TARGET_PANE" ]; then
+                    tmux send-keys -t "$TARGET_PANE" C-c
+                fi
+                ;;
+        esac
+    done
+    echo "✅ Servers stopped."
+    exit 0
+fi
+
+# --- 세션 생성/접속 로직 ---
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    tmux attach-session -t "$SESSION_NAME"
+    exit 0
+fi
+
+echo "🚀 Starting new Trinity session: $SESSION_NAME (Robust Mode)"
+
+# 1. 윈도우: code
+tmux new-session -d -s "$SESSION_NAME" -n 'code' -c "$PROJECT_ROOT" "$TMUX_SHELL"
+tmux send-keys -t "$SESSION_NAME:code" "clear" C-m
+tmux send-keys -t "$SESSION_NAME:code" "echo 'Workspace ready: $PROJECT_ROOT'" C-m
+
+# 2. 윈도우: client (2분할)
+tmux new-window -t "$SESSION_NAME" -n 'client' -c "$PROJECT_ROOT" "$TMUX_SHELL"
+tmux split-window -h -p 50 -t "$SESSION_NAME:client" -c "$PROJECT_ROOT" "$TMUX_SHELL"
+CLIENT_PANES=($(tmux list-panes -t "$SESSION_NAME:client" -F '#{pane_id}'))
+tmux send-keys -t "${CLIENT_PANES[0]}" "$PROJECT_ROOT/run client" C-m
+tmux send-keys -t "${CLIENT_PANES[1]}" "clear" C-m
+tmux send-keys -t "${CLIENT_PANES[1]}" "printf 'Client workspace ready\n'" C-m
+
+# 3. 윈도우: server (2분할)
+tmux new-window -t "$SESSION_NAME" -n 'server' -c "$PROJECT_ROOT" "$TMUX_SHELL"
+tmux split-window -h -p 50 -t "$SESSION_NAME:server" -c "$PROJECT_ROOT" "$TMUX_SHELL"
+SERVER_PANES=($(tmux list-panes -t "$SESSION_NAME:server" -F '#{pane_id}'))
+tmux send-keys -t "${SERVER_PANES[0]}" "PYTHONPATH=$SERVER_PYTHONPATH $PROJECT_ROOT/run server" C-m
+tmux send-keys -t "${SERVER_PANES[1]}" "source $VENV_PATH && clear" C-m
+tmux send-keys -t "${SERVER_PANES[1]}" "printf 'Server workspace ready\n'" C-m
+
+# 4. 윈도우: trading (2분할)
+tmux new-window -t "$SESSION_NAME" -n 'trading' -c "$PROJECT_ROOT/server/ai_trading" "$TMUX_SHELL"
+tmux split-window -h -p 35 -t "$SESSION_NAME:trading" -c "$PROJECT_ROOT/server/ai_trading" "$TMUX_SHELL"
+AI_PANES=($(tmux list-panes -t "$SESSION_NAME:trading" -F '#{pane_id}'))
+tmux send-keys -t "${AI_PANES[0]}" "source $VENV_PATH && clear" C-m
+tmux send-keys -t "${AI_PANES[0]}" "printf 'ai_trading workspace ready\n'" C-m
+tmux send-keys -t "${AI_PANES[1]}" "clear" C-m
+tmux send-keys -t "${AI_PANES[1]}" "printf 'Logs: %s\n' \"$PROJECT_ROOT/logs/evolution.log\"" C-m
+tmux send-keys -t "${AI_PANES[1]}" "if [ -f \"$PROJECT_ROOT/logs/evolution.log\" ]; then tail -f \"$PROJECT_ROOT/logs/evolution.log\"; else printf 'Waiting for logs...\\n'; fi" C-m
+
+# 마지막 정리: 메인으로 이동
+tmux select-window -t "$SESSION_NAME:code"
+tmux attach-session -t "$SESSION_NAME"

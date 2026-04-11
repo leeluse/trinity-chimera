@@ -2,29 +2,54 @@
 
 # Trinity Project Runner
 
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 COMMAND=$1
 
+is_port_listening() {
+  local port="$1"
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+show_port_owner() {
+  local port="$1"
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sed -n '2,$p'
+}
+
 case $COMMAND in
-  "front")
-    echo "🚀 Starting Trinity Frontend (Next.js)..."
-    cd front && npm run dev
-    ;;
-  "slack")
-    echo "🤖 Starting Slack Agent..."
-    if [ -d "venv" ]; then
-      source venv/bin/activate
+  "client"|"front")
+    if is_port_listening 3000; then
+      echo "ℹ️ Client is already running on port 3000."
+      show_port_owner 3000
+      exit 0
     fi
-    python slack-on.py
+    echo "🚀 Starting Trinity Client (Next.js)..."
+    cd "$PROJECT_ROOT/client" && npm run dev
     ;;
-  "api")
-    echo "⚙️ Starting FastAPI Backend..."
-    cd api && python main.py
+  # "slack")
+  #   echo "🤖 Starting Slack Agent..."
+  #   if [ -d "$PROJECT_ROOT/venv" ]; then
+  #     source "$PROJECT_ROOT/venv/bin/activate"
+  #   fi
+  #   if [ ! -f "$PROJECT_ROOT/slack-on.py" ]; then
+  #     echo "❌ slack-on.py not found at project root."
+  #     exit 1
+  #   fi
+  #   python "$PROJECT_ROOT/slack-on.py"
+  #   ;;
+  "server"|"api")
+    if is_port_listening 8000; then
+      echo "ℹ️ server is already running on port 8000."
+      show_port_owner 8000
+      exit 0
+    fi
+    echo "⚙️ Starting FastAPI server..."
+    cd "$PROJECT_ROOT/server/api" && source "$PROJECT_ROOT/venv/bin/activate" && set -a && [ -f "$PROJECT_ROOT/.env" ] && source "$PROJECT_ROOT/.env" && set +a && PYTHONPATH="$PROJECT_ROOT" python -m server.api.main
     ;;
   *)
-    echo "Usage: ./run [front|slack|api]"
-    echo "  front: Start the Next.js dashboard"
+    echo "Usage: ./run [client|server|slack]"
+    echo "  client: Start the Next.js dashboard (alias: front)"
     echo "  slack: Start the Slack AI agent"
-    echo "  api:   Start the FastAPI backend server"
+    echo "  server: Start the FastAPI server (alias: api)"
     exit 1
     ;;
 esac

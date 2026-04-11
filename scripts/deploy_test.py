@@ -3,8 +3,8 @@
 Trinity Production Deployment Test Script
 
 This script validates that the system is ready for production deployment by:
-1. Testing backend server health and API endpoints
-2. Verifying frontend build process
+1. Testing server server health and API endpoints
+2. Verifying client build process
 3. Performing actual API call verification
 4. Checking environment configurations
 5. Validating Supabase connectivity
@@ -27,7 +27,7 @@ sys.path.insert(0, str(project_root))
 class DeploymentTester:
     def __init__(self):
         self.test_results = []
-        self.backend_url = "http://localhost:8000"
+        self.server_url = "http://localhost:8000"
         self.supabase_url = "https://stoigfjmmjetkphbpcis.supabase.co"
         self.start_time = datetime.now()
 
@@ -74,12 +74,12 @@ class DeploymentTester:
         else:
             self.log_test(test_name, "PASS", "All required variables present")
 
-    def test_backend_server(self):
-        """Test if backend API server is responsive"""
+    def test_server_server(self):
+        """Test if server API server is responsive"""
         test_name = "Backend Server"
 
         try:
-            response = requests.get(f"{self.backend_url}/docs", timeout=10)
+            response = requests.get(f"{self.server_url}/docs", timeout=10)
             if response.status_code == 200:
                 self.log_test(test_name, "PASS", "Backend server responsive")
             else:
@@ -99,7 +99,7 @@ class DeploymentTester:
         all_passed = True
         for endpoint, description in endpoints_to_test:
             try:
-                response = requests.get(f"{self.backend_url}{endpoint}", timeout=10)
+                response = requests.get(f"{self.server_url}{endpoint}", timeout=10)
                 if response.status_code in [200, 401]:  # 401 is OK (auth required)
                     self.log_test(f"{test_name} - {description}", "PASS", "Endpoint responsive")
                 else:
@@ -142,21 +142,21 @@ class DeploymentTester:
         except Exception as e:
             self.log_test(test_name, "FAIL", f"Supabase test failed: {str(e)}")
 
-    def test_frontend_build(self):
-        """Test if frontend can be built successfully"""
+    def test_client_build(self):
+        """Test if client can be built successfully"""
         test_name = "Frontend Build"
 
         try:
-            # Check if frontend directory exists
-            frontend_dir = project_root / "front"
-            if not frontend_dir.exists():
+            # Check if client directory exists
+            client_dir = project_root / "client"
+            if not client_dir.exists():
                 self.log_test(test_name, "FAIL", "Frontend directory not found")
                 return
 
             # Test npm install
             result = subprocess.run(
                 ["npm", "install"],
-                cwd=str(frontend_dir),
+                cwd=str(client_dir),
                 capture_output=True,
                 text=True,
                 timeout=120
@@ -169,7 +169,7 @@ class DeploymentTester:
             # Test build
             result = subprocess.run(
                 ["npm", "run", "build"],
-                cwd=str(frontend_dir),
+                cwd=str(client_dir),
                 capture_output=True,
                 text=True,
                 timeout=300
@@ -188,9 +188,9 @@ class DeploymentTester:
         test_name = "Integration Tests"
 
         try:
-            # Run backend integration tests
+            # Run server integration tests
             result = subprocess.run(
-                ["python", "-m", "pytest", "ai_trading/tests/test_integration.py", "-v"],
+                ["python", "-m", "pytest", "server/ai_trading/tests/test_integration.py", "-v"],
                 cwd=str(project_root),
                 capture_output=True,
                 text=True,
@@ -244,10 +244,10 @@ class DeploymentTester:
 
         # Run tests in order
         self.test_environment_variables()
-        self.test_backend_server()
+        self.test_server_server()
         self.test_api_endpoints()
         self.test_supabase_connectivity()
-        self.test_frontend_build()
+        self.test_client_build()
         self.test_integration_tests()
 
         print("\n" + "="*60)

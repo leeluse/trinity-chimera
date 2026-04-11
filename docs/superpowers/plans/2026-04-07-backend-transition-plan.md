@@ -17,11 +17,11 @@
 ## Phase 1: Supabase Infrastructure & Data Layer
 **Goal:** Establish the source of truth for agents and their evolutionary history.
 
-### Task 1: Supabase Schema Initialization
+### Task 1: Supabase Schema Initialization ✅ COMPLETED
 **Files:**
 - Create: `docs/superpowers/plans/supabase_schema.sql`
 
-- [ ] **Step 1: Define SQL Schema**
+- [x] **Step 1: Define SQL Schema**
 Create a SQL file with the following tables:
 - `agents`: id (UUID), name, persona, current_strategy_id (FK), status, last_evolution_at.
 - `strategies`: id (UUID), agent_id (FK), version, code (text), params (jsonb), rationale, created_at.
@@ -33,11 +33,11 @@ git add docs/superpowers/plans/supabase_schema.sql
 git commit -m "docs: define supabase schema for trinity evolution"
 ```
 
-### Task 2: Supabase Client Integration
+### Task 2: Supabase Client Integration ✅ COMPLETED
 **Files:**
 - Create: `api/services/supabase_client.py`
 
-- [ ] **Step 1: Implement Supabase Client**
+- [x] **Step 1: Implement Supabase Client**
 ```python
 from supabase import create_client, Client
 import os
@@ -58,20 +58,20 @@ class SupabaseManager:
         # Insert into backtest_results
         pass
 ```
-- [ ] **Step 2: Verify connection with a simple test script**
-- [ ] **Step 3: Commit**
+- [x] **Step 2: Verify connection with a simple test script**
+- [x] **Step 3: Commit**
 
 ---
 
-## Phase 2: Dynamic Strategy Sandbox (B-Mode)
+## Phase 2: Dynamic Strategy Sandbox (B-Mode) ✅ COMPLETED
 **Goal:** Safely execute LLM-generated Python code without compromising the server.
 
-### Task 3: Strategy Interface & Loader
+### Task 3: Strategy Interface & Loader ✅ COMPLETED
 **Files:**
 - Create: `ai_trading/core/strategy_interface.py`
 - Create: `ai_trading/core/strategy_loader.py`
 
-- [ ] **Step 1: Define StrategyInterface**
+- [x] **Step 1: Define StrategyInterface**
 ```python
 from abc import ABC, abstractmethod
 
@@ -84,7 +84,7 @@ class StrategyInterface(ABC):
     def get_params(self) -> dict:
         pass
 ```
-- [ ] **Step 2: Implement AST-based Validator**
+- [x] **Step 2: Implement AST-based Validator**
 In `StrategyLoader`, implement a method to check for forbidden imports/calls:
 ```python
 import ast
@@ -99,28 +99,28 @@ def validate_code(code: str):
         if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'open':
             raise SecurityError("Open call forbidden")
 ```
-- [ ] **Step 3: Implement Dynamic Loader with Timeout**
+- [x] **Step 3: Implement Dynamic Loader with Timeout**
 Use `multiprocessing` to wrap the `exec()` call of the generated code to prevent infinite loops.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ---
 
-## Phase 3: Robust Backtesting Engine
+## Phase 3: Robust Backtesting Engine ✅ COMPLETED
 **Goal:** Implement anti-overfitting and realistic cost models.
 
-### Task 4: In-Sample/Out-of-Sample Splitter
+### Task 4: In-Sample/Out-of-Sample Splitter ✅ COMPLETED
 **Files:**
-- Modify: `ai_trading/core/triple_barrier.py` (or create new `backtest_manager.py`)
+- Modify: `ai_trading/core/backtest_manager.py`
 
-- [ ] **Step 1: Implement Data Splitter**
+- [x] **Step 1: Implement Data Splitter**
 Divide the recent 60-day window into:
 - Train (In-Sample): First 30 days.
 - Validation (Out-of-Sample): Last 30 days.
-- [ ] **Step 2: Implement Validation Gate**
+- [x] **Step 2: Implement Validation Gate**
 Logic: `if (oos_score << is is_score * 0.7): return REJECT` (Prevent overfitting).
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
-### Task 5: Conservative Cost Model
+### Task 5: Conservative Cost Model ⏳ PENDING (Tests)
 **Files:**
 - Modify: `ai_trading/rl/trading_env.py` (apply similar logic to backtester)
 
@@ -133,23 +133,23 @@ Add a constant fee (e.g., 0.05% per trade) and a random slippage factor (0.01% t
 ## Phase 4: Autonomous Evolution Orchestrator
 **Goal:** Build the background loop that drives the evolution.
 
-### Task 6: Loop State Machine & Scheduler
+### Task 6: Loop State Machine & Scheduler ✅ COMPLETED
 **Files:**
 - Create: `api/services/evolution_orchestrator.py`
 
-- [ ] **Step 1: Implement State Machine**
+- [x] **Step 1: Implement State Machine**
 Define states: `TRIGGERED` $\rightarrow$ `GENERATING` $\rightarrow$ `VALIDATING` $\rightarrow$ `COMMITTING`.
-- [ ] **Step 2: Integrate LLM Generation Loop**
+- [x] **Step 2: Integrate LLM Generation Loop**
 Call LLM with: [Current Code + Backtest Results + Market Regime].
-- [ ] **Step 3: Integrate Backtest & Commit**
+- [x] **Step 3: Integrate Backtest & Commit**
 Run the sandbox $\rightarrow$ Calculate Trinity Score $\rightarrow$ Update Supabase if score improved.
-- [ ] **Step 4: Setup APScheduler**
+- [x] **Step 4: Setup APScheduler**
 Configure the loop to run every 14 days per agent.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ---
 
-## Phase 5: API & Frontend Integration
+## Phase 5: API & Frontend Integration ⏳ PENDING
 **Goal:** Replace mock endpoints with real Supabase data.
 
 ### Task 7: API Endpoint Transition
