@@ -1,5 +1,5 @@
 node_modules
-docs
+# docs (Whitelisted below)
 venv
 .agents
 .claude
@@ -9,12 +9,13 @@ __pycache__
 CLAUDE.md
 AGENTS.md
 __init__.py
-docs
-logs
-reaserch.md
+# Keep docs and team backups
 venv
 .worktrees
-tmp/
+tmp/*
+!tmp/team-backups/
+!docs/
+!docs/**
 .mcp.json
 .DS_Store
 .vscode/

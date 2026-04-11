@@ -1,0 +1,60 @@
+{
+  "name": "trinity-design-council",
+  "createdAt": 1775834635841,
+  "leadAgentId": "team-lead@trinity-design-council",
+  "leadSessionId": "2fd0eba9-5edb-48e9-983a-4d8a57c16308",
+  "members": [
+    {
+      "agentId": "team-lead@trinity-design-council",
+      "name": "team-lead",
+      "agentType": "general-purpose",
+      "model": "claude-sonnet-4-6",
+      "joinedAt": 1775834635841,
+      "tmuxPaneId": "",
+      "cwd": "/Users/lsy/Desktop/project/trinity-chimery",
+      "subscriptions": []
+    },
+    {
+      "agentId": "analyst_expert@trinity-design-council",
+      "name": "analyst_expert",
+      "agentType": "agents-crypto-trading:crypto-analyst",
+      "model": "claude-opus-4-6",
+      "prompt": "You are joining the 'trinity-design-council' team. Your goal is to review the current Trinity AI Trading System and propose improvements for data analysis, on-chain signal processing, and market research pipelines. Focus on the quality and timeliness of the data feeding into the AI's decision process.",
+      "color": "blue",
+      "planModeRequired": false,
+      "joinedAt": 1775834781545,
+      "tmuxPaneId": "%17",
+      "cwd": "/Users/lsy/Desktop/project/trinity-chimery",
+      "subscriptions": [],
+      "backendType": "tmux"
+    },
+    {
+      "agentId": "trader_expert@trinity-design-council",
+      "name": "trader_expert",
+      "agentType": "agents-crypto-trading:crypto-trader",
+      "model": "claude-opus-4-6",
+      "prompt": "You are joining the 'trinity-design-council' team. Your goal is to review the current Trinity AI Trading System and propose architectural improvements from a trading systems perspective (execution, strategy management, and risk). Please familiarize yourself with the codebase and prepare to discuss how to make the system more robust and scalable.",
+      "color": "green",
+      "planModeRequired": false,
+      "joinedAt": 1775834781842,
+      "tmuxPaneId": "%18",
+      "cwd": "/Users/lsy/Desktop/project/trinity-chimery",
+      "subscriptions": [],
+      "backendType": "tmux"
+    },
+    {
+      "agentId": "ai_expert@trinity-design-council",
+      "name": "ai_expert",
+      "agentType": "agents-data-ai:ai-engineer",
+      "model": "claude-opus-4-6",
+      "prompt": "You are joining the 'trinity-design-council' team. Your goal is to review the current Trinity AI Trading System and propose improvements for the AI orchestration, LLM-based decision making, and RAG integration. Focus on how to reduce hallucination, improve reasoning for trading, and optimize the agentic flow.",
+      "color": "yellow",
+      "planModeRequired": false,
+      "joinedAt": 1775834782164,
+      "tmuxPaneId": "%19",
+      "cwd": "/Users/lsy/Desktop/project/trinity-chimery",
+      "subscriptions": [],
+      "backendType": "tmux"
+    }
+  ]
+}
