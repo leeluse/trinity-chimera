@@ -45,11 +45,20 @@ case $COMMAND in
     echo "⚙️ Starting FastAPI server..."
     cd "$PROJECT_ROOT/server/api" && source "$PROJECT_ROOT/venv/bin/activate" && set -a && [ -f "$PROJECT_ROOT/.env" ] && source "$PROJECT_ROOT/.env" && set +a && PYTHONPATH="$PROJECT_ROOT" python -m server.api.main
     ;;
+  "test")
+    echo "🧪 Running AI Trading Tests..."
+    cd "$PROJECT_ROOT" && ./venv/bin/python -m pytest \
+      server/ai_trading/tests/test_metrics_buffer.py \
+      server/ai_trading/tests/test_integration.py \
+      server/ai_trading/tests/test_llm_client.py \
+      server/ai_trading/tests/test_costs.py \
+      server/ai_trading/tests/test_sandbox.py -v --tb=short
+    ;;
   *)
-    echo "Usage: ./run [client|server|slack]"
+    echo "Usage: ./run [client|server|test]"
     echo "  client: Start the Next.js dashboard (alias: front)"
-    echo "  slack: Start the Slack AI agent"
     echo "  server: Start the FastAPI server (alias: api)"
+    echo "  test: Run AI trading pytest suite"
     exit 1
     ;;
 esac

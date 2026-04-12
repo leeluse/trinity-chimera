@@ -59,7 +59,7 @@ class TestSandbox(unittest.TestCase):
     def test_security_block_import(self):
         with self.assertRaises(SecurityError) as cm:
             StrategyLoader.load_strategy(MALICIOUS_STRATEGY_CODE, "MaliciousStrategy")
-        self.assertIn("Forbidden module import: os", str(cm.exception))
+        self.assertIn("금지된 모듈 임포트: os", str(cm.exception))
 
     def test_security_block_open(self):
         code = """
@@ -72,7 +72,7 @@ class OpenStrategy(StrategyInterface):
 """
         with self.assertRaises(SecurityError) as cm:
             StrategyLoader.load_strategy(code, "OpenStrategy")
-        self.assertIn("Forbidden function call: open", str(cm.exception))
+        self.assertIn("금지된 함수 호출: open", str(cm.exception))
 
     def test_timeout_termination(self):
         strategy = StrategyLoader.load_strategy(INFINITE_STRATEGY_CODE, "InfiniteStrategy")

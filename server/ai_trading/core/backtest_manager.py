@@ -121,6 +121,7 @@ class BacktestManager:
         """
         balance = 10000.0
         position = 0
+        entry_cost = 0.0  # #25: Track actual entry cost for PnL calc
         trades = []  # Track individual trade P&L
 
         prices = data['close'].values
@@ -143,7 +144,7 @@ class BacktestManager:
             elif signal == -1 and position > 0: # Sell
                 cost_price = self.apply_trading_costs(prices[i], -1)
                 sale_value = position * cost_price
-                trade_pnl = sale_value - 10000.0  # Simplified P&L
+                trade_pnl = sale_value - entry_cost  # #25: Use actual entry cost
                 trades.append(trade_pnl)
                 balance = sale_value
                 position = 0
@@ -191,8 +192,13 @@ class BacktestManager:
 
         return -max_dd  # Return negative value
 
-    def _calculate_sharpe(self, equity_curve: list) -> float:
-        """Calculate simplified Sharpe ratio from equity curve."""
+    def _calculate_sharpe(self, equity_curve: list, data_frequency: str = "daily") -> float:
+        """Calculate simplified Sharpe ratio from equity curve.
+
+        Args:
+            equity_curve: List of equity values over time
+            data_frequency: "tick", "hourly", "daily", or actual periods per year
+        """
         if len(equity_curve) < 2:
             return 0.0
 
@@ -211,8 +217,18 @@ class BacktestManager:
         if std_return == 0:
             return 0.0
 
-        # Annualized Sharpe (simplified)
-        return (mean_return / std_return) * np.sqrt(252)
+        # Annualized Sharpe based on data frequency (#23)
+        if data_frequency == "tick":
+            periods_per_year = 252 * 24 * 60  # minutes in trading year
+        elif data_frequency == "hourly":
+            periods_per_year = 252 * 24  # hourly
+        elif data_frequency == "daily":
+            periods_per_year = 252  # trading days
+        else:
+            periods_per_year = 252  # default
+
+        sharpe = (mean_return / std_return) * np.sqrt(periods_per_year)
+        return round(sharpe, 4)
 
     def validate_strategy(self, strategy: StrategyInterface, data: pd.DataFrame,
                           train_days: int = 30, val_days: int = 30,

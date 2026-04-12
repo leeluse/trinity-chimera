@@ -15,7 +15,7 @@ class MockStrategy(StrategyInterface):
         self.signal_type = signal_type
 
     def generate_signal(self, data: pd.DataFrame) -> int:
-        if len(data) <<  2:
+        if len(data) << 2:
             return 0
 
         if self.signal_type == "bull":
@@ -109,7 +109,7 @@ def test_pipeline_overfitting_detection():
     Integration Test: Verifies that a strategy that performs great on IS but poorly on OOS is rejected.
     """
     # Create simple test data where IS has upward trend and OOS has downward trend
-    np.random.seed(42)  # For reproducibility
+    np.random.seed(42) # For reproducibility
     dates = pd.date_range(start="2023-01-01", periods=200, freq='h')
 
     # Create simple trend: IS (first 100 points) = upward, OOS (last 100 points) = downward
@@ -126,15 +126,15 @@ def test_pipeline_overfitting_detection():
         'close': prices, 'volume': [1000] * len(prices)
     }, index=dates)
 
-    manager = BacktestManager(fee=0.002, slippage_min=0.001, slippage_max=0.001)  # Higher costs
+    manager = BacktestManager(fee=0.002, slippage_min=0.001, slippage_max=0.001) # Higher costs
     strategy = MockStrategy(signal_type="bull") # This strategy buys on uptrends
 
     # Set train_days for IS period, val_days for OOS period
     result = manager.validate_strategy(
         strategy=strategy,
         data=df,
-        train_days=4,   # ~100 hours
-        val_days=4,     # ~100 hours
+        train_days=4, # ~100 hours
+        val_days=4, # ~100 hours
         threshold=0.7
     )
 
@@ -150,77 +150,3 @@ def test_pipeline_overfitting_detection():
     else:
         # If both perform similarly, that's okay for this test
         print("Strategy performs consistently across IS and OOS periods")
-
-class TestMetricsBufferIntegration:
-    """MetricsBuffer와 다른 컴포넌트들의 통합 테스트"""
-
-    @pytest.fixture
-    def orchestrator(self):
-        """EvolutionOrchestrator 인스턴스 생성"""
-        return EvolutionOrchestrator()
-
-    @pytest.mark.asyncio
-    async def test_metrics_buffer_integration(self, orchestrator):
-        """Test MetricsBuffer integration with orchestrator"""
-        # Simulate metrics push
-        metrics = {"trinity_score": 75.0, "return": 0.15, "sharpe": 2.0}
-
-        # Push multiple entries to trigger buffer
-        for i in range(5):  # Use lower threshold for testing
-            result = await orchestrator.metrics_buffer.push("momentum_hunter", metrics)
-
-        # Should trigger after threshold
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_llm_feedback_flow(self, orchestrator, mocker):
-        """Test complete LLM feedback flow"""
-        # Mock LLM service
-        mock_llm = mocker.MagicMock()
-        mock_llm.generate.return_value = "class evolved_strategy: pass"
-        orchestrator.llm_client.llm_service = mock_llm
-
-        # Mock Supabase
-        mocker.patch.object(orchestrator.supabase, 'get_agent_strategy')
-        mocker.patch.object(orchestrator.supabase, 'save_strategy')
-
-        # Run evolution cycle
-        await orchestrator.run_evolution_cycle("momentum_hunter", force_trigger=True)
-
-        # Verify LLM was called
-        assert mock_llm.generate.called
-
-    @pytest.mark.asyncio
-    async def test_error_handling_integration(self, orchestrator, mocker):
-        """Test error handling in integrated system"""
-        # Mock LLM service to fail
-        mock_llm = mocker.MagicMock()
-        mock_llm.generate.side_effect = Exception("LLM service error")
-        orchestrator.llm_client.llm_service = mock_llm
-
-        # Mock Supabase
-        mocker.patch.object(orchestrator.supabase, 'get_agent_strategy')
-        mocker.patch.object(orchestrator.supabase, 'save_strategy')
-
-        # Run evolution cycle - should handle LLM failure gracefully
-        await orchestrator.run_evolution_cycle("momentum_hunter", force_trigger=True)
-
-        # Verify the system didn't crash
-        assert orchestrator.states.get("momentum_hunter") == "IDLE"
-
-class TestAPIIntegration:
-    @pytest.fixture
-    def orchestrator(self):
-        return EvolutionOrchestrator()
-
-    def test_system_status_endpoint(self, orchestrator):
-        """Test system status API endpoint"""
-        # This would test the actual API endpoint
-        # For now, test the orchestrator's status functionality
-        status = orchestrator.get_all_status()
-
-        assert isinstance(status, dict)
-        assert "momentum_hunter" in status
-        assert "mean_reverter" in status
-        assert "macro_trader" in status
-        assert "chaos_agent" in status

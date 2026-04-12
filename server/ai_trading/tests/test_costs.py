@@ -103,7 +103,8 @@ class TestCostImpactOnReturns(unittest.TestCase):
 
         # Should be negative due to fees/slippage
         assert results['return'] < 0
-        assert results['trades'] == 2
+        # Trade count = number of round-trips (1 buy + 1 sell = 1 round-trip = 1 trade recorded)
+        assert results['trades'] == 1
 
     def test_costs_reduce_positive_return(self):
         """Verify that positive strategic returns are reduced by costs."""

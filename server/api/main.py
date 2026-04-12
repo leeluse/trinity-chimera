@@ -78,6 +78,28 @@ async def serve_client():
         return FileResponse(index_path)
     return {"message": "Trinity Chimery API 서버 실행 중"}
 
+@app.get("/api/system/status")
+async def get_system_status():
+    """시스템 상태 정보 반환"""
+    orchestrator = get_evolution_orchestrator()
+
+    status = {
+        "agents": {},
+        "metrics_buffer": {},
+        "evolution_states": {}
+    }
+
+    for agent_id in AGENT_IDS:
+        buffer_stats = orchestrator.metrics_buffer.get_buffer_stats(agent_id)
+        evolution_state = orchestrator.states.get(agent_id, "IDLE")
+
+        status["agents"][agent_id] = {
+            "buffer": buffer_stats,
+            "evolution_state": evolution_state
+        }
+
+    return status
+
 if __name__ == "__main__":
     uvicorn.run(
         "server.api.main:app",
