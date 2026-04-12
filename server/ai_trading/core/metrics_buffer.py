@@ -5,11 +5,13 @@ MetricsBuffer - T-002 구현
 트리거 조건: 30분 경과 OR 30틱 누적 중 먼저 도달한 조건
 """
 
+import asyncio
 import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Callable, Any
+from inspect import iscoroutinefunction
+from typing import Dict, List, Optional, Callable, Any, Awaitable, Union
 from threading import Lock
 
 from server.ai_trading.agents.constants import AGENT_IDS
@@ -84,11 +86,11 @@ class MetricsBuffer:
     TRIGGER_DURATION_MINUTES = 30
     TRIGGER_TICK_COUNT = 30
 
-    def __init__(self, trigger_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None):
+    def __init__(self, trigger_callback: Optional[Callable[[str, Dict[str, Any]], Union[None, Awaitable[None]]]] = None):
         """
         Args:
-            trigger_callback: (agent_id, context) -> None
-                             트리거 발생 시 호출될 콜백
+            trigger_callback: (agent_id, context) -> None | Awaitable[None]
+                             트리거 발생 시 호출될 콜백 (동기/비동기 모두 지원)
         """
         self._buffers: Dict[str, BufferedMetrics] = {}
         self._trigger_callback = trigger_callback
@@ -137,15 +139,26 @@ class MetricsBuffer:
 
                 logger.info(f"Trigger fired for {agent_id}: {trigger_reason}")
 
+                # async 콜백은 백그라운드에서 실행
                 if self._trigger_callback:
-                    try:
-                        self._trigger_callback(agent_id, context)
-                    except Exception as e:
-                        logger.error(f"Trigger callback failed for {agent_id}: {e}")
+                    asyncio.create_task(self._invoke_callback(agent_id, context))
 
                 return trigger_reason
 
         return None
+
+    async def _invoke_callback(self, agent_id: str, context: Dict[str, Any]) -> None:
+        """콜백 호출 - 동기/비동기 자동 처리"""
+        if self._trigger_callback is None:
+            return
+
+        try:
+            if iscoroutinefunction(self._trigger_callback):
+                await self._trigger_callback(agent_id, context)
+            else:
+                self._trigger_callback(agent_id, context)
+        except Exception as e:
+            logger.error(f"Trigger callback failed for {agent_id}: {e}")
 
     def _check_trigger(self, agent_id: str, buffer: BufferedMetrics) -> Optional[str]:
         """
@@ -220,10 +233,7 @@ class MetricsBuffer:
             buffer.last_trigger_time = time.time()
 
             if self._trigger_callback:
-                try:
-                    self._trigger_callback(agent_id, context)
-                except Exception as e:
-                    logger.error(f"Manual trigger callback failed: {e}")
+                asyncio.create_task(self._invoke_callback(agent_id, context))
 
         return True
 

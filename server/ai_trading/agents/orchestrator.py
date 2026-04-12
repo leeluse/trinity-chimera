@@ -13,7 +13,20 @@ from .trigger import EvolutionTrigger
 try:
     from server.ai_trading.core.strategy_loader import StrategyLoader
     from server.ai_trading.core.backtest_manager import BacktestManager
+    from server.ai_trading.core.metrics_buffer import MetricsBuffer
 except ImportError:
+    class MetricsBuffer:
+        def __init__(self, trigger_callback=None):
+            self._trigger_callback = trigger_callback
+
+        async def set_callback(self, callback):
+            """Set callback - async to support both sync and async callbacks"""
+            self._trigger_callback = callback
+
+        async def push(self, agent_id: str, tick: Any) -> Optional[str]:
+            """No-op fallback push"""
+            return None
+
     class StrategyLoader:
         @staticmethod
         def load_strategy(code: str):
