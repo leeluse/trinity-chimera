@@ -1,4 +1,5 @@
-from typing import Optional
+import os
+from typing import Optional, Dict
 from datetime import datetime, timedelta
 
 
@@ -12,6 +13,17 @@ class EvolutionTrigger:
     - L3 (Competitive Pressure): Strategy is lagging behind the top performer.
     - L4 (Heartbeat): Regular periodic update.
     """
+
+    def __init__(self):
+        self._last_trigger_at: Dict[str, datetime] = {}
+
+    @staticmethod
+    def _heartbeat_minutes() -> int:
+        try:
+            minutes = int(os.getenv("EVOLUTION_HEARTBEAT_MINUTES", "60"))
+        except ValueError:
+            minutes = 60
+        return max(1, min(minutes, 24 * 60))
 
     def check_regime_shift(self, current_regime: str, prev_regime: str) -> bool:
         """L1: Return True if the market regime has changed."""
@@ -33,11 +45,31 @@ class EvolutionTrigger:
         return gap >= gap_threshold
 
     def check_heartbeat(self, last_evolution_at: Optional[datetime], days: int = 14) -> bool:
-        """L4: Return True if more than 14 days have passed since the last evolution."""
+        """Legacy day-based heartbeat helper."""
         if last_evolution_at is None:
             return True
 
         return datetime.now() - last_evolution_at >= timedelta(days=days)
+
+    async def check_trigger(self, agent_id: str) -> bool:
+        """
+        Runtime trigger used by orchestrator scheduled polling.
+        Returns True when heartbeat interval has elapsed.
+        """
+        now = datetime.utcnow()
+        interval = timedelta(minutes=self._heartbeat_minutes())
+        last_at = self._last_trigger_at.get(agent_id)
+
+        if last_at is None or (now - last_at) >= interval:
+            self._last_trigger_at[agent_id] = now
+            return True
+        return False
+
+    def mark_trigger(self, agent_id: str, when: Optional[datetime] = None) -> None:
+        self._last_trigger_at[agent_id] = when or datetime.utcnow()
+
+    def get_last_trigger_date(self, agent_id: str) -> datetime:
+        return self._last_trigger_at.get(agent_id, datetime.utcnow())
 
     def get_intensity(self, trigger_level: str) -> str:
         """

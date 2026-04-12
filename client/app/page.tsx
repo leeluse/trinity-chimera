@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import Chart from "chart.js/auto";
 import Head from "next/head";
-import { APIClient } from "../lib/api";
+import { APIClient, DashboardMetrics, DashboardProgress, EvolutionLogEvent } from "../lib/api";
 
 // Centralized Components Import
 import {
@@ -19,9 +19,8 @@ import {
 } from "@/components";
 
 // Externalized Constants/Types/Styles
-import { COLORS, NAMES, HINT_MAP } from "@/constants";
+import { COLORS, NAMES } from "@/constants";
 import { MetricKey } from "@/types";
-import { ambientGlows } from "@/styles/common";
 
 const DAYS = 96;
 const labels: string[] = [];
@@ -35,76 +34,6 @@ for (let i = 0; i < 5; i++) {
   labels.push("");
 }
 
-function simTrinityScore(retDrift: number, retNoise: number, sharpeBase: number, mddFloor: number) {
-  let cumRet = 0, peakRet = 0, mdd = 0;
-  return Array.from({ length: DAYS }).map(() => {
-    const dailyRet = retDrift + (Math.random() - 0.46) * retNoise;
-    cumRet += dailyRet;
-    peakRet = Math.max(peakRet, cumRet);
-    if (peakRet > 0) mdd = Math.min(mdd, (cumRet - peakRet) / peakRet);
-    const sharpe = sharpeBase + (Math.random() - 0.4) * 0.3;
-    const score = (cumRet * 0.40) + (sharpe * 25 * 0.35) + ((1 + Math.max(mdd, mddFloor)) * 100 * 0.25);
-    return parseFloat((100 + score).toFixed(2));
-  });
-}
-
-function simReturn(drift: number, noise: number) {
-  let v = 0;
-  return Array.from({ length: DAYS }).map(() => { v += drift + (Math.random() - 0.46) * noise; return parseFloat(v.toFixed(2)); });
-}
-
-function simSharpe(base: number, noise: number) {
-  return Array.from({ length: DAYS }).map(() => parseFloat((base + (Math.random() - 0.4) * noise).toFixed(3)));
-}
-
-const metrics = {
-  score: [
-    simTrinityScore(2.8, 4.5, 2.41, -12.3),
-    simTrinityScore(0.3, 3.2, 1.87, -8.1),
-    simTrinityScore(-0.1, 2.8, 1.23, -15.2),
-    simTrinityScore(-0.4, 4.5, -0.31, -24.7),
-    simTrinityScore(0.05, 1.2, 1.5, -30.0),
-  ],
-  return: [
-    simReturn(2.4, 5.5),
-    simReturn(0.4, 3.8),
-    simReturn(-0.1, 3.5),
-    simReturn(-0.5, 5.2),
-    simReturn(0.1, 1.5)
-  ],
-  sharpe: [
-    simSharpe(2.8, 0.8),
-    simSharpe(1.6, 0.6),
-    simSharpe(1.1, 0.7),
-    simSharpe(-0.4, 1.5),
-    simSharpe(0.2, 0.9)
-  ],
-  mdd: [
-    simReturn(-10, 5),
-    simReturn(-6, 4),
-    simReturn(-18, 10),
-    simReturn(-28, 8),
-    simReturn(-38, 12)
-  ],
-  win: [
-    simSharpe(67, 3), simSharpe(71, 2),
-    simSharpe(52, 4), simSharpe(44, 3), simSharpe(30, 5)
-  ]
-} as any;
-
-function buildDatasets(metric: MetricKey) {
-  return metrics[metric].map((data: number[], i: number) => ({
-    label: NAMES[i], data,
-    borderColor: COLORS[i],
-    backgroundColor: i === 0 ? `color-mix(in srgb, ${COLORS[0]}, transparent 98%)` : 'transparent',
-    borderWidth: i === 0 ? 1.4 : (i === 4 ? 0.8 : 1),
-    pointRadius: 0, tension: 0.42,
-    fill: i === 0,
-    borderDash: i === 3 ? [5, 4] : (i === 4 ? [1, 5] : []),
-    clip: false,
-  }));
-}
-
 export default function Dashboard() {
   const chartRef = useRef<HTMLCanvasElement | null>(null);
   const chartInstance = useRef<Chart | null>(null);
@@ -112,44 +41,109 @@ export default function Dashboard() {
   // Separate states for Chart and Log filtering
   const [chartActiveAgent, setChartActiveAgent] = useState("ALL");
   const [logActiveAgent, setLogActiveAgent] = useState("ALL");
-  const [dashboardProgress, setDashboardProgress] = useState<any>(null);
+  const [dashboardProgress, setDashboardProgress] = useState<DashboardProgress | null>(null);
+  const [metricsData, setMetricsData] = useState<DashboardMetrics | null>(null);
+  const [evolutionEvents, setEvolutionEvents] = useState<EvolutionLogEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoopRunning, setIsLoopRunning] = useState(false);
+  const [loopNotice, setLoopNotice] = useState("");
   const [labelPositions, setLabelPositions] = useState<any[]>([]);
   const labelPositionsRef = useRef<any[]>([]);
-  const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
   const [agentNames, setAgentNames] = useState<string[]>(NAMES);
 
   useEffect(() => {
-    const loadDashboardData = async () => {
+    const loadDashboardData = async (silent = false) => {
       try {
-        setIsLoading(true);
-        const [progress, metricsData] = await Promise.all([
+        if (!silent) setIsLoading(true);
+        const [progress, metrics, events] = await Promise.all([
           APIClient.getDashboardProgress(),
-          APIClient.getDashboardMetrics()
+          APIClient.getDashboardMetrics(),
+          APIClient.getEvolutionLog(220),
         ]);
 
         setDashboardProgress(progress);
+        setMetricsData(metrics);
+        setEvolutionEvents(events);
 
         // Update names from DB
         const ids = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
-        const newNames = ids.map(id => metricsData.agents[id]?.name || NAMES[ids.indexOf(id)]);
+        const newNames = ids.map(id => metrics.agents[id]?.name || NAMES[ids.indexOf(id)]);
         newNames.push("BTC BnH"); // Benchmark always stays
         setAgentNames(newNames);
 
       } catch (error) {
         console.error('대시보드 데이터 로드 실패:', error);
       } finally {
-        setIsLoading(false);
+        if (!silent) setIsLoading(false);
       }
     };
-    loadDashboardData();
+
+    loadDashboardData(false);
+    const pollTimer = window.setInterval(() => {
+      loadDashboardData(true);
+    }, 4000);
+
+    return () => {
+      window.clearInterval(pollTimer);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!loopNotice) return;
+    const clearTimer = window.setTimeout(() => setLoopNotice(""), 7000);
+    return () => window.clearTimeout(clearTimer);
+  }, [loopNotice]);
+
+  const handleRunLoop = async () => {
+    try {
+      setIsLoopRunning(true);
+      const result = await APIClient.runEvolutionLoop();
+      setLoopNotice(`ITER #${result.iteration} · ${result.queued_agents.length} agents`);
+      const [progress, events] = await Promise.all([
+        APIClient.getDashboardProgress(),
+        APIClient.getEvolutionLog(220),
+      ]);
+      setDashboardProgress(progress);
+      setEvolutionEvents(events);
+    } catch (error) {
+      console.error("Run loop 실행 실패:", error);
+      setLoopNotice("Run loop 실패");
+    } finally {
+      setIsLoopRunning(false);
+    }
+  };
 
   const buildDynamicDatasets = (metric: MetricKey, names: string[]) => {
     const ids = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent', 'BTC BnH'];
-    return metrics[metric].map((data: number[], i: number) => {
-      const id = ids[i];
-      // Hide if a specific agent is selected and this isn't it, and it's not the benchmark
+    const metricFieldMap: Record<
+      MetricKey,
+      "current_score" | "current_return" | "current_sharpe" | "current_mdd" | "current_win_rate"
+    > = {
+      score: "current_score",
+      return: "current_return",
+      sharpe: "current_sharpe",
+      mdd: "current_mdd",
+      win: "current_win_rate",
+    };
+
+    return ids.map((id, i) => {
+      let data: number[] = [];
+
+      if (id === "BTC BnH") {
+        // Benchmark data - currently we use a flat line or simulated trend as benchmark
+        // In a real scenario, this would be fetched from a benchmark API
+        data = Array(DAYS).fill(100).map((v, idx) => v + (idx * 0.1));
+      } else if (metricsData?.agents[id]) {
+        // Map API current value to a flat line for the chart
+        // until getAgentTimeseries is fully integrated into the dashboard loop
+        const metricField = metricFieldMap[metric];
+        const agentMetrics = metricsData.agents[id as keyof typeof metricsData.agents];
+        const currentVal = agentMetrics?.[metricField] ?? 0;
+        data = Array(DAYS).fill(currentVal || 0);
+      } else {
+        data = Array(DAYS).fill(0);
+      }
+
       const isHidden = chartActiveAgent !== "ALL" && id !== chartActiveAgent && i !== 4;
 
       return {
@@ -162,7 +156,6 @@ export default function Dashboard() {
         tension: 0.42,
         fill: false,
         borderDash: i === 3 ? [5, 4] : (i === 4 ? [1, 5] : []),
-        clip: false,
         hidden: isHidden
       };
     });
@@ -211,7 +204,7 @@ export default function Dashboard() {
             padding: 12,
             callbacks: {
               title: items => `📅 ${items[0].label}`,
-              label: item => `  ${item.dataset.label}: ${Number(item.raw).toFixed(1)}`
+              label: item => ` ${item.dataset.label}: ${Number(item.raw).toFixed(1)}`
             }
           }
         },
@@ -222,14 +215,14 @@ export default function Dashboard() {
       }
     });
     return () => chartInstance.current?.destroy();
-  }, [agentNames]); // Refresh chart when names are loaded
+  }, [agentNames]);
 
   useEffect(() => {
     if (chartInstance.current) {
       chartInstance.current.data.datasets = buildDynamicDatasets(currentMetric, agentNames);
       chartInstance.current.update();
     }
-  }, [currentMetric, agentNames, chartActiveAgent]);
+  }, [currentMetric, agentNames, chartActiveAgent, metricsData]);
 
   return (
     <>
@@ -244,6 +237,10 @@ export default function Dashboard() {
             activeAgent={logActiveAgent}
             setActiveAgent={setLogActiveAgent}
             names={agentNames}
+            metricsData={metricsData ?? undefined}
+            progress={dashboardProgress ?? undefined}
+            evolutionEvents={evolutionEvents}
+            isLoopRunning={isLoopRunning}
           />
         </PageLayout.Side>
 
@@ -251,13 +248,39 @@ export default function Dashboard() {
           <PageHeader
             isLoading={isLoading}
             statusText={dashboardProgress ? `${dashboardProgress.active_improvements}개 개선 진행` : 'System Live'}
+            statusColor={(dashboardProgress?.active_improvements || 0) > 0 || isLoopRunning ? "blue" : "green"}
+            extra={
+              <div className="flex items-center gap-2">
+                {loopNotice && (
+                  <span className="hidden sm:inline-flex rounded-full border border-[#244c8c]/50 bg-[#102340]/50 px-3 py-1 text-[10px] font-bold tracking-[0.12em] text-[#8fb6ff]">
+                    {loopNotice}
+                  </span>
+                )}
+                <button
+                  onClick={handleRunLoop}
+                  disabled={isLoopRunning}
+                  className={`rounded-xl border px-3 py-1.5 text-[10px] font-black tracking-[0.16em] transition-all ${
+                    isLoopRunning
+                      ? "cursor-not-allowed border-[#2b4e87]/40 bg-[#13284a]/45 text-[#5c84c2]"
+                      : "border-[#6f4fff]/35 bg-[#2a1f56]/60 text-[#c7b6ff] hover:border-[#7f65ff]/70 hover:bg-[#34256d]/70"
+                  }`}
+                >
+                  {isLoopRunning ? "LOOPING..." : "RUN LOOP"}
+                </button>
+              </div>
+            }
           />
 
           <div className="relative px-6 py-2">
             <div className="flex flex-col gap-4 relative z-10">
               <MetricSelector currentMetric={currentMetric} setCurrentMetric={setCurrentMetric} />
 
-              <AgentsList activeAgent={chartActiveAgent} setActiveAgent={setChartActiveAgent} names={agentNames} />
+              <AgentsList
+                activeAgent={chartActiveAgent}
+                setActiveAgent={setChartActiveAgent}
+                names={agentNames}
+                metrics={metricsData?.agents}
+              />
 
               <div className="flex flex-col min-h-0 gap-3 mt-2">
                 <ChartLegend names={agentNames} />

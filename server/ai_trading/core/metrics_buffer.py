@@ -103,6 +103,10 @@ class MetricsBuffer:
 
         logger.info(f"MetricsBuffer initialized for agents: {AGENT_IDS}")
 
+    def set_callback(self, callback):
+        """Set callback - sync or async function"""
+        self._trigger_callback = callback
+
     def push(self, agent_id: str, tick: MetricTick) -> Optional[str]:
         """
         새로운 메트릭 틱을 버퍼에 추가하고 트리거 조건 체크

@@ -7,38 +7,49 @@ interface AgentsListProps {
   activeAgent: string;
   setActiveAgent: (id: string) => void;
   names?: string[];
+  metrics?: {
+    [agentId: string]: {
+      current_score: number;
+      current_return: number;
+      current_sharpe: number;
+      current_mdd: number;
+      current_win_rate: number;
+    };
+  };
 }
 
-export const AgentsList = ({ activeAgent, setActiveAgent, names }: AgentsListProps) => {
+export const AgentsList = ({ activeAgent, setActiveAgent, names, metrics }: AgentsListProps) => {
   const getName = (idx: number, fallback: string) => names && names[idx] ? names[idx] : fallback;
   const getAvatar = (idx: number, fallback: string) => names && names[idx] ? names[idx].charAt(0) : fallback;
+  const normalizeRatio = (value: number): number => (Math.abs(value) > 1 ? value / 100 : value);
+  const formatPercent = (value: number, digits = 1): string => `${(normalizeRatio(value) * 100).toFixed(digits)}%`;
+
+  const agentIds = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-2">
-      <AgentCard 
-        id="momentum_hunter" name={getName(0, "momentum_hunter")} avatar={getAvatar(0, "M")} strategy="Donchian Breakout" 
-        sharpe="2.41" mdd="-12.3%" winRate="67.4%" color={COLORS[0]} 
-        isActive={activeAgent === "momentum_hunter"} 
-        onClick={() => setActiveAgent("momentum_hunter")} 
-      />
-      <AgentCard 
-        id="mean_reverter" name={getName(1, "mean_reverter")} avatar={getAvatar(1, "A")} strategy="Grid + Mean Rev" 
-        sharpe="1.87" mdd="-8.1%" winRate="71.2%" color={COLORS[1]} 
-        isActive={activeAgent === "mean_reverter"} 
-        onClick={() => setActiveAgent("mean_reverter")} 
-      />
-      <AgentCard 
-        id="macro_trader" name={getName(2, "macro_trader")} avatar={getAvatar(2, "N")} strategy="Trend Following" 
-        sharpe="1.23" mdd="-18.9%" winRate="52.1%" color={COLORS[2]} 
-        isActive={activeAgent === "macro_trader"} 
-        onClick={() => setActiveAgent("macro_trader")} 
-      />
-      <AgentCard 
-        id="chaos_agent" name={getName(3, "chaos_agent")} avatar={getAvatar(3, "C")} strategy="Scalping ATR" 
-        sharpe="-0.31" mdd="-24.7%" winRate="44.8%" color={COLORS[3]} 
-        isActive={activeAgent === "chaos_agent"} 
-        onClick={() => setActiveAgent("chaos_agent")} 
-      />
+      {agentIds.map((id, idx) => {
+        const m = metrics?.[id];
+        return (
+          <AgentCard
+            key={id}
+            id={id}
+            name={getName(idx, id)}
+            avatar={getAvatar(idx, id.charAt(0).toUpperCase())}
+            strategy={
+              id === 'momentum_hunter' ? 'Donchian Breakout' :
+              id === 'mean_reverter' ? 'Grid + Mean Rev' :
+              id === 'macro_trader' ? 'Trend Following' : 'Scalping ATR'
+            }
+            sharpe={m ? m.current_sharpe.toFixed(2) : '0.00'}
+            mdd={m ? formatPercent(m.current_mdd, 1) : '0.0%'}
+            winRate={m ? formatPercent(m.current_win_rate, 1) : '0.0%'}
+            color={COLORS[idx]}
+            isActive={activeAgent === id}
+            onClick={() => setActiveAgent(id)}
+          />
+        );
+      })}
     </div>
   );
 };

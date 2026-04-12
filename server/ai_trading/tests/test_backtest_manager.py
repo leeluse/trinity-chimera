@@ -310,6 +310,21 @@ class ZeroReturnStrategy(StrategyInterface):
         return {"name": "ZeroReturnStrategy"}
 
 
+class SingleLossTradeStrategy(StrategyInterface):
+    """Mock strategy with one guaranteed losing round-trip."""
+
+    def generate_signal(self, data: pd.DataFrame) -> int:
+        idx = len(data) - 1
+        if idx == 0:
+            return 1
+        if idx == 3:
+            return -1
+        return 0
+
+    def get_params(self) -> dict:
+        return {"name": "SingleLossTradeStrategy"}
+
+
 class TestBacktestManagerIntegration(unittest.TestCase):
     """Integration tests for the complete BacktestManager."""
 
@@ -351,6 +366,29 @@ class TestBacktestManagerIntegration(unittest.TestCase):
 
         # Return should be negative due to fees and slippage
         self.assertLess(results['return'], 0, f"Return should be negative, got {results['return']}")
+
+    def test_losing_trade_sets_zero_win_rate(self):
+        """A single losing trade must produce win_rate=0.0 and finite PF."""
+        dates = pd.date_range(start='2024-01-01', periods=6, freq='h')
+        close = [100.0, 98.0, 95.0, 90.0, 90.0, 90.0]
+        data = pd.DataFrame(
+            {
+                'open': close,
+                'high': close,
+                'low': close,
+                'close': close,
+                'volume': [1000] * len(close),
+            },
+            index=dates,
+        )
+        strategy = SingleLossTradeStrategy()
+
+        manager = BacktestManager(fee=0.0, slippage_min=0.0, slippage_max=0.0)
+        results = manager.run_backtest(strategy, data)
+
+        self.assertEqual(results['trades'], 1)
+        self.assertEqual(results['win_rate'], 0.0)
+        self.assertEqual(results['profit_factor'], 0.0)
 
 
 if __name__ == '__main__':

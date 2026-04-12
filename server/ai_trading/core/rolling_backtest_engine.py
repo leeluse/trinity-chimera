@@ -58,10 +58,15 @@ class MetricsBuffer:
     buffer: Dict[str, List[RollingMetrics]] = field(default_factory=dict)
     last_flush: Dict[str, datetime] = field(default_factory=dict)
     tick_count: Dict[str, int] = field(default_factory=dict)
+    _trigger_callback: Optional[Callable] = None
 
     # 트리거 설정
     FLUSH_INTERVAL_MINUTES: int = 30
     TICK_THRESHOLD: int = 30
+
+    def set_callback(self, callback: Callable):
+        """트리거 콜백 설정 (T-003 연동용)"""
+        self._trigger_callback = callback
 
     def __post_init__(self):
         for agent_id in AGENT_IDS:

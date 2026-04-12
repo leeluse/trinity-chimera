@@ -55,7 +55,12 @@ export default function LogCard({
       <div className="flex flex-col px-4 pb-4 gap-2 sm:gap-4">
         <div className="flex flex-col gap-2">
           <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c] border-b border-white/[0.03] pb-2">현재 전략 분석</div>
-          <p className="text-[12.5px] leading-relaxed text-[#94a3b8] [&_span]:text-white [&_span]:font-semibold pt-1" dangerouslySetInnerHTML={{ __html: analysis }} />
+          <p className="text-[12.5px] leading-relaxed text-[#94a3b8] pt-1">{analysis}</p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c] border-b border-white/[0.03] pb-2">실행 상세</div>
+          <p className="text-[12px] leading-relaxed text-[#7f90ae] pt-1">{reason}</p>
         </div>
 
         {params && params.length > 0 && (

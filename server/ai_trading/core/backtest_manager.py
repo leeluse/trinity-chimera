@@ -139,6 +139,7 @@ class BacktestManager:
             if signal == 1 and position == 0: # Buy
                 cost_price = self.apply_trading_costs(prices[i], 1)
                 shares = balance / cost_price
+                entry_cost = shares * cost_price
                 position = shares
                 balance = 0
             elif signal == -1 and position > 0: # Sell

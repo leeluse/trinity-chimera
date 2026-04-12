@@ -7,6 +7,7 @@ import os
 import logging
 import asyncio
 from pathlib import Path
+from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 
@@ -53,14 +54,30 @@ evolution_orchestrator = get_evolution_orchestrator()
 async def scheduled_evolution_poll():
     """Periodic job to check all agents for evolution triggers."""
     logger.info("Running scheduled evolution poll...")
+    if hasattr(evolution_orchestrator, "start_scheduled_loop"):
+        evolution_orchestrator.start_scheduled_loop(list(AGENT_IDS))
     for agent_id in AGENT_IDS:
         asyncio.create_task(evolution_orchestrator.run_evolution_cycle(agent_id))
 
 @app.on_event("startup")
 async def startup_event():
-    scheduler.add_job(scheduled_evolution_poll, 'interval', hours=1)
+    try:
+        poll_minutes = int(os.getenv("EVOLUTION_POLL_MINUTES", "60"))
+    except ValueError:
+        poll_minutes = 60
+    poll_minutes = max(1, min(poll_minutes, 24 * 60))
+
+    scheduler.add_job(
+        scheduled_evolution_poll,
+        "interval",
+        minutes=poll_minutes,
+        next_run_time=datetime.now(),
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=poll_minutes * 60,
+    )
     scheduler.start()
-    logger.info("APScheduler started: Evolution poll scheduled every hour.")
+    logger.info("APScheduler started: Evolution poll scheduled every %s minute(s).", poll_minutes)
 
 @app.on_event("shutdown")
 async def shutdown_event():

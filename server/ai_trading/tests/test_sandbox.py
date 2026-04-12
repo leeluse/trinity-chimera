@@ -45,6 +45,37 @@ class InfiniteStrategy(StrategyInterface):
         return {}
 """
 
+LEGACY_SIGNAL_STYLE_CODE = """
+class LegacyBreakout(Strategy):
+    params = {"period": 20}
+
+    def generate_signals(self, data, params):
+        if len(data) < 2:
+            return Signal()
+        if data['close'].iloc[-1] > data['close'].iloc[-2]:
+            return Signal(entry=True, direction="long")
+        return Signal(exit=True)
+"""
+
+ABSTRACT_METHOD_COMPAT_CODE = """
+class PatchedStrategy(StrategyInterface):
+    default_params = {"k": 1}
+
+    def generate_signals(self, data, params):
+        return {"entry": True, "direction": "long"}
+"""
+
+UNKNOWN_IMPORT_CODE = """
+import lettrade
+
+class ThirdPartyStrategy(StrategyInterface):
+    def generate_signal(self, data):
+        return 0
+
+    def get_params(self):
+        return {}
+"""
+
 class TestSandbox(unittest.TestCase):
     def setUp(self):
         self.data = pd.DataFrame({'close': [100, 110]})
@@ -78,6 +109,27 @@ class OpenStrategy(StrategyInterface):
         strategy = StrategyLoader.load_strategy(INFINITE_STRATEGY_CODE, "InfiniteStrategy")
         with self.assertRaises(TimeoutError):
             StrategyLoader.execute_with_timeout(strategy, INFINITE_STRATEGY_CODE, "InfiniteStrategy", self.data, timeout=2)
+
+    def test_legacy_generate_signals_compat(self):
+        strategy = StrategyLoader.load_strategy(LEGACY_SIGNAL_STYLE_CODE, "LegacyBreakout")
+        self.assertIsInstance(strategy, StrategyInterface)
+
+        up_data = pd.DataFrame({'close': [100, 101]})
+        down_data = pd.DataFrame({'close': [101, 100]})
+        self.assertEqual(strategy.generate_signal(up_data), 1)
+        self.assertEqual(strategy.generate_signal(down_data), -1)
+        self.assertEqual(strategy.get_params().get("period"), 20)
+
+    def test_patch_abstract_methods_from_generate_signals(self):
+        strategy = StrategyLoader.load_strategy(ABSTRACT_METHOD_COMPAT_CODE, "PatchedStrategy")
+        self.assertIsInstance(strategy, StrategyInterface)
+        self.assertEqual(strategy.generate_signal(self.data), 1)
+        self.assertEqual(strategy.get_params().get("k"), 1)
+
+    def test_security_block_unknown_module_import(self):
+        with self.assertRaises(SecurityError) as cm:
+            StrategyLoader.load_strategy(UNKNOWN_IMPORT_CODE, "ThirdPartyStrategy")
+        self.assertIn("허용되지 않은 모듈 임포트: lettrade", str(cm.exception))
 
 if __name__ == "__main__":
     unittest.main()

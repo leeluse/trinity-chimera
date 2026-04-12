@@ -1,5 +1,7 @@
 import os
+import uuid
 from pathlib import Path
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from supabase import create_client, Client
 from postgrest import APIError
@@ -22,23 +24,104 @@ class SupabaseManager:
 
         self.client: Client = create_client(url, key)
 
+    @staticmethod
+    def _is_uuid_like(value: str) -> bool:
+        try:
+            uuid.UUID(str(value))
+            return True
+        except (ValueError, TypeError):
+            return False
+
+    def _resolve_agent_row(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Resolve both UUID agent ids and technical aliases like momentum_hunter.
+        """
+        alias_hints: Dict[str, List[str]] = {
+            "momentum_hunter": ["momentum", "hunter"],
+            "mean_reverter": ["mean", "revert"],
+            "macro_trader": ["macro", "trend"],
+            "chaos_agent": ["chaos", "scalp"],
+        }
+
+        try:
+            if self._is_uuid_like(agent_id):
+                res = self.client.table("agents").select("id,name,current_strategy_id").eq("id", agent_id).limit(1).execute()
+                rows = res.data or []
+                if rows:
+                    return rows[0]
+
+            # Exact name match first
+            name_res = self.client.table("agents").select("id,name,current_strategy_id").eq("name", agent_id).limit(1).execute()
+            name_rows = name_res.data or []
+            if name_rows:
+                return name_rows[0]
+
+            # Heuristic alias matching against name
+            for hint in alias_hints.get(agent_id, [agent_id]):
+                res = self.client.table("agents").select("id,name,current_strategy_id").ilike("name", f"%{hint}%").limit(1).execute()
+                rows = res.data or []
+                if rows:
+                    return rows[0]
+        except APIError as e:
+            print(f"Error resolving agent row ({agent_id}): {e}")
+            return None
+
+        return None
+
     async def get_agent_strategy(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """
         Fetch the currently active strategy code and metadata for an agent.
         """
         try:
-            # Get the agent to find the current_strategy_id
-            agent_res = self.client.table("agents").select("current_strategy_id").eq("id", agent_id).single().execute()
-            agent_data = agent_res.data
+            agent_data = self._resolve_agent_row(agent_id)
 
-            if not agent_data or not agent_data.get("current_strategy_id"):
+            if not agent_data:
                 return None
 
-            strategy_id = agent_data["current_strategy_id"]
+            strategy_id = agent_data.get("current_strategy_id")
+            if strategy_id:
+                strategy_res = self.client.table("strategies").select("*").eq("id", strategy_id).single().execute()
+                return strategy_res.data
 
-            # Get the strategy details
-            strategy_res = self.client.table("strategies").select("*").eq("id", strategy_id).single().execute()
-            return strategy_res.data
+            # Fallback 1: latest strategy owned by this agent
+            own_rows = (
+                self.client.table("strategies")
+                .select("*")
+                .eq("agent_id", agent_data["id"])
+                .order("version", desc=True)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if own_rows:
+                return own_rows[0]
+
+            # Fallback 2: latest system strategy from catalog agent
+            system_agent_rows = (
+                self.client.table("agents")
+                .select("id")
+                .eq("name", "system_strategy_catalog")
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if not system_agent_rows:
+                return None
+
+            system_agent_id = system_agent_rows[0]["id"]
+            system_rows = (
+                self.client.table("strategies")
+                .select("*")
+                .eq("agent_id", system_agent_id)
+                .order("version", desc=True)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            return system_rows[0] if system_rows else None
         except APIError as e:
             print(f"Error fetching agent strategy: {e}")
             return None
@@ -48,15 +131,21 @@ class SupabaseManager:
         Create a new version in strategies table and update the current_strategy_id in the agents table.
         """
         try:
+            resolved_agent = self._resolve_agent_row(agent_id)
+            if not resolved_agent:
+                print(f"Error saving strategy: agent not found for {agent_id}")
+                return None
+            resolved_agent_id = resolved_agent["id"]
+
             # 1. Get the current version number for the agent
-            version_res = self.client.table("strategies").select("version").eq("agent_id", agent_id).order("version", desc=True).limit(1).execute()
+            version_res = self.client.table("strategies").select("version").eq("agent_id", resolved_agent_id).order("version", desc=True).limit(1).execute()
             current_version = 0
             if version_res.data and len(version_res.data) > 0:
                 current_version = version_res.data[0]["version"]
 
             # 2. Insert new strategy version
             new_strategy_data = {
-                "agent_id": agent_id,
+                "agent_id": resolved_agent_id,
                 "version": current_version + 1,
                 "code": code,
                 "rationale": rationale,
@@ -72,11 +161,54 @@ class SupabaseManager:
             new_strategy_id = rows[0]["id"]
 
             # 3. Update agents table to point to the new strategy
-            self.client.table("agents").update({"current_strategy_id": new_strategy_id}).eq("id", agent_id).execute()
+            self.client.table("agents").update({"current_strategy_id": new_strategy_id}).eq("id", resolved_agent_id).execute()
 
             return new_strategy_id
         except APIError as e:
             print(f"Error saving strategy: {e}")
+            return None
+
+    async def get_backtest_for_period(
+        self,
+        strategy_id: str,
+        end_date: Optional[datetime] = None,
+        period_type: str = "OOS"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fetch the latest backtest metrics for a strategy up to end_date.
+        """
+        try:
+            query = self.client.table("backtest_results").select(
+                "trinity_score,return_val,sharpe,mdd,win_rate,test_period,created_at"
+            ).eq("strategy_id", strategy_id)
+
+            if end_date is not None:
+                end_iso = end_date.isoformat() if hasattr(end_date, "isoformat") else str(end_date)
+                query = query.lte("created_at", end_iso)
+
+            rows = query.order("created_at", desc=True).limit(20).execute().data or []
+            if not rows:
+                return None
+
+            selected = rows[0]
+            if period_type:
+                for row in rows:
+                    test_period = row.get("test_period") or {}
+                    if isinstance(test_period, dict) and str(test_period.get("type", "")).upper() == period_type.upper():
+                        selected = row
+                        break
+
+            return {
+                "trinity_score": selected.get("trinity_score"),
+                "return": selected.get("return_val"),
+                "sharpe": selected.get("sharpe"),
+                "mdd": selected.get("mdd"),
+                "win_rate": selected.get("win_rate"),
+                "profit_factor": selected.get("profit_factor", 0.0),
+                "test_period": selected.get("test_period") or {},
+            }
+        except APIError as e:
+            print(f"Error fetching backtest period: {e}")
             return None
 
     async def save_backtest(self, strategy_id: str, metrics: Dict[str, Any]) -> bool:
@@ -105,8 +237,13 @@ class SupabaseManager:
         Record the evolution step in improvement_logs.
         """
         try:
+            resolved_agent = self._resolve_agent_row(agent_id)
+            if not resolved_agent:
+                print(f"Error saving improvement log: agent not found for {agent_id}")
+                return False
+
             data = {
-                "agent_id": agent_id,
+                "agent_id": resolved_agent["id"],
                 "prev_strategy_id": prev_id,
                 "new_strategy_id": new_id,
                 "llm_analysis": analysis,

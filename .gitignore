@@ -1,5 +1,5 @@
 node_modules
-# docs (Whitelisted below)
+docs
 venv
 .agents
 .claude
@@ -9,11 +9,11 @@ __pycache__
 CLAUDE.md
 AGENTS.md
 __init__.py
-docs/
-logs/
+docs
+logs
 reaserch.md
-venv/
-.worktrees/
+venv
+.worktrees
 tmp/
 .mcp.json
 .DS_Store

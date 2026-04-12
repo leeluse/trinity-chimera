@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from typing import Any, Dict, List, Optional
+import asyncio
 import math
-from datetime import datetime, timezone
+from pydantic import BaseModel
 
 from server.api.models.agent import AgentImprovementRequest
 from server.ai_trading.agents.constants import AGENT_IDS
@@ -14,6 +15,10 @@ dashboard_router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 improvement_service = SelfImprovementService()
 evolution_orchestrator = get_evolution_orchestrator()
 
+
+class RunLoopRequest(BaseModel):
+    agent_ids: Optional[List[str]] = None
+
 def _build_metric_series(agent_id: str, metric: str, points: int = 96) -> List[float]:
     seed = sum(ord(char) for char in agent_id)
     values: List[float] = []
@@ -24,13 +29,13 @@ def _build_metric_series(agent_id: str, metric: str, points: int = 96) -> List[f
         if metric == "score":
             value = 90 + (seed % 10) * 0.6 + idx * 0.12 + math.sin(phase) * 2.5
         elif metric == "return":
-            value = 4 + (seed % 7) * 0.4 + idx * 0.22 + math.sin(phase) * 1.8
+            value = (4 + (seed % 7) * 0.4 + idx * 0.22 + math.sin(phase) * 1.8) / 100
         elif metric == "sharpe":
             value = 1.0 + (seed % 5) * 0.06 + math.sin(phase) * 0.22
         elif metric == "mdd":
-            value = -7 - (seed % 4) - abs(math.sin(phase)) * 4.2
+            value = (-7 - (seed % 4) - abs(math.sin(phase)) * 4.2) / 100
         elif metric == "win":
-            value = 49 + (seed % 9) + math.sin(phase) * 4
+            value = (49 + (seed % 9) + math.sin(phase) * 4) / 100
         else:
             value = 0.0
 
@@ -64,6 +69,30 @@ def _build_agent_performance(agent_id: str, real_name: Optional[str] = None) -> 
         "losing_trades": 30 + (seed % 60),
         "avg_trade_duration": 28 + (seed % 25),
     }
+
+
+@router.post("/run-loop")
+async def run_manual_loop(request: Optional[RunLoopRequest] = None):
+    requested = request.agent_ids if request and request.agent_ids else list(AGENT_IDS)
+    filtered: List[str] = []
+    for agent_id in requested:
+        if agent_id in AGENT_IDS and agent_id not in filtered:
+            filtered.append(agent_id)
+
+    if not filtered:
+        raise HTTPException(status_code=400, detail="유효한 agent_ids가 없습니다.")
+
+    iteration = evolution_orchestrator.start_manual_loop(filtered)
+    for agent_id in filtered:
+        asyncio.create_task(evolution_orchestrator.run_evolution_cycle(agent_id, force_trigger=True))
+
+    return {
+        "success": True,
+        "iteration": iteration,
+        "queued_agents": filtered,
+        "message": f"Manual loop #{iteration} queued for {len(filtered)} agents.",
+    }
+
 
 @router.post("/{agent_id}/evolve")
 async def trigger_evolution(agent_id: str, background_tasks: BackgroundTasks):
@@ -131,23 +160,16 @@ async def request_improvement(agent_id: str, request: AgentImprovementRequest):
 
 @dashboard_router.get("/improvement")
 async def get_dashboard_improvement():
-    now = datetime.now(timezone.utc).isoformat()
-    latest = [
-        {
-            "agent_id": agent_id,
-            "status": "idle",
-            "progress": 0,
-            "created_at": now,
-        }
-        for agent_id in AGENT_IDS
-    ]
+    return evolution_orchestrator.get_dashboard_snapshot()
+
+
+@dashboard_router.get("/evolution-log")
+async def get_evolution_log(
+    limit: int = Query(120, ge=1, le=500),
+    agent_id: Optional[str] = Query(None),
+):
     return {
-        "active_improvements": 0,
-        "completed_improvements": 0,
-        "failed_improvements": 0,
-        "total_improvements": 0,
-        "agents": list(AGENT_IDS),
-        "latest_improvements": latest,
+        "events": evolution_orchestrator.get_evolution_events(limit=limit, agent_id=agent_id)
     }
 
 @dashboard_router.get("/metrics")

@@ -38,6 +38,23 @@ export interface ImprovementResponse {
   message: string;
 }
 
+export interface RunLoopResponse {
+  success: boolean;
+  iteration: number;
+  queued_agents: string[];
+  message: string;
+}
+
+export interface EvolutionLogEvent {
+  id: number;
+  created_at: string;
+  level: string;
+  phase: string;
+  message: string;
+  agent_id?: string | null;
+  agent_label?: string | null;
+}
+
 export interface DashboardProgress {
   active_improvements: number;
   completed_improvements: number;
@@ -49,6 +66,7 @@ export interface DashboardProgress {
     status: string;
     progress: number;
     created_at: string;
+    detail?: string;
   }>;
 }
 
@@ -87,6 +105,24 @@ export interface LLMFeedback {
 
 // API 호출 함수들 - fetchWithBypass를 사용하여 네트워크 안정성 확보
 export class APIClient {
+  static async runEvolutionLoop(agentIds?: string[]): Promise<RunLoopResponse> {
+    const response = await fetchWithBypass(`${API_BASE_URL}/agents/run-loop`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        agent_ids: agentIds && agentIds.length > 0 ? agentIds : undefined,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`루프 실행 실패: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
   static async requestImprovement(
     agentId: string,
     request: AgentImprovementRequest
@@ -114,6 +150,22 @@ export class APIClient {
     }
 
     return response.json();
+  }
+
+  static async getEvolutionLog(limit = 160, agentId?: string): Promise<EvolutionLogEvent[]> {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (agentId && agentId !== "ALL" && agentId !== "전체") {
+      params.set("agent_id", agentId);
+    }
+
+    const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/evolution-log?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`진화 로그 조회 실패: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    return Array.isArray(payload?.events) ? payload.events : [];
   }
 
   static async getBacktestResult(agentId: string): Promise<BacktestResult | null> {
