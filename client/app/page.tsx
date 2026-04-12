@@ -49,31 +49,50 @@ export default function Dashboard() {
   const [loopNotice, setLoopNotice] = useState("");
   const [labelPositions, setLabelPositions] = useState<any[]>([]);
   const labelPositionsRef = useRef<any[]>([]);
+  const loadInFlightRef = useRef(false);
   const [agentNames, setAgentNames] = useState<string[]>(NAMES);
 
   useEffect(() => {
     const loadDashboardData = async (silent = false) => {
+      if (loadInFlightRef.current) return;
+      loadInFlightRef.current = true;
       try {
         if (!silent) setIsLoading(true);
-        const [progress, metrics, events] = await Promise.all([
+        const [progressResult, metricsResult, eventsResult] = await Promise.allSettled([
           APIClient.getDashboardProgress(),
           APIClient.getDashboardMetrics(),
           APIClient.getEvolutionLog(220),
         ]);
 
-        setDashboardProgress(progress);
-        setMetricsData(metrics);
-        setEvolutionEvents(events);
+        if (progressResult.status === "fulfilled") {
+          setDashboardProgress(progressResult.value);
+        }
+        if (metricsResult.status === "fulfilled") {
+          const metrics = metricsResult.value;
+          setMetricsData(metrics);
 
-        // Update names from DB
-        const ids = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
-        const newNames = ids.map(id => metrics.agents[id]?.name || NAMES[ids.indexOf(id)]);
-        newNames.push("BTC BnH"); // Benchmark always stays
-        setAgentNames(newNames);
+          // Update names from DB
+          const ids = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
+          const newNames = ids.map(id => metrics.agents[id]?.name || NAMES[ids.indexOf(id)]);
+          newNames.push("BTC BnH"); // Benchmark always stays
+          setAgentNames(newNames);
+        }
+        if (eventsResult.status === "fulfilled") {
+          setEvolutionEvents(eventsResult.value);
+        }
+
+        if (
+          progressResult.status === "rejected" &&
+          metricsResult.status === "rejected" &&
+          eventsResult.status === "rejected"
+        ) {
+          throw progressResult.reason || metricsResult.reason || eventsResult.reason;
+        }
 
       } catch (error) {
         console.error('대시보드 데이터 로드 실패:', error);
       } finally {
+        loadInFlightRef.current = false;
         if (!silent) setIsLoading(false);
       }
     };

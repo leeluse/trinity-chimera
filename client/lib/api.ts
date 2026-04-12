@@ -5,6 +5,10 @@ const API_BASE_URL = '/api';
 const normalizeApiBase = (value: string): string => value.replace(/\/+$/, "").replace(/\/api$/, "");
 export const API_BASE = normalizeApiBase(process.env.NEXT_PUBLIC_API_URL || "");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const RAW_FETCH_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_API_FETCH_TIMEOUT_MS || "12000");
+const FETCH_TIMEOUT_MS = Number.isFinite(RAW_FETCH_TIMEOUT_MS)
+  ? Math.max(3000, Math.min(RAW_FETCH_TIMEOUT_MS, 60000))
+  : 12000;
 const LOCAL_API_FALLBACKS = [
   "http://localhost:8000",
   "http://127.0.0.1:8000",
@@ -282,6 +286,8 @@ const buildCandidates = (url: string): string[] => {
   if (url.startsWith("http")) return [url];
   const path = url.startsWith("/") ? url : `/${url}`;
   const candidates: string[] = [];
+  const isHttpsPage =
+    typeof window !== "undefined" && window.location?.protocol === "https:";
   const configuredRemote =
     !!API_BASE && !API_BASE.includes("localhost") && !API_BASE.includes("127.0.0.1");
 
@@ -295,6 +301,7 @@ const buildCandidates = (url: string): string[] => {
 
   if (!IS_PRODUCTION) {
     for (const localBase of LOCAL_API_FALLBACKS) {
+      if (isHttpsPage && localBase.startsWith("http://")) continue;
       candidates.push(`${localBase}${path}`);
     }
   }
@@ -304,13 +311,30 @@ const buildCandidates = (url: string): string[] => {
 
 export const fetchWithBypass = async (url: string, options: RequestInit = {}) => {
   const candidates = buildCandidates(url);
-  const requestOptions = withBypassHeaders(options);
 
   let lastError: unknown = null;
 
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i];
     const isLast = i === candidates.length - 1;
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort("timeout"), FETCH_TIMEOUT_MS);
+    const externalSignal = options.signal;
+    let externalAbortListener: (() => void) | null = null;
+
+    if (externalSignal) {
+      externalAbortListener = () => timeoutController.abort("aborted");
+      if (externalSignal.aborted) {
+        clearTimeout(timeoutId);
+        throw new DOMException("Request aborted", "AbortError");
+      }
+      externalSignal.addEventListener("abort", externalAbortListener, { once: true });
+    }
+
+    const requestOptions = withBypassHeaders({
+      ...options,
+      signal: timeoutController.signal,
+    });
 
     try {
       const response = await fetch(candidate, requestOptions);
@@ -323,6 +347,11 @@ export const fetchWithBypass = async (url: string, options: RequestInit = {}) =>
       lastError = error;
       console.warn(`[API] Candidate error: ${candidate}`, error);
       if (isLast) throw error;
+    } finally {
+      clearTimeout(timeoutId);
+      if (externalSignal && externalAbortListener) {
+        externalSignal.removeEventListener("abort", externalAbortListener);
+      }
     }
   }
 

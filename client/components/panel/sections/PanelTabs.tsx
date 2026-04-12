@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
-export const PanelTabs = () => {
+const PanelTabsContent = () => {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -33,6 +34,14 @@ export const PanelTabs = () => {
         BACKTEST
       </button>
     </div>
+  );
+};
+
+export const PanelTabs = () => {
+  return (
+    <Suspense fallback={<div className="h-14 bg-white/[0.02] border-b border-white/[0.03]" />}>
+      <PanelTabsContent />
+    </Suspense>
   );
 };
 

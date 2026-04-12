@@ -13,6 +13,7 @@ import EvolutionLogPanel from "./sections/EvolutionLogPanel";
 import { COLORS } from "@/constants";
 
 import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
 interface DashboardRightPanelProps {
   activeAgent: string;
@@ -24,7 +25,15 @@ interface DashboardRightPanelProps {
   isLoopRunning?: boolean;
 }
 
-export default function DashboardRightPanel({
+export default function DashboardRightPanel(props: DashboardRightPanelProps) {
+  return (
+    <Suspense fallback={<div className="flex-1 bg-[#060912]/30 animate-pulse" />}>
+      <DashboardRightPanelContent {...props} />
+    </Suspense>
+  );
+}
+
+function DashboardRightPanelContent({
   activeAgent,
   setActiveAgent,
   names,
