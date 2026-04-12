@@ -29,8 +29,9 @@ class TestTrinityScoreV2:
     def test_trinity_score_v2_edge_cases(self):
         """엣지 케이스 테스트"""
         # Test zero values
+        # PF 0은 캡핑되어 0.5가 됨: (0.5 * 20 * 0.15) = 1.5
         result = calculate_trinity_score_v2(0, 0, 0, 0, 0)
-        assert result == 20.0  # (1 + 0) * 100 * 0.20 = 20
+        assert result == 21.5  # 20 + 1.5 = 21.5
 
         # Test negative return
         result = calculate_trinity_score_v2(-0.1, 1.0, -0.1, 0.8, 0.4)
