@@ -51,6 +51,15 @@ def calculate_trinity_score_v2(
     if mdd > 0:
         mdd = -mdd
 
+    # Profit Factor 캡핑 (0.5 ~ 10 범위)
+    profit_factor = max(0.5, min(profit_factor, 10))
+
+    # Sharpe 캡핑 (0 ~ 10 범위)
+    sharpe = max(0, min(sharpe, 10))
+
+    # Return 캡핑 (-1 ~ 2 범위)
+    return_val = max(-1, min(return_val, 2))
+
     score = (
         (return_val * 0.30) +
         (sharpe * 25 * 0.25) +
