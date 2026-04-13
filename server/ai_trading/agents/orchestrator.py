@@ -1,5 +1,6 @@
 import logging
 import ast
+import os
 from enum import Enum
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -401,186 +402,209 @@ class EvolutionOrchestrator:
             }
             prev_strategy_id = strategy_data.get("id")
 
+            baseline_score = float(evolution_package["metrics"].get("trinity_score") or 0.0)
             try:
-                new_code = await self.llm_client.generate_strategy_code(evolution_package)
-                self._append_event(
-                    level="success",
-                    phase="generated",
-                    message=f"[{label}] 후보 전략 코드 생성 완료, 검증 단계 진입.",
-                    agent_id=agent_id,
-                )
-            except LLMUnavailableError as llm_error:
-                reason = f"Candidate strategy rejected: LLM unavailable ({llm_error})."
-                logger.warning(f"Evolution rejected for {agent_id}: {reason}")
-                self.failed_improvements += 1
-                self._record_latest(agent_id, "failed", 100, reason)
-                self._append_event(
-                    level="error",
-                    phase="failed",
-                    message=f"[{label}] LLM 호출 실패로 후보 전략 거부: {llm_error}",
-                    agent_id=agent_id,
-                )
-                await self.supabase.save_improvement_log(
-                    agent_id=agent_id,
-                    prev_id=prev_strategy_id,
-                    new_id=None,
-                    analysis=reason,
-                    expected={
-                        "baseline_trinity_score": evolution_package["metrics"]["trinity_score"],
-                        "candidate_trinity_score": None,
-                    },
-                )
-                self._set_state(agent_id, EvolutionState.IDLE)
-                return
+                candidate_attempts = int(os.getenv("EVOLUTION_CANDIDATE_ATTEMPTS", "2"))
+            except ValueError:
+                candidate_attempts = 2
+            candidate_attempts = max(1, min(candidate_attempts, 5))
+
+            try:
+                min_trinity_delta = float(os.getenv("EVOLUTION_MIN_TRINITY_DELTA", "0.0"))
+            except ValueError:
+                min_trinity_delta = 0.0
 
             self._set_state(agent_id, EvolutionState.VALIDATING)
 
-            StrategyLoader.validate_code(new_code)
-            class_name = self._extract_class_name(new_code)
-            if not class_name:
-                raise ValueError(f"Could not extract strategy class name for {agent_id}")
+            accepted_code: Optional[str] = None
+            accepted_metrics: Optional[Dict[str, Any]] = None
+            best_candidate_metrics: Optional[Dict[str, Any]] = None
+            best_candidate_score = float("-inf")
+            last_failure_reason: Optional[str] = None
 
-            try:
-                strategy_instance = StrategyLoader.load_strategy(new_code, class_name)
-            except Exception as strategy_error:
-                reason = f"Candidate strategy rejected: failed to load strategy code ({strategy_error})."
-                logger.warning(f"Evolution rejected for {agent_id}: {reason}")
-                self.failed_improvements += 1
-                self._record_latest(agent_id, "failed", 100, reason)
-                self._append_event(
-                    level="warning",
-                    phase="failed",
-                    message=f"[{label}] 후보 전략 로드 실패: {strategy_error}",
-                    agent_id=agent_id,
-                )
-                await self.supabase.save_improvement_log(
-                    agent_id=agent_id,
-                    prev_id=prev_strategy_id,
-                    new_id=None,
-                    analysis=reason,
-                    expected={
-                        "baseline_trinity_score": evolution_package["metrics"]["trinity_score"],
-                        "candidate_trinity_score": None,
-                    },
-                )
-                self._set_state(agent_id, EvolutionState.IDLE)
-                return
-
-            validation_data = self._build_validation_data()
-            runtime_fix_retries = 1
-            validation_result = None
-
-            for runtime_attempt in range(runtime_fix_retries + 1):
-                try:
-                    validation_result = self.backtest_manager.validate_strategy(
-                        strategy_instance,
-                        validation_data,
-                        train_days=60,
-                        val_days=30,
-                        threshold=0.7,
+            for candidate_attempt in range(candidate_attempts):
+                attempt_no = candidate_attempt + 1
+                if candidate_attempt > 0:
+                    self._append_event(
+                        level="info",
+                        phase="retry",
+                        message=f"[{label}] 개선 후보 재생성 시도 {attempt_no}/{candidate_attempts}.",
+                        agent_id=agent_id,
                     )
-                    break
-                except Exception as runtime_error:
-                    if runtime_attempt >= runtime_fix_retries:
-                        reason = f"Candidate strategy rejected: runtime validation failed ({runtime_error})."
-                        logger.warning(f"Evolution rejected for {agent_id}: {reason}")
-                        self.failed_improvements += 1
-                        self._record_latest(agent_id, "failed", 100, reason)
-                        self._append_event(
-                            level="error",
-                            phase="failed",
-                            message=f"[{label}] 백테스트 실행 오류로 후보 거부: {runtime_error}",
-                            agent_id=agent_id,
-                        )
-                        await self.supabase.save_improvement_log(
-                            agent_id=agent_id,
-                            prev_id=prev_strategy_id,
-                            new_id=None,
-                            analysis=reason,
-                            expected={
-                                "baseline_trinity_score": evolution_package["metrics"]["trinity_score"],
-                                "candidate_trinity_score": None,
-                            },
-                        )
-                        self._set_state(agent_id, EvolutionState.IDLE)
-                        return
 
+                try:
+                    new_code = await self.llm_client.generate_strategy_code(evolution_package)
+                    self._append_event(
+                        level="success",
+                        phase="generated",
+                        message=(
+                            f"[{label}] 후보 전략 코드 생성 완료 "
+                            f"(시도 {attempt_no}/{candidate_attempts}), 검증 단계 진입."
+                        ),
+                        agent_id=agent_id,
+                    )
+                except LLMUnavailableError as llm_error:
+                    last_failure_reason = f"Candidate strategy rejected: LLM unavailable ({llm_error})."
+                    self._append_event(
+                        level="warning",
+                        phase="retry",
+                        message=f"[{label}] LLM 호출 실패(시도 {attempt_no}/{candidate_attempts}): {llm_error}",
+                        agent_id=agent_id,
+                    )
+                    continue
+
+                try:
+                    StrategyLoader.validate_code(new_code)
+                    class_name = self._extract_class_name(new_code)
+                    if not class_name:
+                        raise ValueError(f"Could not extract strategy class name for {agent_id}")
+                    strategy_instance = StrategyLoader.load_strategy(new_code, class_name)
+                except Exception as strategy_error:
+                    last_failure_reason = (
+                        f"Candidate strategy rejected: failed to load strategy code ({strategy_error})."
+                    )
                     self._append_event(
                         level="warning",
                         phase="retry",
                         message=(
-                            f"[{label}] 런타임 오류 감지({runtime_error}). "
-                            f"수정 코드 재생성 시도 {runtime_attempt + 1}/{runtime_fix_retries}."
+                            f"[{label}] 후보 전략 로드 실패(시도 {attempt_no}/{candidate_attempts}): "
+                            f"{strategy_error}"
                         ),
                         agent_id=agent_id,
                     )
+                    continue
 
-                    correction_context = (
-                        "Runtime backtest validation failed with the following error:\n"
-                        f"{runtime_error}\n"
-                        "Regenerate complete strategy code that fixes this error."
-                    )
+                validation_data = self._build_validation_data()
+                runtime_fix_retries = 1
+                validation_result = None
+                candidate_runtime_failed = False
+
+                for runtime_attempt in range(runtime_fix_retries + 1):
                     try:
-                        new_code = await self.llm_client.generate_strategy_code(
-                            evolution_package,
-                            max_retries=2,
-                            initial_error_context=correction_context,
+                        validation_result = self.backtest_manager.validate_strategy(
+                            strategy_instance,
+                            validation_data,
+                            train_days=60,
+                            val_days=30,
+                            threshold=0.7,
                         )
-                        StrategyLoader.validate_code(new_code)
-                        class_name = self._extract_class_name(new_code)
-                        if not class_name:
-                            raise ValueError(f"Could not extract corrected strategy class name for {agent_id}")
-                        strategy_instance = StrategyLoader.load_strategy(new_code, class_name)
-                    except Exception as correction_error:
-                        reason = f"Candidate strategy rejected: runtime correction failed ({correction_error})."
-                        logger.warning(f"Evolution rejected for {agent_id}: {reason}")
-                        self.failed_improvements += 1
-                        self._record_latest(agent_id, "failed", 100, reason)
+                        break
+                    except Exception as runtime_error:
+                        if runtime_attempt >= runtime_fix_retries:
+                            candidate_runtime_failed = True
+                            last_failure_reason = (
+                                f"Candidate strategy rejected: runtime validation failed ({runtime_error})."
+                            )
+                            self._append_event(
+                                level="warning",
+                                phase="retry",
+                                message=(
+                                    f"[{label}] 백테스트 실행 오류(시도 {attempt_no}/{candidate_attempts}): "
+                                    f"{runtime_error}"
+                                ),
+                                agent_id=agent_id,
+                            )
+                            break
+
                         self._append_event(
-                            level="error",
-                            phase="failed",
-                            message=f"[{label}] 런타임 보정 실패로 후보 거부: {correction_error}",
+                            level="warning",
+                            phase="retry",
+                            message=(
+                                f"[{label}] 런타임 오류 감지({runtime_error}). "
+                                f"수정 코드 재생성 시도 {runtime_attempt + 1}/{runtime_fix_retries}."
+                            ),
                             agent_id=agent_id,
                         )
-                        await self.supabase.save_improvement_log(
-                            agent_id=agent_id,
-                            prev_id=prev_strategy_id,
-                            new_id=None,
-                            analysis=reason,
-                            expected={
-                                "baseline_trinity_score": evolution_package["metrics"]["trinity_score"],
-                                "candidate_trinity_score": None,
-                            },
+
+                        correction_context = (
+                            "Runtime backtest validation failed with the following error:\n"
+                            f"{runtime_error}\n"
+                            "Regenerate complete strategy code that fixes this error."
                         )
-                        self._set_state(agent_id, EvolutionState.IDLE)
-                        return
-                    self._append_event(
-                        level="info",
-                        phase="generated",
-                        message=f"[{label}] 런타임 오류 보정 후보 생성 완료, 재검증 진행.",
-                        agent_id=agent_id,
-                    )
+                        try:
+                            new_code = await self.llm_client.generate_strategy_code(
+                                evolution_package,
+                                max_retries=2,
+                                initial_error_context=correction_context,
+                            )
+                            StrategyLoader.validate_code(new_code)
+                            class_name = self._extract_class_name(new_code)
+                            if not class_name:
+                                raise ValueError(
+                                    f"Could not extract corrected strategy class name for {agent_id}"
+                                )
+                            strategy_instance = StrategyLoader.load_strategy(new_code, class_name)
+                        except Exception as correction_error:
+                            candidate_runtime_failed = True
+                            last_failure_reason = (
+                                f"Candidate strategy rejected: runtime correction failed ({correction_error})."
+                            )
+                            self._append_event(
+                                level="warning",
+                                phase="retry",
+                                message=(
+                                    f"[{label}] 런타임 보정 실패(시도 {attempt_no}/{candidate_attempts}): "
+                                    f"{correction_error}"
+                                ),
+                                agent_id=agent_id,
+                            )
+                            break
+                        self._append_event(
+                            level="info",
+                            phase="generated",
+                            message=f"[{label}] 런타임 오류 보정 후보 생성 완료, 재검증 진행.",
+                            agent_id=agent_id,
+                        )
 
-            if validation_result is None:
-                raise RuntimeError("Validation result missing after runtime retry loop.")
-            metrics = validation_result["oos_metrics"]
-            metrics["test_period"] = {
-                "type": "OOS",
-                "generated_at": datetime.utcnow().isoformat(),
-            }
+                if candidate_runtime_failed or validation_result is None:
+                    continue
 
-            if metrics["trinity_score"] <= evolution_package["metrics"]["trinity_score"]:
+                candidate_metrics = validation_result["oos_metrics"]
+                candidate_metrics["test_period"] = {
+                    "type": "OOS",
+                    "generated_at": datetime.utcnow().isoformat(),
+                }
+                candidate_score = float(candidate_metrics.get("trinity_score") or 0.0)
+
+                if candidate_score > best_candidate_score:
+                    best_candidate_score = candidate_score
+                    best_candidate_metrics = candidate_metrics
+
+                if candidate_score >= baseline_score + min_trinity_delta:
+                    accepted_code = new_code
+                    accepted_metrics = candidate_metrics
+                    break
+
+                last_failure_reason = "Candidate strategy rejected: no OOS trinity score improvement."
+                self._append_event(
+                    level="warning",
+                    phase="retry",
+                    message=(
+                        f"[{label}] 개선 미달 "
+                        f"(Trinity {baseline_score:.1f} -> {candidate_score:.1f}), "
+                        f"다음 후보 시도."
+                    ),
+                    agent_id=agent_id,
+                )
+
+            if accepted_code is None or accepted_metrics is None:
                 reason = "Candidate strategy rejected: no OOS trinity score improvement."
+                if best_candidate_metrics is not None:
+                    reason = (
+                        "Candidate strategy rejected: no OOS trinity score improvement "
+                        f"(baseline={baseline_score:.4f}, best_candidate={best_candidate_score:.4f}, "
+                        f"min_delta={min_trinity_delta:.4f}, attempts={candidate_attempts})."
+                    )
+                elif last_failure_reason:
+                    reason = last_failure_reason
+
                 logger.info(f"Evolution rejected for agent {agent_id}: {reason}")
                 self.failed_improvements += 1
                 self._record_latest(agent_id, "failed", 100, reason)
                 self._append_event(
                     level="warning",
                     phase="failed",
-                    message=(
-                        f"[{label}] 개선 미달로 후보 거부 "
-                        f"(Trinity {evolution_package['metrics']['trinity_score']:.1f} -> {metrics['trinity_score']:.1f})."
-                    ),
+                    message=f"[{label}] 후보 최종 거부: {reason}",
                     agent_id=agent_id,
                 )
                 await self.supabase.save_improvement_log(
@@ -589,12 +613,15 @@ class EvolutionOrchestrator:
                     new_id=None,
                     analysis=reason,
                     expected={
-                        "baseline_trinity_score": evolution_package["metrics"]["trinity_score"],
-                        "candidate_trinity_score": metrics["trinity_score"],
+                        "baseline_trinity_score": baseline_score,
+                        "candidate_trinity_score": best_candidate_score if best_candidate_metrics else None,
                     },
                 )
                 self._set_state(agent_id, EvolutionState.IDLE)
                 return
+
+            new_code = accepted_code
+            metrics = accepted_metrics
 
             self._set_state(agent_id, EvolutionState.COMMITTING)
 

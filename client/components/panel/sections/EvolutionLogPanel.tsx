@@ -39,10 +39,7 @@ export default function EvolutionLogPanel({
     : events.filter((event) => event.agent_id === activeAgent);
 
   return (
-    <div className="flex-1 m-3 rounded-2xl border border-white/[0.05] bg-[#0c1221]/80 backdrop-blur-xl flex flex-col overflow-hidden shadow-2xl relative group">
-      {/* Dynamic Background Glow */}
-      <div className="absolute top-0 left-1/4 w-1/2 h-1/2 bg-purple-500/10 blur-[100px] -z-10" />
-
+    <div className="flex-1 flex flex-col overflow-hidden relative group">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.08] bg-white/[0.02]">
         <div className="flex items-center gap-2.5">

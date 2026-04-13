@@ -4,6 +4,18 @@
 
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 COMMAND=$1
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+TUNNEL_SUBDOMAIN="${TUNNEL_SUBDOMAIN:-lsy-super-trend}"
+LT_LOCAL_HOST="${LT_LOCAL_HOST:-127.0.0.1}"
+LOG_DIR="$PROJECT_ROOT/logs"
+RUN_DIR="$PROJECT_ROOT/tmp/always_on"
+API_PID_FILE="$RUN_DIR/api.pid"
+TUNNEL_PID_FILE="$RUN_DIR/localtunnel.pid"
+API_LOG="$LOG_DIR/api-${BACKEND_PORT}.log"
+TUNNEL_LOG="$LOG_DIR/localtunnel-${BACKEND_PORT}.log"
+URL_FILE="$LOG_DIR/backend_tunnel_url.txt"
+
+mkdir -p "$LOG_DIR" "$RUN_DIR"
 
 is_port_listening() {
   local port="$1"
@@ -25,17 +37,6 @@ case $COMMAND in
     echo "🚀 Starting Trinity Client (Next.js)..."
     cd "$PROJECT_ROOT/client" && npm run dev
     ;;
-  # "slack")
-  #   echo "🤖 Starting Slack Agent..."
-  #   if [ -d "$PROJECT_ROOT/venv" ]; then
-  #     source "$PROJECT_ROOT/venv/bin/activate"
-  #   fi
-  #   if [ ! -f "$PROJECT_ROOT/slack-on.py" ]; then
-  #     echo "❌ slack-on.py not found at project root."
-  #     exit 1
-  #   fi
-  #   python "$PROJECT_ROOT/slack-on.py"
-  #   ;;
   "server"|"api")
     if is_port_listening 8000; then
       echo "ℹ️ server is already running on port 8000."
@@ -44,6 +45,89 @@ case $COMMAND in
     fi
     echo "⚙️ Starting FastAPI server..."
     cd "$PROJECT_ROOT/server/api" && source "$PROJECT_ROOT/venv/bin/activate" && set -a && [ -f "$PROJECT_ROOT/.env" ] && source "$PROJECT_ROOT/.env" && set +a && PYTHONPATH="$PROJECT_ROOT" python -m server.api.main
+    ;;
+  "public"|"tunnel")
+    if ! command -v lt >/dev/null 2>&1 && ! command -v npx >/dev/null 2>&1; then
+      echo "❌ localtunnel 실행 도구를 찾지 못했습니다. (lt 또는 npx 필요)"
+      exit 1
+    fi
+
+    if is_port_listening "$BACKEND_PORT"; then
+      echo "ℹ️ backend already running on port ${BACKEND_PORT}."
+      show_port_owner "$BACKEND_PORT"
+    else
+      echo "⚙️ Starting FastAPI server in background..."
+      nohup "$PROJECT_ROOT/venv/bin/python" -m uvicorn server.api.main:app \
+        --host 0.0.0.0 --port "$BACKEND_PORT" >> "$API_LOG" 2>&1 &
+      echo $! > "$API_PID_FILE"
+      sleep 1
+    fi
+
+    if ! is_port_listening "$BACKEND_PORT"; then
+      echo "❌ backend failed to start. Check log: $API_LOG"
+      exit 1
+    fi
+
+    pkill -f "localtunnel --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
+    pkill -f "lt --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
+    : > "$TUNNEL_LOG"
+
+    TUNNEL_URL="https://${TUNNEL_SUBDOMAIN}.loca.lt"
+    echo "$TUNNEL_URL" > "$URL_FILE"
+    echo "🌐 Localtunnel 시작 — ${TUNNEL_URL} → 포트 ${BACKEND_PORT}"
+    if command -v lt >/dev/null 2>&1; then
+      LT_CMD=(lt --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
+    else
+      LT_CMD=(npx --yes localtunnel --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
+    fi
+    if [ -n "${LT_HOST:-}" ]; then
+      LT_CMD+=(--host "$LT_HOST")
+    fi
+    echo
+    echo "✅ Public tunnel starting (foreground)"
+    echo "   API Local : http://127.0.0.1:${BACKEND_PORT}"
+    echo "   API Public: ${TUNNEL_URL} (fixed by subdomain)"
+    echo "   URL file  : $URL_FILE"
+    echo "   API log   : $API_LOG"
+    echo "   Tunnel log: $TUNNEL_LOG"
+    echo "   Stop      : Ctrl+C"
+    echo
+    echo "Vercel 동기화:"
+    echo "  ./scripts/always_on_sync_vercel.sh \"${TUNNEL_URL}\" --deploy"
+    echo
+    "${LT_CMD[@]}" 2>&1 | tee -a "$TUNNEL_LOG"
+    ;;
+  "public-stop"|"tunnel-stop")
+    if [ -f "$TUNNEL_PID_FILE" ]; then
+      TUNNEL_PID="$(cat "$TUNNEL_PID_FILE" || true)"
+      if [ -n "${TUNNEL_PID:-}" ] && ps -p "$TUNNEL_PID" >/dev/null 2>&1; then
+        kill "$TUNNEL_PID" >/dev/null 2>&1 || true
+        echo "🛑 localtunnel stopped (pid=$TUNNEL_PID)"
+      fi
+      rm -f "$TUNNEL_PID_FILE"
+    fi
+    pkill -f "localtunnel --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
+    pkill -f "lt --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
+    echo "✅ tunnel stopped."
+    ;;
+  "public-status"|"tunnel-status")
+    echo "🔎 backend/tunnel status"
+    if is_port_listening "$BACKEND_PORT"; then
+      echo "   backend: LISTEN on ${BACKEND_PORT}"
+      show_port_owner "$BACKEND_PORT"
+    else
+      echo "   backend: NOT LISTENING on ${BACKEND_PORT}"
+    fi
+    if pgrep -af "localtunnel --port ${BACKEND_PORT}" >/dev/null 2>&1 || pgrep -af "lt --port ${BACKEND_PORT}" >/dev/null 2>&1; then
+      echo "   tunnel : RUNNING"
+      pgrep -af "localtunnel --port ${BACKEND_PORT}" || true
+      pgrep -af "lt --port ${BACKEND_PORT}" || true
+    else
+      echo "   tunnel : NOT RUNNING"
+    fi
+    if [ -f "$URL_FILE" ]; then
+      echo "   public : $(cat "$URL_FILE")"
+    fi
     ;;
   "test")
     echo "🧪 Running AI Trading Tests..."
@@ -55,9 +139,13 @@ case $COMMAND in
       server/ai_trading/tests/test_sandbox.py -v --tb=short
     ;;
   *)
-    echo "Usage: ./run [client|server|test]"
+    echo "Usage: ./run [client|server|public|public-status|public-stop|test]"
     echo "  client: Start the Next.js dashboard (alias: front)"
     echo "  server: Start the FastAPI server (alias: api)"
+    echo "  public: Start/attach backend + localtunnel fixed subdomain"
+    echo "          env: TUNNEL_SUBDOMAIN=<name> BACKEND_PORT=<port> LT_LOCAL_HOST=<ip>"
+    echo "  public-status: Show backend/tunnel status"
+    echo "  public-stop: Stop localtunnel"
     echo "  test: Run AI trading pytest suite"
     exit 1
     ;;
