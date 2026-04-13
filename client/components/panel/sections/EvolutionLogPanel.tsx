@@ -42,13 +42,13 @@ export default function EvolutionLogPanel({
     <div className="flex-1 m-3 rounded-2xl border border-white/[0.05] bg-[#0c1221]/80 backdrop-blur-xl flex flex-col overflow-hidden shadow-2xl relative group">
       {/* Dynamic Background Glow */}
       <div className="absolute top-0 left-1/4 w-1/2 h-1/2 bg-purple-500/10 blur-[100px] -z-10" />
-      
+
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.08] bg-white/[0.02]">
         <div className="flex items-center gap-2.5">
           <div className="relative">
-             <FiTerminal className="text-purple-400 w-4 h-4" />
-             <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-purple-400 rounded-full animate-ping" />
+            <FiTerminal className="text-purple-400 w-4 h-4" />
+            <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-purple-400 rounded-full animate-ping" />
           </div>
           <h3 className="text-[11px] font-black tracking-[0.2em] text-white uppercase">
             Evolution Monitor
@@ -76,8 +76,8 @@ export default function EvolutionLogPanel({
             {filtered.map((event) => {
               const config = PHASE_CONFIG[event.phase?.toLowerCase()] || { color: "#abb2bf", icon: FiTerminal, label: "LOG" };
               return (
-                <div 
-                  key={event.id} 
+                <div
+                  key={event.id}
                   className="group/item font-mono border-l-2 border-transparent hover:border-white/20 transition-all pl-3"
                 >
                   {/* Header Line: [LOG] Agent_Name (Time) */}
@@ -90,7 +90,7 @@ export default function EvolutionLogPanel({
                         {event.agent_label.replace(/\s/g, '_')}
                       </span>
                     )}
-                    <span className="text-slate-500 text-[9px]">
+                    <span className="text-slate-500 text-[9px]" suppressHydrationWarning>
                       ({formatEventTime(event.created_at)})
                     </span>
                   </div>
@@ -112,10 +112,10 @@ export default function EvolutionLogPanel({
       {/* Footer Info */}
       <div className="px-5 py-2 border-t border-white/[0.05] bg-black/20 flex justify-between items-center shrink-0">
         <span className="text-[9px] font-bold text-slate-600 tracking-widest flex items-center gap-2">
-           <FiCpu className="w-3 h-3" /> TRINITY_ORCH_V1.1
+          <FiCpu className="w-3 h-3" /> TRINITY_ORCH_V1.1
         </span>
         <span className="text-[9px] font-mono text-slate-500">
-           SEQ_{Math.max(0, ...filtered.map(e => e.id)).toString().padStart(4, '0')}
+          SEQ_{Math.max(0, ...filtered.map(e => e.id)).toString().padStart(4, '0')}
         </span>
       </div>
     </div>

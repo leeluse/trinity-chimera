@@ -91,7 +91,7 @@ function DashboardRightPanelContent({
       avatarBg: "rgba(255,255,255,0.1)",
       color: `var(--agent-${colorIdx + 1})`,
       time: new Date(imp.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) + ' · ' +
-            new Date(imp.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        new Date(imp.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }),
       analysis: `${statusLabel} (진행률 ${imp.progress}%)`,
       reason: detailText,
       params: []
@@ -105,11 +105,11 @@ function DashboardRightPanelContent({
   return (
     <>
       <PanelTabs />
-      
+
       {isLogsView && (
         <AgentFilter names={names} activeAgent={activeAgent} setActiveAgent={setActiveAgent} />
       )}
-      
+
       {isEvolutionView && (
         <EvolutionLogPanel events={evolutionEvents} activeAgent={activeAgent} isLoopRunning={isLoopRunning} />
       )}

@@ -49,7 +49,7 @@ export default function LogCard({
           </div>
           <span className="text-sm font-semibold" style={{ color }}>{agentName}</span>
         </div>
-        <span className="text-[11px] text-[#4a5a7a] font-mono">{time}</span>
+        <span className="text-[11px] text-[#4a5a7a] font-mono" suppressHydrationWarning>{time}</span>
       </div>
 
       <div className="flex flex-col px-4 pb-4 gap-2 sm:gap-4">
