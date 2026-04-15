@@ -66,10 +66,10 @@ export default function BacktestPage() {
   const [activeAgent, setActiveAgent] = useState("ALL");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [timeFrame, setTimeFrame] = useState<TimeFrame>("1h");
-  const [strategy, setStrategy] = useState("optPredator");
+  const [strategy, setStrategy] = useState(""); // Start with empty, will be set on load
   const [strategies, setStrategies] = useState<any[]>([]);
-  const [startDate, setStartDate] = useState(defaultStart.toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState("2024-01-01");
+  const [endDate, setEndDate] = useState("2024-04-15");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
 
@@ -92,7 +92,11 @@ export default function BacktestPage() {
       const res = await fetchWithBypass("/api/backtest/strategies");
       const data = await res.json();
       if (!res.ok || !data?.success) return;
-      setStrategies((data?.strategies || []).map((s: any) => ({ key: String(s.key), label: String(s.label || s.key) })));
+      const loaded = (data?.strategies || []).map((s: any) => ({ key: String(s.key), label: String(s.label || s.key) }));
+      setStrategies(loaded);
+      if (loaded.length > 0 && !strategy) {
+        setStrategy(loaded[0].key);
+      }
     };
     void loadStrategies();
   }, []);
@@ -175,7 +179,7 @@ export default function BacktestPage() {
         params.append("code", strategyCode);
       }
 
-      const res = await fetchWithBypass(`/api/backtest?${params.toString()}`);
+      const res = await fetchWithBypass(`/api/backtest/run?${params.toString()}`);
       const data = await res.json();
       if (!res.ok || !data?.success) throw new Error(data?.error || "백테스트 실패");
       applyBacktestPayload(data);
@@ -310,6 +314,7 @@ export default function BacktestPage() {
                 <StrategyCodeSection
                   strategyName={strategies.find(s => s.key === strategy)?.label || strategy}
                   code={strategyCode}
+                  onChange={setStrategyCode}
                   loading={codeLoading}
                 />
               </div>

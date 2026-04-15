@@ -3,6 +3,8 @@
 # Trinity Project Runner
 
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Add common bin paths for background execution
+export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 COMMAND=$1
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 TUNNEL_SUBDOMAIN="${TUNNEL_SUBDOMAIN:-lsy-super-trend}"
@@ -44,7 +46,41 @@ case $COMMAND in
       exit 0
     fi
     echo "⚙️ Starting FastAPI server..."
-    cd "$PROJECT_ROOT/server/api" && source "$PROJECT_ROOT/venv/bin/activate" && set -a && [ -f "$PROJECT_ROOT/.env" ] && source "$PROJECT_ROOT/.env" && set +a && PYTHONPATH="$PROJECT_ROOT" python -m server.api.main
+    
+    # Background tunnel starter: waits for port 8000 then runs localtunnel
+    (
+      echo "⏳ Waiting for backend to bind to port 8000..." > "$LOG_DIR/auto_tunnel.log"
+      for i in {1..20}; do
+        if is_port_listening 8000; then
+          echo "✅ Backend is up on port 8000. Starting localtunnel..." >> "$LOG_DIR/auto_tunnel.log"
+          
+          # Kill existing tunnels for this port
+          pkill -f "localtunnel --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
+          pkill -f "lt --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
+          
+          TUNNEL_URL="https://${TUNNEL_SUBDOMAIN}.loca.lt"
+          echo "$TUNNEL_URL" > "$URL_FILE"
+          
+          if command -v lt >/dev/null 2>&1; then
+            LT_CMD=(lt --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
+          else
+            LT_CMD=(npx --yes localtunnel --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
+          fi
+          
+          # Start tunnel in background from this subshell
+          nohup "${LT_CMD[@]}" >> "$TUNNEL_LOG" 2>&1 &
+          echo "🌐 Tunnel started: $TUNNEL_URL" >> "$LOG_DIR/auto_tunnel.log"
+          exit 0
+        fi
+        sleep 1
+      done
+      echo "❌ Timeout waiting for backend on port 8000" >> "$LOG_DIR/auto_tunnel.log"
+    ) &
+    
+    cd "$PROJECT_ROOT/server/api" && \
+    source "$PROJECT_ROOT/venv/bin/activate" && \
+    set -a && [ -f "$PROJECT_ROOT/.env" ] && source "$PROJECT_ROOT/.env" && set +a && \
+    PYTHONPATH="$PROJECT_ROOT" python -m server.api.main
     ;;
   "public"|"tunnel")
     if ! command -v lt >/dev/null 2>&1 && ! command -v npx >/dev/null 2>&1; then
@@ -60,7 +96,12 @@ case $COMMAND in
       nohup "$PROJECT_ROOT/venv/bin/python" -m uvicorn server.api.main:app \
         --host 0.0.0.0 --port "$BACKEND_PORT" >> "$API_LOG" 2>&1 &
       echo $! > "$API_PID_FILE"
-      sleep 1
+      
+      # Wait for start
+      for i in {1..10}; do
+        is_port_listening "$BACKEND_PORT" && break
+        sleep 1
+      done
     fi
 
     if ! is_port_listening "$BACKEND_PORT"; then
@@ -92,9 +133,6 @@ case $COMMAND in
     echo "   Tunnel log: $TUNNEL_LOG"
     echo "   Stop      : Ctrl+C"
     echo
-    echo "Vercel 동기화:"
-    echo "  ./scripts/always_on_sync_vercel.sh \"${TUNNEL_URL}\" --deploy"
-    echo
     "${LT_CMD[@]}" 2>&1 | tee -a "$TUNNEL_LOG"
     ;;
   "public-stop"|"tunnel-stop")
@@ -118,10 +156,9 @@ case $COMMAND in
     else
       echo "   backend: NOT LISTENING on ${BACKEND_PORT}"
     fi
-    if pgrep -af "localtunnel --port ${BACKEND_PORT}" >/dev/null 2>&1 || pgrep -af "lt --port ${BACKEND_PORT}" >/dev/null 2>&1; then
+    if ps aux | grep -v grep | grep -E "localtunnel|lt" | grep -q "${BACKEND_PORT}"; then
       echo "   tunnel : RUNNING"
-      pgrep -af "localtunnel --port ${BACKEND_PORT}" || true
-      pgrep -af "lt --port ${BACKEND_PORT}" || true
+      ps aux | grep -v grep | grep -E "localtunnel|lt" | grep "${BACKEND_PORT}" || true
     else
       echo "   tunnel : NOT RUNNING"
     fi

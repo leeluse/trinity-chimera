@@ -17,7 +17,7 @@ export default function RightPanel({
     <div className={`
       w-full ${width} shrink-0 flex flex-col 
       border-t lg:border-t-0 lg:border-l border-white/[0.05] 
-      bg-[#060912]/80 backdrop-blur-3xl relative z-10 
+      bg-[#060912]/80 backdrop-blur-3xl relative z-[120] 
       h-screen sticky top-0
       ${className}
     `}>

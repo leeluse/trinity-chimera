@@ -2,7 +2,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import Chart from "chart.js/auto";
 import Head from "next/head";
 import { APIClient, DashboardMetrics, DashboardProgress, EvolutionLogEvent } from "../lib/api";
@@ -22,13 +22,14 @@ import {
 import { COLORS, NAMES } from "@/constants";
 import { MetricKey } from "@/types";
 
-const DAYS = 96;
+const DAYS = 96; // 96 intervals of 15 minutes = 24 hours
 const labels: string[] = [];
-const startDate = new Date('2026-01-01');
+// Assuming a starting time, e.g., midnight
+const startDate = new Date('2026-04-13T00:00:00');
 for (let i = 0; i < DAYS; i++) {
   const d = new Date(startDate);
-  d.setDate(d.getDate() + i);
-  labels.push(d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }));
+  d.setMinutes(d.getMinutes() + i * 15);
+  labels.push(d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }));
 }
 for (let i = 0; i < 5; i++) {
   labels.push("");
@@ -38,74 +39,83 @@ export default function Dashboard() {
   const chartRef = useRef<HTMLCanvasElement | null>(null);
   const chartInstance = useRef<Chart | null>(null);
   const [currentMetric, setCurrentMetric] = useState<MetricKey>("score");
-  // Separate states for Chart and Log filtering
   const [chartActiveAgent, setChartActiveAgent] = useState("ALL");
   const [logActiveAgent, setLogActiveAgent] = useState("ALL");
+
+  // React Query 대체 상태 및 로딩
   const [dashboardProgress, setDashboardProgress] = useState<DashboardProgress | null>(null);
   const [metricsData, setMetricsData] = useState<DashboardMetrics | null>(null);
   const [evolutionEvents, setEvolutionEvents] = useState<EvolutionLogEvent[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [automationStatus, setAutomationStatus] = useState<{enabled: boolean, status: string} | null>(null);
+  const [timeseriesData, setTimeseriesData] = useState<Record<string, number[]>>({});
+  
+  const [isLoadingProgress, setIsLoadingProgress] = useState(true);
+  const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(true);
+
+  // 데이터 fetch 로직
+  const fetchAllData = async () => {
+    try {
+      const [prog, met, logs, auto] = await Promise.all([
+        APIClient.getDashboardProgress(),
+        APIClient.getDashboardMetrics(),
+        APIClient.getEvolutionLog(220),
+        APIClient.getAutomationStatus()
+      ]);
+      setDashboardProgress(prog);
+      setMetricsData(met);
+      setEvolutionEvents(logs);
+      setAutomationStatus(auto);
+      setIsLoadingProgress(false);
+      setIsLoadingMetrics(false);
+      setIsLoadingEvents(false);
+    } catch (e) {
+      console.error("Data fetch error:", e);
+    }
+  };
+
+  const fetchTimeseries = async (metric: MetricKey) => {
+    const ids = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
+    const results: Record<string, number[]> = {};
+    await Promise.all(ids.map(async (id) => {
+      try {
+        results[id] = await APIClient.getAgentTimeseries(id, metric);
+      } catch (e) {
+        results[id] = [];
+      }
+    }));
+    setTimeseriesData(results);
+  };
+
+  // 폴링 설정
+  useEffect(() => {
+    fetchAllData();
+    fetchTimeseries(currentMetric);
+
+    const mainInterval = setInterval(fetchAllData, 4000);
+    const tsInterval = setInterval(() => fetchTimeseries(currentMetric), 4000);
+
+    return () => {
+      clearInterval(mainInterval);
+      clearInterval(tsInterval);
+    };
+  }, [currentMetric]);
+
+  const isLoading = isLoadingProgress || isLoadingMetrics || isLoadingEvents;
   const [isLoopRunning, setIsLoopRunning] = useState(false);
   const [loopNotice, setLoopNotice] = useState("");
   const [labelPositions, setLabelPositions] = useState<any[]>([]);
   const labelPositionsRef = useRef<any[]>([]);
-  const loadInFlightRef = useRef(false);
-  const [agentNames, setAgentNames] = useState<string[]>(NAMES);
 
-  useEffect(() => {
-    const loadDashboardData = async (silent = false) => {
-      if (loadInFlightRef.current) return;
-      loadInFlightRef.current = true;
-      try {
-        if (!silent) setIsLoading(true);
-        const [progressResult, metricsResult, eventsResult] = await Promise.allSettled([
-          APIClient.getDashboardProgress(),
-          APIClient.getDashboardMetrics(),
-          APIClient.getEvolutionLog(220),
-        ]);
+  const metricsDataSignature = JSON.stringify(metricsData?.agents);
+  const timeseriesSignature = JSON.stringify(timeseriesData);
 
-        if (progressResult.status === "fulfilled") {
-          setDashboardProgress(progressResult.value);
-        }
-        if (metricsResult.status === "fulfilled") {
-          const metrics = metricsResult.value;
-          setMetricsData(metrics);
-
-          // Update names from DB
-          const ids = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
-          const newNames = ids.map(id => metrics.agents[id]?.name || NAMES[ids.indexOf(id)]);
-          newNames.push("BTC BnH"); // Benchmark always stays
-          setAgentNames(newNames);
-        }
-        if (eventsResult.status === "fulfilled") {
-          setEvolutionEvents(eventsResult.value);
-        }
-
-        if (
-          progressResult.status === "rejected" &&
-          metricsResult.status === "rejected" &&
-          eventsResult.status === "rejected"
-        ) {
-          throw progressResult.reason || metricsResult.reason || eventsResult.reason;
-        }
-
-      } catch (error) {
-        console.error('대시보드 데이터 로드 실패:', error);
-      } finally {
-        loadInFlightRef.current = false;
-        if (!silent) setIsLoading(false);
-      }
-    };
-
-    loadDashboardData(false);
-    const pollTimer = window.setInterval(() => {
-      loadDashboardData(true);
-    }, 4000);
-
-    return () => {
-      window.clearInterval(pollTimer);
-    };
-  }, []);
+  const agentNames = useMemo(() => {
+    const ids = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
+    const newNames = ids.map(id => metricsData?.agents[id]?.name || NAMES[ids.indexOf(id)]);
+    newNames.push("BTC BnH"); // Benchmark always stays
+    return newNames;
+  }, [metricsDataSignature]);
 
   useEffect(() => {
     if (!loopNotice) return;
@@ -118,17 +128,24 @@ export default function Dashboard() {
       setIsLoopRunning(true);
       const result = await APIClient.runEvolutionLoop();
       setLoopNotice(`ITER #${result.iteration} · ${result.queued_agents.length} agents`);
-      const [progress, events] = await Promise.all([
-        APIClient.getDashboardProgress(),
-        APIClient.getEvolutionLog(220),
-      ]);
-      setDashboardProgress(progress);
-      setEvolutionEvents(events);
+      // 즉시 새로고침
+      await fetchAllData();
     } catch (error) {
       console.error("Run loop 실행 실패:", error);
       setLoopNotice("Run loop 실패");
     } finally {
       setIsLoopRunning(false);
+    }
+  };
+
+  const handleToggleAutomation = async () => {
+    try {
+      const current = automationStatus?.enabled ?? false;
+      await APIClient.setAutomationStatus(!current);
+      const newStatus = await APIClient.getAutomationStatus();
+      setAutomationStatus(newStatus);
+    } catch (error) {
+      console.error("자동화 상태 변경 실패:", error);
     }
   };
 
@@ -149,16 +166,30 @@ export default function Dashboard() {
       let data: number[] = [];
 
       if (id === "BTC BnH") {
-        // Benchmark data - currently we use a flat line or simulated trend as benchmark
-        // In a real scenario, this would be fetched from a benchmark API
-        data = Array(DAYS).fill(100).map((v, idx) => v + (idx * 0.1));
+        let base = 50, step = 0.2;
+        if (metric === "return") { base = 0.05; step = 0.001; }
+        else if (metric === "sharpe") { base = 0.5; step = 0.002; }
+        else if (metric === "mdd") { base = -0.15; step = 0; }
+        else if (metric === "win") { base = 0.5; step = 0.001; }
+        data = Array(DAYS).fill(base).map((v, idx) => v + (idx * step));
       } else if (metricsData?.agents[id]) {
-        // Map API current value to a flat line for the chart
-        // until getAgentTimeseries is fully integrated into the dashboard loop
+        // Map API timeseries value
         const metricField = metricFieldMap[metric];
         const agentMetrics = metricsData.agents[id as keyof typeof metricsData.agents];
         const currentVal = agentMetrics?.[metricField] ?? 0;
-        data = Array(DAYS).fill(currentVal || 0);
+        
+        if (timeseriesData && timeseriesData[id] && timeseriesData[id].length > 0) {
+           const history = timeseriesData[id];
+           if (history.length >= DAYS) {
+             data = history.slice(-DAYS);
+           } else {
+             // Pad beginning with first value or 0 if shorter than DAYS
+             const padding = Array(DAYS - history.length).fill(history[0] || 0);
+             data = [...padding, ...history];
+           }
+        } else {
+           data = Array(DAYS).fill(currentVal || 0);
+        }
       } else {
         data = Array(DAYS).fill(0);
       }
@@ -239,9 +270,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (chartInstance.current) {
       chartInstance.current.data.datasets = buildDynamicDatasets(currentMetric, agentNames);
-      chartInstance.current.update();
+      chartInstance.current.update('none'); // Update without animation to prevent bounce on tick
     }
-  }, [currentMetric, agentNames, chartActiveAgent, metricsData]);
+  }, [currentMetric, agentNames, chartActiveAgent, metricsDataSignature, timeseriesSignature]);
 
   return (
     <>
@@ -260,6 +291,8 @@ export default function Dashboard() {
             progress={dashboardProgress ?? undefined}
             evolutionEvents={evolutionEvents}
             isLoopRunning={isLoopRunning}
+            automationEnabled={automationStatus?.enabled ?? false}
+            onToggleAutomation={handleToggleAutomation}
           />
         </PageLayout.Side>
 

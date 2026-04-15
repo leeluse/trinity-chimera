@@ -3,7 +3,8 @@
 
 const API_BASE_URL = '/api';
 const normalizeApiBase = (value: string): string => value.replace(/\/+$/, "").replace(/\/api$/, "");
-export const API_BASE = normalizeApiBase(process.env.NEXT_PUBLIC_API_URL || "");
+// [RECOVERY] Use relative paths to leverage Next.js rewrites for stability
+export const API_BASE = "" as string; 
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const RAW_FETCH_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_API_FETCH_TIMEOUT_MS || "12000");
 const FETCH_TIMEOUT_MS = Number.isFinite(RAW_FETCH_TIMEOUT_MS)
@@ -34,6 +35,10 @@ export interface AgentImprovementRequest {
   market_regime: string;
   improvement_goal?: string;
 }
+
+type FetchWithBypassOptions = RequestInit & {
+  timeoutMs?: number;
+};
 
 export interface ImprovementResponse {
   success: boolean;
@@ -147,7 +152,8 @@ export class APIClient {
   }
 
   static async getDashboardProgress(): Promise<DashboardProgress> {
-    const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/improvement`);
+    const ts = Date.now();
+    const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/improvement?_ts=${ts}`);
 
     if (!response.ok) {
       throw new Error(`대시보드 데이터 조회 실패: ${response.status}`);
@@ -159,6 +165,7 @@ export class APIClient {
   static async getEvolutionLog(limit = 160, agentId?: string): Promise<EvolutionLogEvent[]> {
     const params = new URLSearchParams();
     params.set("limit", String(limit));
+    params.set("_ts", String(Date.now()));
     if (agentId && agentId !== "ALL" && agentId !== "전체") {
       params.set("agent_id", agentId);
     }
@@ -224,6 +231,22 @@ export class APIClient {
       throw new Error(`대시보드 메트릭 조회 실패: ${response.status}`);
     }
 
+    return response.json();
+  }
+
+  static async getAutomationStatus(): Promise<{ enabled: boolean, status: string }> {
+    const response = await fetchWithBypass(`${API_BASE_URL}/system/automation`);
+    if (!response.ok) throw new Error("자동화 상태 조회 실패");
+    return response.json();
+  }
+
+  static async setAutomationStatus(enabled: boolean): Promise<{ success: boolean, enabled: boolean }> {
+    const response = await fetchWithBypass(`${API_BASE_URL}/system/automation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!response.ok) throw new Error("자동화 상태 변경 실패");
     return response.json();
   }
 }
@@ -309,7 +332,11 @@ const buildCandidates = (url: string): string[] => {
   return [...new Set(candidates)];
 };
 
-export const fetchWithBypass = async (url: string, options: RequestInit = {}) => {
+export const fetchWithBypass = async (url: string, options: FetchWithBypassOptions = {}) => {
+  const { timeoutMs, ...requestInit } = options;
+  const effectiveTimeoutMs = Number.isFinite(timeoutMs)
+    ? Math.max(3000, Math.min(Number(timeoutMs), 300000))
+    : FETCH_TIMEOUT_MS;
   const candidates = buildCandidates(url);
 
   let lastError: unknown = null;
@@ -318,8 +345,8 @@ export const fetchWithBypass = async (url: string, options: RequestInit = {}) =>
     const candidate = candidates[i];
     const isLast = i === candidates.length - 1;
     const timeoutController = new AbortController();
-    const timeoutId = setTimeout(() => timeoutController.abort("timeout"), FETCH_TIMEOUT_MS);
-    const externalSignal = options.signal;
+    const timeoutId = setTimeout(() => timeoutController.abort("timeout"), effectiveTimeoutMs);
+    const externalSignal = requestInit.signal;
     let externalAbortListener: (() => void) | null = null;
 
     if (externalSignal) {
@@ -331,8 +358,10 @@ export const fetchWithBypass = async (url: string, options: RequestInit = {}) =>
       externalSignal.addEventListener("abort", externalAbortListener, { once: true });
     }
 
+    const method = String(requestInit.method || "GET").toUpperCase();
     const requestOptions = withBypassHeaders({
-      ...options,
+      ...requestInit,
+      cache: method === "GET" ? "no-store" : requestInit.cache,
       signal: timeoutController.signal,
     });
 

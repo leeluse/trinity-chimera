@@ -16,10 +16,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env", override=False)
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
-# Routes
-from server.api.routes import agents, backtest, chat
-from server.ai_trading.agents.constants import AGENT_IDS
-from server.ai_trading.agents.orchestrator import get_evolution_orchestrator
+# Routes - New Modular Structure
+from server.modules.chat.router import router as chat_router
+from server.modules.evolution.router import router as evolution_router, dashboard_router
+from server.modules.engine.router import router as engine_router
+from server.modules.evolution.orchestrator import get_evolution_orchestrator
+from server.modules.evolution.constants import AGENT_IDS
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -42,10 +44,10 @@ app.add_middleware(
 )
 
 # Router 등록
-app.include_router(agents.router)
-app.include_router(agents.dashboard_router)
-app.include_router(backtest.router)
-app.include_router(chat.router)
+app.include_router(chat_router, prefix="/api")
+app.include_router(evolution_router, prefix="/api")  # /api/agents ...
+app.include_router(dashboard_router, prefix="/api")  # /api/dashboard ...
+app.include_router(engine_router, prefix="/api/backtest")
 
 # Scheduler setup
 scheduler = AsyncIOScheduler()
@@ -57,7 +59,7 @@ async def scheduled_evolution_poll():
     if hasattr(evolution_orchestrator, "start_scheduled_loop"):
         evolution_orchestrator.start_scheduled_loop(list(AGENT_IDS))
     for agent_id in AGENT_IDS:
-        asyncio.create_task(evolution_orchestrator.run_evolution_cycle(agent_id))
+        await evolution_orchestrator.run_evolution_cycle(agent_id)
 
 @app.on_event("startup")
 async def startup_event():
@@ -71,13 +73,18 @@ async def startup_event():
         scheduled_evolution_poll,
         "interval",
         minutes=poll_minutes,
-        next_run_time=datetime.now(),
+        id="evolution_poll",
         coalesce=True,
         max_instances=1,
         misfire_grace_time=poll_minutes * 60,
     )
+    # 기본적으로 일시정지 상태로 시작하여 사용자의 명시적 'RUN' 요청 시 작동하게 함
+    job = scheduler.get_job("evolution_poll")
+    if job:
+        job.pause()
+        
     scheduler.start()
-    logger.info("APScheduler started: Evolution poll scheduled every %s minute(s).", poll_minutes)
+    logger.info("APScheduler started: Evolution poll added (PAUSED by default).")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -107,7 +114,7 @@ async def get_system_status():
     }
 
     for agent_id in AGENT_IDS:
-        buffer_stats = orchestrator.metrics_buffer.get_buffer_stats(agent_id)
+        buffer_stats = orchestrator.metrics_buffer.get_buffer_status(agent_id)
         evolution_state = orchestrator.states.get(agent_id, "IDLE")
 
         status["agents"][agent_id] = {
@@ -116,6 +123,38 @@ async def get_system_status():
         }
 
     return status
+
+
+@app.get("/api/system/automation")
+async def get_automation_status():
+    """자동화 루프(스케줄러) 상태 조회"""
+    job = scheduler.get_job("evolution_poll")
+    if not job:
+        return {"enabled": False, "status": "not_found"}
+
+    # next_run_time이 None이면 일시정지 상태임
+    enabled = job.next_run_time is not None
+    return {"enabled": enabled, "status": "running" if enabled else "paused"}
+
+
+@app.post("/api/system/automation")
+async def set_automation_status(data: dict):
+    """자동화 루프(스케줄러) 끄기/켜기"""
+    enabled = data.get("enabled", True)
+    job = scheduler.get_job("evolution_poll")
+    if not job:
+        return {"success": False, "error": "job_not_found"}
+
+    if enabled:
+        job.resume()
+        # 재개 시 즉시 실행되도록 다음 실행 시간을 지금으로 설정
+        job.modify(next_run_time=datetime.now())
+        logger.info("Evolution automation RESUMED and triggered immediately.")
+    else:
+        job.pause()
+        logger.info("Evolution automation PAUSED.")
+
+    return {"success": True, "enabled": enabled}
 
 if __name__ == "__main__":
     uvicorn.run(

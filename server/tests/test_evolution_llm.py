@@ -1,8 +1,8 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
-from server.api.services.evolution_llm_client import EvolutionLLMClient
-from server.ai_trading.core.strategy_loader import SecurityError
+from server.core.evolution.llm_client import EvolutionLLMClient
+from server.shared.market.strategy_loader import SecurityError
 
 def run_async(coro):
     return asyncio.run(coro)

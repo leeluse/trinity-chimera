@@ -2,23 +2,35 @@
 
 import { EvolutionLogEvent } from "@/lib/api";
 import { FiActivity, FiTerminal, FiCpu, FiAlertTriangle, FiCheckCircle } from "react-icons/fi";
+import type { IconType } from "react-icons";
+import { COLORS } from "@/constants";
 
 interface EvolutionLogPanelProps {
   events: EvolutionLogEvent[];
   activeAgent: string;
   isLoopRunning?: boolean;
+  automationEnabled?: boolean;
+  onToggleAutomation?: () => void;
 }
 
-const PHASE_CONFIG: Record<string, { color: string; icon: any; label: string }> = {
-  boot: { color: "#61afef", icon: FiCpu, label: "BOOT" },
-  loop: { color: "#d19a66", icon: FiActivity, label: "LOOP" },
-  generating: { color: "#c678dd", icon: FiTerminal, label: "GEN" },
-  backtesting: { color: "#56b6c2", icon: FiActivity, label: "TEST" },
-  validation: { color: "#56b6c2", icon: FiActivity, label: "VAL" },
-  committing: { color: "#98c379", icon: FiCheckCircle, label: "COMMIT" },
-  success: { color: "#98c379", icon: FiCheckCircle, label: "OK" },
-  failed: { color: "#e06c75", icon: FiAlertTriangle, label: "FAIL" },
-  error: { color: "#e06c75", icon: FiAlertTriangle, label: "ERR" },
+const PHASE_CONFIG: Record<string, { color: string; icon: IconType; label: string }> = {
+  boot: { color: "#61afef", icon: FiCpu, label: "부팅" },
+  loop: { color: "#d19a66", icon: FiActivity, label: "루프" },
+  queued: { color: "#d19a66", icon: FiActivity, label: "대기" },
+  triggered: { color: "#d19a66", icon: FiActivity, label: "트리거" },
+  context: { color: "#61afef", icon: FiCpu, label: "맥락" },
+  baseline: { color: "#56b6c2", icon: FiActivity, label: "기준" },
+  generating: { color: "#c678dd", icon: FiTerminal, label: "생성" },
+  generated: { color: "#c678dd", icon: FiTerminal, label: "코드" },
+  backtesting: { color: "#56b6c2", icon: FiActivity, label: "검증" },
+  validation: { color: "#56b6c2", icon: FiActivity, label: "검증" },
+  retry: { color: "#e5c07b", icon: FiAlertTriangle, label: "재시도" },
+  committing: { color: "#98c379", icon: FiCheckCircle, label: "반영" },
+  completed: { color: "#98c379", icon: FiCheckCircle, label: "완료" },
+  success: { color: "#98c379", icon: FiCheckCircle, label: "성공" },
+  skipped: { color: "#abb2bf", icon: FiAlertTriangle, label: "건너뜀" },
+  failed: { color: "#e06c75", icon: FiAlertTriangle, label: "실패" },
+  error: { color: "#e06c75", icon: FiAlertTriangle, label: "오류" },
 };
 
 const formatEventTime = (iso: string) =>
@@ -29,10 +41,39 @@ const formatEventTime = (iso: string) =>
     hour12: false,
   });
 
+const AGENT_COLOR_MAP: Record<string, string> = {
+  momentum_hunter: COLORS[0],
+  mean_reverter: COLORS[1],
+  macro_trader: COLORS[2],
+  chaos_agent: COLORS[3],
+};
+
+const AGENT_FALLBACK_PALETTE = [COLORS[0], COLORS[1], COLORS[2], COLORS[3], "#61afef", "#e5c07b"];
+
+const colorFromAgentId = (agentId?: string | null) => {
+  if (!agentId) return "#8b93a7";
+  if (AGENT_COLOR_MAP[agentId]) return AGENT_COLOR_MAP[agentId];
+
+  const key = String(agentId);
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  }
+  return AGENT_FALLBACK_PALETTE[hash % AGENT_FALLBACK_PALETTE.length];
+};
+
+const withAlpha = (hex: string, alpha: string) => {
+  const normalized = hex.replace("#", "");
+  if (normalized.length !== 6) return hex;
+  return `#${normalized}${alpha}`;
+};
+
 export default function EvolutionLogPanel({
   events,
   activeAgent,
   isLoopRunning = false,
+  automationEnabled = false,
+  onToggleAutomation,
 }: EvolutionLogPanelProps) {
   const filtered = (activeAgent === "ALL" || activeAgent === "전체")
     ? events
@@ -48,16 +89,23 @@ export default function EvolutionLogPanel({
             <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-purple-400 rounded-full animate-ping" />
           </div>
           <h3 className="text-[11px] font-black tracking-[0.2em] text-white uppercase">
-            Evolution Monitor
+            진화 로그 모니터
           </h3>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/[0.03] border border-white/10">
-            <div className={`w-1.5 h-1.5 rounded-full ${isLoopRunning ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)] animate-pulse' : 'bg-slate-600'}`} />
-            <span className="text-[9px] font-bold text-slate-300 uppercase tracking-wider">
-              {isLoopRunning ? "Active" : "Idle"}
+          <button
+            onClick={onToggleAutomation}
+            className={`flex items-center gap-2 px-3 py-1 rounded-full border transition-all ${
+              automationEnabled
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+                : "bg-slate-500/10 border-slate-500/30 text-slate-400 hover:bg-slate-500/20"
+            }`}
+          >
+            <div className={`w-1.5 h-1.5 rounded-full ${automationEnabled ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)] animate-pulse' : 'bg-slate-600'}`} />
+            <span className="text-[9px] font-black tracking-widest uppercase">
+              {automationEnabled ? "Auto Live" : "Auto Paused"}
             </span>
-          </div>
+          </button>
         </div>
       </div>
 
@@ -72,10 +120,12 @@ export default function EvolutionLogPanel({
           <div className="space-y-4">
             {filtered.map((event) => {
               const config = PHASE_CONFIG[event.phase?.toLowerCase()] || { color: "#abb2bf", icon: FiTerminal, label: "LOG" };
+              const agentColor = colorFromAgentId(event.agent_id);
               return (
                 <div
                   key={event.id}
-                  className="group/item font-mono border-l-2 border-transparent hover:border-white/20 transition-all pl-3"
+                  className="group/item font-mono border-l-2 transition-all pl-3"
+                  style={{ borderLeftColor: withAlpha(agentColor, "66") }}
                 >
                   {/* Header Line: [LOG] Agent_Name (Time) */}
                   <div className="flex items-center gap-2 text-[10px]">
@@ -83,7 +133,7 @@ export default function EvolutionLogPanel({
                       [{config.label}]
                     </span>
                     {event.agent_label && (
-                      <span className="font-bold text-indigo-400">
+                      <span className="font-bold" style={{ color: agentColor }}>
                         {event.agent_label.replace(/\s/g, '_')}
                       </span>
                     )}

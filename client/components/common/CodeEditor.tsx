@@ -1,6 +1,6 @@
 import Editor, { OnMount } from '@monaco-editor/react'
 
-export default function CodeEditor({ code }: { code: string }) {
+export default function CodeEditor({ code, onChange }: { code: string; onChange?: (value: string) => void }) {
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     // Define a custom theme that matches the project's aesthetics
     monaco.editor.defineTheme('trinity-dark', {
@@ -36,10 +36,11 @@ export default function CodeEditor({ code }: { code: string }) {
     <Editor
       height="500px"
       defaultLanguage="python"
-      value={code || '// No strategy code available'}
+      value={code || ''}
       onMount={handleEditorDidMount}
+      onChange={(value) => onChange?.(value || "")}
       options={{
-        readOnly: true,
+        readOnly: false,
         minimap: { enabled: false },
         fontSize: 13,
         fontFamily: "'JetBrains Mono', 'Fira Code', monospace",

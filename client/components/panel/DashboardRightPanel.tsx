@@ -23,6 +23,8 @@ interface DashboardRightPanelProps {
   progress?: DashboardProgress;
   evolutionEvents?: EvolutionLogEvent[];
   isLoopRunning?: boolean;
+  automationEnabled?: boolean;
+  onToggleAutomation?: () => void;
 }
 
 export default function DashboardRightPanel(props: DashboardRightPanelProps) {
@@ -41,13 +43,15 @@ function DashboardRightPanelContent({
   progress,
   evolutionEvents = [],
   isLoopRunning = false,
+  automationEnabled = false,
+  onToggleAutomation,
 }: DashboardRightPanelProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const view = searchParams.get("view");
+  const view = (searchParams.get("view") || "").toLowerCase();
 
   const isEvolutionView = pathname === "/" && view === "evolution";
-  const isLogsView = pathname === "/" && !view;
+  const isLogsView = pathname === "/" && (view === "" || view === "logs");
 
   const agentIds = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
   const normalizeRatio = (value: number): number => (Math.abs(value) > 1 ? value / 100 : value);
@@ -111,7 +115,13 @@ function DashboardRightPanelContent({
       )}
 
       {isEvolutionView && (
-        <EvolutionLogPanel events={evolutionEvents} activeAgent={activeAgent} isLoopRunning={isLoopRunning} />
+        <EvolutionLogPanel
+          events={evolutionEvents}
+          activeAgent={activeAgent}
+          isLoopRunning={isLoopRunning}
+          automationEnabled={automationEnabled}
+          onToggleAutomation={onToggleAutomation}
+        />
       )}
 
       {isLogsView && (

@@ -341,56 +341,59 @@ header {
 }
 /* ── MARKDOWN CONTENT STYLES ── */
 .markdown-content h4 {
-  font-size: 12px;
-  font-weight: 900;
+  font-size: 11px;
+  font-weight: 800;
   color: #94a3b8;
   text-transform: uppercase;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.12em;
   margin-top: 24px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .markdown-content h4::before {
   content: '';
   display: inline-block;
-  width: 3px;
-  height: 12px;
+  width: 2px;
+  height: 10px;
   background: var(--accent-blue);
   border-radius: 9999px;
 }
 
 .markdown-content h3 {
-  font-size: 16px;
+  font-size: 14px !important;
   font-weight: 800;
   color: #f8fafc;
-  margin-top: 10px;
-  margin-bottom: 18px;
+  margin-top: 28px;
+  margin-bottom: 16px;
   letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .markdown-content p {
-  margin-bottom: 14px;
+  margin-bottom: 12px;
   color: #cbd5e1;
-  line-height: 1.7;
-  font-size: 13.5px;
+  line-height: 1.6;
+  font-size: 11.5px !important;
 }
 
 .markdown-content ul {
-  margin-bottom: 20px;
-  padding-left: 4px;
+  margin-bottom: 14px;
+  padding-left: 2px;
   list-style: none;
 }
 
 .markdown-content li {
   position: relative;
-  padding-left: 20px;
-  margin-bottom: 10px;
+  padding-left: 16px;
+  margin-bottom: 6px;
   color: #f1f5f9;
-  font-size: 13.5px;
-  line-height: 1.6;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .markdown-content li::before {
@@ -418,14 +421,36 @@ header {
 }
 
 .markdown-content code {
-  background: rgba(248, 250, 252, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  padding: 2px 6px;
+  background: rgba(248, 250, 252, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 1px 4px;
   border-radius: 4px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12.5px;
-  color: #4ade80;
-  font-weight: 600;
+  font-size: 11px !important;
+  color: #8be9fd;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.markdown-content pre {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+  overflow-x: auto;
+  max-height: 200px;
+  width: 100%;
+}
+
+.markdown-content pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #f1f5f9;
+  font-size: 11px !important;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .markdown-content hr {
@@ -437,4 +462,92 @@ header {
 .markdown-content strong {
   color: #f1f5f9;
   font-weight: 700;
+}
+
+/* ── MARKDOWN TABLE STYLES ── */
+.markdown-content table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.01);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  min-width: 100%; /* 부모 너비는 다 쓰되 */
+  white-space: nowrap; /* 칸 안의 내용이 억지로 줄바꿈되지 않게 */
+}
+
+.markdown-content table::-webkit-scrollbar {
+  height: 4px;
+}
+
+.markdown-content table::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.markdown-content table::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+.markdown-content table::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.markdown-content th {
+  background: rgba(189, 147, 249, 0.1);
+  color: var(--accent-blue);
+  font-weight: 700;
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 2px solid rgba(189, 147, 249, 0.2);
+  white-space: nowrap;
+}
+
+.markdown-content td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  vertical-align: top;
+  line-height: 1.5;
+}
+
+.markdown-content tr:last-child td {
+  border-bottom: none;
+}
+
+.markdown-content tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* ── THOUGHT SPECIFIC MARKDOWN ── */
+.thought-markdown p, 
+.thought-markdown li, 
+.thought-markdown strong {
+  color: #94a3b8 !important; /* 명확한 회색 강제 */
+  font-size: 11px !important;
+}
+
+/* ── INPUT FOCUS RESET ── */
+input:focus, 
+textarea:focus, 
+select:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: var(--accent-purple) !important;
+  background: rgba(189, 147, 249, 0.08) !important; /* 약간 더 선명하게 */
+  transition: all 0.2s ease;
+}
+
+/* 포커스 시 호버 효과 제거 (깔끔하게 고정) */
+input:focus:hover,
+textarea:focus:hover {
+  background: rgba(189, 147, 249, 0.08) !important;
+  border-color: var(--accent-purple) !important;
+}
+
+button:focus {
+  outline: none !important;
 }

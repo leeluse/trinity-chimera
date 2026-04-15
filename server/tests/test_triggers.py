@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
-from server.api.services.evolution_trigger import EvolutionTrigger
+from server.core.evolution.trigger import EvolutionTrigger
 
 class TestEvolutionTrigger(unittest.TestCase):
     def setUp(self):
