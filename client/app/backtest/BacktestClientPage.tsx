@@ -57,6 +57,7 @@ const parseResults = (payload: any): Results => ({
   avgHoldBars: Number(payload?.results?.avg_bars ?? 0),
   longCount: Number(payload?.results?.long_count ?? 0),
   shortCount: Number(payload?.results?.short_count ?? 0),
+  equityCurve: payload?.equity_curve || [],
 });
 
 export default function BacktestPage() {
@@ -186,6 +187,45 @@ export default function BacktestPage() {
     } catch (e) { alert(e instanceof Error ? e.message : "Error"); } finally { setLoading(false); }
   };
 
+  const handleDeploy = async () => {
+    if (!strategyCode) {
+      alert("배포할 전략 코드가 없습니다.");
+      return;
+    }
+
+    const title = strategies.find(s => s.key === strategy)?.label || strategy || "New Strategy";
+    
+    setLoading(true);
+    try {
+      const res = await fetchWithBypass("/api/chat/deploy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: strategyCode,
+          title: title
+        })
+      });
+      
+      const data = await res.json();
+      if (data.success) {
+        alert(`✅ 전략이 성공적으로 배포되었습니다!\nID: ${data.strategy_key}`);
+        // Refresh strategy list
+        const sRes = await fetchWithBypass("/api/backtest/strategies");
+        const sData = await sRes.json();
+        if (sData.success) {
+          const loaded = (sData.strategies || []).map((s: any) => ({ key: String(s.key), label: String(s.label || s.key) }));
+          setStrategies(loaded);
+        }
+      } else {
+        throw new Error(data.error || "배포 실패");
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "배포 중 오류가 발생했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const applyGeneratedCode = (code: string, name?: string, payload?: any) => {
     // 1. Apply code
     setStrategyCode(code);
@@ -289,6 +329,7 @@ export default function BacktestPage() {
               endDate={endDate} setEndDate={setEndDate}
               strategy={strategy} strategies={strategies} setStrategy={setStrategy}
               onRun={handleStartTest}
+              onDeploy={handleDeploy}
               activeTab={activeTab}
               onTabChange={handleTabChange}
               loading={loading}
@@ -298,13 +339,10 @@ export default function BacktestPage() {
               <>
                 <StatsGrid results={results} fmtMoney={fmtMoney} />
                 <EquityChart results={results} />
-                <div className="flex flex-col lg:flex-row gap-4">
-                  <div className="flex-1 min-w-0">
-                    <PerformanceDetails results={results} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <TradeAnalysis results={results} />
-                  </div>
+                {/* 1:1 Grid Results Layout */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full max-w-[1600px] mx-auto">
+                  <PerformanceDetails results={results} />
+                  <TradeAnalysis results={results} />
                 </div>
               </>
             )}

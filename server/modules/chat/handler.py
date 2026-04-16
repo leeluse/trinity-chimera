@@ -44,6 +44,25 @@ class ChatHandler:
         m = re.search(r"```python\s*([\s\S]*?)```", text)
         return m.group(1).strip() if m else ""
 
+    @staticmethod
+    def extract_strategy_title(text: str) -> str:
+        """LLM 응답 또는 코드 내 주석/독스프링에서 전략명 추출"""
+        patterns = [
+            r"\[Title:\s*(.*?)\]",
+            r"\[전략 이름:\s*(.*?)\]",
+            r"전략명:\s*(.*)",
+            r"Name:\s*(.*)",
+            r"\"\"\"\s*\n?\s*(.*?Strategy.*?)\n", # Docstring 첫 줄 (Strategy 포함 시)
+            r"#\s*(.*?Strategy.*?)$"              # 주석 라인 (Strategy 포함 시)
+        ]
+        for p in patterns:
+            m = re.search(p, text, re.IGNORECASE | re.MULTILINE)
+            if m:
+                # 불필요한 공백/따옴표 제거
+                t = m.group(1).strip().replace('"', '').replace("'", "")
+                if t: return t
+        return "AI Generated Strategy"
+
     # -------------------------------------------------------------------------
     # 전략 로그 아카이빙: 생성된 결과와 성과를 STRATEGY.md 파일에 영구 기록
     # -------------------------------------------------------------------------
@@ -61,6 +80,42 @@ class ChatHandler:
                 f.write(entry)
         except Exception as e:
             logger.error(f"STRATEGY.md 로그 기록 실패: {e}")
+
+    async def deploy_strategy(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """사용자가 선택한 전략을 시스템 전략 라이브러리에 영구 저장"""
+        try:
+            db = SupabaseManager()
+            code = data.get("code", "")
+            
+            # [IMPROVEMENT] 코드 내용에서 제목을 먼저 추출하도록 시도
+            extracted_title = self.extract_strategy_title(code)
+            # 수동 입력 제목보다 코드 내 제목을 우선(코드 중심)
+            title = extracted_title if extracted_title != "AI Generated Strategy" else data.get("title", "AI Generated Strategy")
+            
+            if not code:
+                return {"success": False, "error": "전략 코드가 없습니다."}
+
+            # 유니크한 키 생성 (시간 기반)
+            strategy_key = f"deployed_{datetime.now().strftime('%y%m%d_%H%M%S')}"
+            
+            # DB 저장
+            db.save_system_strategy(
+                strategy_key=strategy_key,
+                code=code,
+                name=title, # [IMPROVEMENT] name 컬럼에 직접 저장
+                params={
+                    "strategy_key": strategy_key,
+                    "display_name": title,
+                    "source": "chat_deploy",
+                    "deployed_at": datetime.now().isoformat()
+                },
+                rationale="User manually deployed via Chat Desktop UI."
+            )
+            
+            return {"success": True, "strategy_key": strategy_key}
+        except Exception as e:
+            logger.exception("Strategy deployment failed")
+            return {"success": False, "error": str(e)}
     
     async def execute_pipeline(
         self, 
@@ -144,10 +199,15 @@ class ChatHandler:
             
             strategy_code = self.extract_python_code(code_full)
             if strategy_code:
+                # [IMPROVEMENT] AI가 제안한 제목 추출
+                strategy_title = self.extract_strategy_title(code_full)
+                if strategy_title == "AI Generated Strategy":
+                    strategy_title = self.extract_strategy_title(design_full)
+                
                 strategy_data = {
-                    "title": "AI 생성 전략",
+                    "title": strategy_title,
                     "code": strategy_code,
-                    "params": {}
+                    "params": {"agent_title": strategy_title}
                 }
                 yield self.format_sse({"type": "strategy", "data": strategy_data})
                 await db.save_chat_message(session_id, "assistant", "", "strategy", strategy_data)
@@ -194,13 +254,13 @@ class ChatHandler:
                             loop.call_soon_threadsafe(queue.put_nowait, msg)
                         
                         # 백테스트 실행을 별도 쓰레드로 분리하여 블로킹 방지
-                        validation_task = asyncio.to_thread(
+                        validation_task = asyncio.create_task(asyncio.to_thread(
                             engine.run_full_validation,
                             strategy_fn=strategy_fn, 
                             strategy_name="Mining Strategy",
                             run_test_set=False,
                             callback=progress_callback
-                        )
+                        ))
                         
                         # 큐에서 메세지를 꺼내 실시간으로 전송하면서 백테스트 태스크 대기
                         while not validation_task.done() or not queue.empty():
@@ -241,9 +301,9 @@ class ChatHandler:
                                     code=strategy_code,
                                     params={
                                         "strategy_key": mining_key,
-                                        "display_name": f"💎 [{persona_name}] {seed}",
-                                        "description": f"Mined via Chat: {persona_name} | {seed}",
-                                        "persona": persona_name,
+                                        "display_name": f"💎 [{persona['name']}] {seed}",
+                                        "description": f"Mined via Chat: {persona['name']} | {seed}",
+                                        "persona": persona['name'],
                                         "seed": seed
                                     },
                                     rationale=f"Mined via interactive evolution chat session. Trinity Score: {trinity_score:.1f}"

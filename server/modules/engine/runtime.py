@@ -212,12 +212,14 @@ def _build_db_catalog() -> List[Dict[str, Any]]:
     seen: set[str] = set()
 
     for row in rows:
-        # [중요] 모든 소스의 전략을 표시함 (필요 시 추후 세부 필터링 가능)
-        # if row.get("source") == "system":
-        #     continue
-        
         params = row.get("params") or {}
         if not isinstance(params, dict):
+            continue
+
+        # [IMPROVEMENT] name 컬럼이 있는 전략만 표시 (사용자 요청)
+        # DB 컬럼의 'name'을 먼저 확인하고, 없으면 params 내의 'display_name' 확인
+        strategy_name = row.get("name") or params.get("display_name")
+        if not strategy_name or strategy_name.strip() == "":
             continue
 
         key = str(params.get("strategy_key") or "").strip()
@@ -231,7 +233,7 @@ def _build_db_catalog() -> List[Dict[str, Any]]:
         out.append(
             {
                 "key": key,
-                "label": str(params.get("display_name") or key),
+                "label": str(strategy_name), # 정제된 이름을 라벨로 사용
                 "description": str(params.get("description") or row.get("rationale") or ""),
                 "timeframe": str(params.get("timeframe") or "1h"),
                 "default_timeframe": str(params.get("timeframe") or "1h"),
@@ -537,57 +539,68 @@ def run_skill_backtest(
 
     # 4. 신형 시뮬레이터 구동
     sim = RealisticSimulator(max_position=min(1.0, leverage/10.0))
-    rets, n_trades = sim.run(df, signal)
-    metrics = compute_metrics(rets, n_trades, resolved_strategy, str(df.index[0]), str(df.index[-1]))
+    # [IMPORTANT] 새로 추가된 롱/숏 수익률 및 비용 데이터 캡처
+    rets, n_trades, trade_results, costs, l_rets, s_rets = sim.run(df, signal)
+    
+    # 벤치마크 수익률 (Buy & Hold 계산용)
+    bench_rets = df["close"].pct_change().fillna(0)
+    
+    metrics = compute_metrics(
+        rets, n_trades, resolved_strategy, 
+        str(df.index[0]), str(df.index[-1]), 
+        trade_results=trade_results,
+        benchmark_returns=bench_rets,
+        costs=costs,
+        long_returns=l_rets,
+        short_returns=s_rets
+    )
 
     # 5. UI용 거래 내역(Trades) 및 마커(Markers) 생성
     trades_payload = []
     markers = []
-    
-    # 신호 변화점 찾기
     pos = signal.shift(1).fillna(0)
-    changes = pos.diff().fillna(0)
     
     for i in range(1, len(df)):
         current_pos = pos.iloc[i]
         prev_pos = pos.iloc[i-1]
-        
         if current_pos != prev_pos:
-            # 진입 또는 방향 전환 시 화살표 표시
             t_ms = int(df.index[i].timestamp())
             is_long = current_pos > 0
             is_exit = current_pos == 0
             
             if not is_exit:
                 markers.append({
-                    "time": t_ms,
-                    "position": "belowBar" if is_long else "aboveBar",
+                    "time": t_ms, "position": "belowBar" if is_long else "aboveBar",
                     "color": "#4ade80" if is_long else "#fb7185",
-                    "shape": "arrowUp" if is_long else "arrowDown",
-                    "text": "L" if is_long else "S",
+                    "shape": "arrowUp" if is_long else "arrowDown", "text": "L" if is_long else "S",
                 })
             else:
                 markers.append({
-                    "time": t_ms,
-                    "position": "aboveBar" if prev_pos > 0 else "belowBar",
-                    "color": "#94a3b8",
-                    "shape": "circle",
-                    "text": "X",
+                    "time": t_ms, "position": "aboveBar" if prev_pos > 0 else "belowBar",
+                    "color": "#94a3b8", "shape": "circle", "text": "X",
                 })
             
-            # 간단한 거래 내역 생성 (UI용)
             if prev_pos != 0:
                 trades_payload.append({
                     "type": "LONG" if prev_pos > 0 else "SHORT",
                     "time": df.index[i].isoformat(),
                     "exitReason": "signal",
-                    "entry": float(df["open"].iloc[i-1]), # 대략적인 진입가
-                    "exit": float(df["open"].iloc[i]),   # 대략적인 퇴출가
-                    "profitPct": f"{rets.iloc[i]*100:+.2f}%",
+                    "entry": float(df["close"].iloc[i-1]),
+                    "exit": float(df["close"].iloc[i]),
+                    "profitPct": f"{(df['close'].iloc[i]/df['close'].iloc[i-1] - 1)*100:+.2f}%",
                     "posSize": 1.0
                 })
 
-    # 6. 결과 조립
+    # 6. 자산 곡선(Equity Curve) 생성
+    cum_equity = (1 + rets).cumprod()
+    equity_curve = []
+    for t, val in cum_equity.items():
+        equity_curve.append({
+            "time": int(t.timestamp()),
+            "value": float(val)
+        })
+
+    # 7. 결과 조립
     return {
         "success": True,
         "framework": "trinity-native-v2",
@@ -598,13 +611,33 @@ def run_skill_backtest(
             "total_return": float(metrics.total_return * 100),
             "max_drawdown": abs(float(metrics.max_drawdown * 100)),
             "sharpe_ratio": float(metrics.sharpe),
-            "win_rate": float(metrics.win_rate * 100),
+            "sortino_ratio": float(metrics.sortino),
+            "calmar_ratio": float(metrics.calmar),
+            "win_rate": float(metrics.win_rate * 100) if metrics.n_trades > 0 else 0.0,
             "profit_factor": float(metrics.profit_factor),
             "total_trades": int(metrics.n_trades),
-            "best_trade": 0.0, # 추후 상세 계산 가능
-            "worst_trade": 0.0,
+            "win_count": int(metrics.win_count),
+            "loss_count": int(metrics.loss_count),
+            "long_count": int(metrics.long_count),
+            "short_count": int(metrics.short_count),
+            "best_trade": float(metrics.best_trade * 100),
+            "worst_trade": float(metrics.worst_trade * 100),
+            "avg_profit": float(metrics.avg_profit * 100),
+            "avg_loss": float(metrics.avg_loss * 100),
+            "max_consecutive_wins": int(metrics.max_consecutive_wins),
+            "max_consecutive_losses": int(metrics.max_consecutive_losses),
+            "buy_hold": float(metrics.buy_hold_return * 100),
+            "alpha": float((metrics.total_return - metrics.buy_hold_return) * 100),
+            "total_fees": float(metrics.total_fees * 10000), 
+            "long_return": float(metrics.long_return * 100),
+            "long_pf": float(metrics.long_pf),
+            "short_return": float(metrics.short_return * 100),
+            "short_pf": float(metrics.short_pf),
+            "expected_return": float(metrics.expected_return * 100),
+            "total_pnl": float(metrics.total_return * 10000), 
         },
         "trades": trades_payload,
         "markers": markers,
-        "candles": _candles_payload(df) if include_candles else []
+        "candles": _candles_payload(df) if include_candles else [],
+        "equity_curve": equity_curve
     }

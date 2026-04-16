@@ -16,6 +16,7 @@ interface BacktestHeaderProps {
   strategies: any[];
   setStrategy: (s: string) => void;
   onRun: () => void;
+  onDeploy?: () => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
   loading?: boolean;
@@ -30,6 +31,7 @@ export default function BacktestHeader({
   strategies,
   setStrategy,
   onRun,
+  onDeploy,
   activeTab,
   onTabChange,
   loading
@@ -97,7 +99,11 @@ export default function BacktestHeader({
             <Play size={14} className={`${loading ? 'animate-pulse' : 'fill-current'}`} />
             {loading ? "작업 중..." : "백테스트 실행"}
           </button>
-          <button className="flex items-center gap-2 px-5 py-2.5 bg-[#90d579ff] text-[#060912] rounded-xl text-xs font-black hover:brightness-110 transition-all shadow-lg shadow-[#90d579ff]/20 active:scale-95">
+          <button 
+            onClick={onDeploy}
+            disabled={loading}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[#90d579ff] text-[#060912] rounded-xl text-xs font-black hover:brightness-110 transition-all shadow-lg shadow-[#90d579ff]/20 active:scale-95 disabled:opacity-50"
+          >
             <Zap size={14} className="fill-current" />
             배포
           </button>

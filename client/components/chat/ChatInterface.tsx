@@ -64,9 +64,13 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     // 과거 기록 불러오기
     const loadHistory = async () => {
       try {
+        const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
         const backendBase = process.env.NEXT_PUBLIC_API_URL 
           ? process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, "")
-          : (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? "http://localhost:8000" : "");
+          : (currentHost === 'localhost' || currentHost === '127.0.0.1') 
+            ? "http://localhost:8000" 
+            : ""; // Relative path will use Next.js rewrite
+        
         const res = await fetch(`${backendBase}/api/chat/history?session_id=${sid}`, {
           headers: {
             "ngrok-skip-browser-warning": "true",
@@ -151,10 +155,13 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           content: msg.content,
         }));
 
-      // 🚀 Next.js 프록시 버퍼링을 피하기 위해 백엔드(8000포트)로 직접 요청 (CORS 사용)
+      // 🚀 Next.js 프록시 버퍼링을 피하기 위해 가급적 백엔드로 직접 요청
+      const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
       const backendBase = process.env.NEXT_PUBLIC_API_URL 
         ? process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, "")
-        : (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? "http://localhost:8000" : "");
+        : (currentHost === 'localhost' || currentHost === '127.0.0.1') 
+          ? "http://localhost:8000" 
+          : ""; // 비로컬 환경에서는 상대 경로(/api/...)를 통해 Next.js 리라이트 활용
       const url = `${backendBase}/api/chat/run?t=${Date.now()}`;
 
       const response = await fetch(url, {

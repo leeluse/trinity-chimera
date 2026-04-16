@@ -41,6 +41,26 @@ class PeriodResult:
     n_trades: int
     profit_factor: float
     calmar: float
+    # [NEW] Trade-level details
+    trade_win_rate: float = 0
+    best_trade: float = 0
+    worst_trade: float = 0
+    avg_profit: float = 0
+    avg_loss: float = 0
+    max_consecutive_wins: int = 0
+    max_consecutive_losses: int = 0
+    # [NEW] More details
+    buy_hold_return: float = 0
+    total_fees: float = 0
+    long_return: float = 0
+    long_pf: float = 0
+    short_return: float = 0
+    short_pf: float = 0
+    expected_return: float = 0
+    win_count: int = 0
+    loss_count: int = 0
+    long_count: int = 0
+    short_count: int = 0
 
 
 @dataclass
@@ -92,18 +112,26 @@ class ValidationResult:
 # ─────────────────────────────────────────────
 
 def compute_metrics(returns: pd.Series, n_trades: int, name: str,
-                    start: str, end: str, freq: int = 24) -> PeriodResult:
+                    start: str, end: str, freq: int = 24, 
+                    trade_results: list[float] = None,
+                    benchmark_returns: pd.Series = None,
+                    costs: pd.Series = None,
+                    long_returns: pd.Series = None,
+                    short_returns: pd.Series = None) -> PeriodResult:
     """일간/시간봉 수익률 시리즈 → 성과 지표 계산"""
     if len(returns) < 5 or returns.std() == 0:
         return PeriodResult(name, start, end, 0, 0, 0, 0, 0, n_trades, 0, 0)
 
-    ann = freq * 365  # 연간 봉 수 (1h = 8760)
+    ann = freq * 365
     total_ret = (1 + returns).prod() - 1
+    
+    # 벤치마크 (Buy & Hold) 수익률
+    bh_ret = (1 + benchmark_returns).prod() - 1 if benchmark_returns is not None else 0
+    
     mu = returns.mean()
     sigma = returns.std() + 1e-10
 
     sharpe = (mu / sigma) * np.sqrt(ann)
-
     downside = returns[returns < 0].std() + 1e-10
     sortino = (mu / downside) * np.sqrt(ann)
 
@@ -111,20 +139,70 @@ def compute_metrics(returns: pd.Series, n_trades: int, name: str,
     peak = cum.cummax()
     dd = (cum - peak) / peak
     max_dd = dd.min()
-
     calmar = (total_ret / abs(max_dd)) if max_dd != 0 else 0
 
-    pos = returns[returns > 0]
-    neg = returns[returns < 0]
-    win_rate = len(pos) / len(returns) if len(returns) > 0 else 0
-    profit_factor = (pos.sum() / abs(neg.sum())) if neg.sum() != 0 else 0
+    # 비용 및 기댓값
+    total_fees = costs.sum() if costs is not None else 0
+    expected_return = returns.mean() if len(returns) > 0 else 0
 
-    return PeriodResult(
-        name=name, start=start, end=end,
-        total_return=total_ret, sharpe=sharpe, sortino=sortino,
-        max_drawdown=max_dd, win_rate=win_rate, n_trades=n_trades,
-        profit_factor=profit_factor, calmar=calmar
-    )
+    # 롱/숏 분리 통계
+    def calc_side_pf(side_rets):
+        if side_rets is None or len(side_rets) == 0: return 0.0, 0.0
+        s_total = (1 + side_rets).prod() - 1
+        pos = side_rets[side_rets > 0].sum()
+        neg = abs(side_rets[side_rets < 0].sum())
+        pf = pos / neg if neg > 0 else pos
+        return float(s_total), float(pf)
+
+    l_ret, l_pf = calc_side_pf(long_returns)
+    s_ret, s_pf = calc_side_pf(short_returns)
+
+    # 매매 단위 통계 계산 (기존 봉 단위 WinRate/PF 대체)
+    t_wins = [t for t in (trade_results or []) if t > 0]
+    t_losses = [t for t in (trade_results or []) if t < 0]
+    
+    trade_win_rate = len(t_wins) / len(trade_results) if trade_results else 0
+    profit_factor = (sum(t_wins) / abs(sum(t_losses))) if t_losses else (sum(t_wins) if t_wins else 0)
+    
+    # 연속 승패 계산
+    max_cons_wins = 0
+    max_cons_losses = 0
+    curr_wins = 0
+    curr_losses = 0
+    for t in (trade_results or []):
+        if t > 0:
+            curr_wins += 1
+            curr_losses = 0
+        else:
+            curr_losses += 1
+            curr_wins = 0
+        max_cons_wins = max(max_cons_wins, curr_wins)
+        max_cons_losses = max(max_cons_losses, curr_losses)
+
+        return PeriodResult(
+            name=name, start=start, end=end,
+            total_return=total_ret, sharpe=sharpe, sortino=sortino,
+            max_drawdown=max_dd, win_rate=trade_win_rate, n_trades=n_trades,
+            profit_factor=profit_factor, calmar=calmar,
+            trade_win_rate=trade_win_rate,
+            best_trade=max(trade_results) if trade_results else 0,
+            worst_trade=min(trade_results) if trade_results else 0,
+            avg_profit=np.mean(t_wins) if t_wins else 0,
+            avg_loss=np.mean(t_losses) if t_losses else 0,
+            max_consecutive_wins=max_cons_wins,
+            max_consecutive_losses=max_cons_losses,
+            buy_hold_return=bh_ret,
+            total_fees=total_fees,
+            long_return=l_ret,
+            long_pf=l_pf,
+            short_return=s_ret,
+            short_pf=s_pf,
+            expected_return=expected_return,
+            win_count=len(t_wins),
+            loss_count=len(t_losses),
+            long_count=len(long_returns[long_returns != 0]) if long_returns is not None else 0,
+            short_count=len(short_returns[short_returns != 0]) if short_returns is not None else 0
+        )
 
 
 # ─────────────────────────────────────────────
@@ -152,30 +230,46 @@ class RealisticSimulator:
         self.max_position = max_position
         self.use_kelly = use_kelly
 
-    def run(self, df: pd.DataFrame, signal: pd.Series) -> tuple[pd.Series, int]:
+    def run(self, df: pd.DataFrame, signal: pd.Series) -> tuple[pd.Series, int, list[float], pd.Series, pd.Series, pd.Series]:
         """
         signal: +1 / 0 / -1 시리즈 (df.index와 같은 인덱스)
-        반환: (bar별 수익률 Series, 거래 횟수)
+        반환: (전체수익률, 거래수입, 개별매매리스트, 비용Series, 롱수익Series, 숏수익Series)
         """
         close = df["close"].reindex(signal.index)
         price_ret = close.pct_change().fillna(0)
 
-        # 포지션 크기 (Kelly 적용 시 신호 강도에 따라 조정)
-        position = signal.shift(1).fillna(0)  # 1봉 지연 — 다음 봉 시가 진입 가정
+        position = signal.shift(1).fillna(0)
         position = position.clip(-self.max_position, self.max_position)
 
-        # 거래 비용 (포지션 변화가 있을 때만)
         pos_change = position.diff().abs().fillna(0)
         total_cost = pos_change * (self.fee_rate + self.slippage)
+        funding_cost = position.abs() * self.funding_rate / 3
 
-        # 펀딩비 (포지션 보유 중 매 봉마다)
-        funding_cost = position.abs() * self.funding_rate / 3  # 1h 기준 (8h/3)
+        # 포지션별 수익률 분리
+        long_returns = (position[position > 0] * price_ret[position > 0]).fillna(0)
+        short_returns = (position[position < 0] * price_ret[position < 0]).fillna(0)
 
-        # 전략 수익률
         strategy_ret = position * price_ret - total_cost - funding_cost
 
-        n_trades = int((pos_change > 0.01).sum())
-        return strategy_ret, n_trades
+        trade_results = []
+        in_trade = False
+        trade_start_val = 1.0
+        
+        for i in range(1, len(position)):
+            curr_pos = position.iloc[i]
+            prev_pos = position.iloc[i-1]
+            if curr_pos != 0 and prev_pos == 0:
+                in_trade = True
+                trade_start_val = 1.0
+            if in_trade:
+                trade_start_val *= (1 + strategy_ret.iloc[i])
+                if curr_pos == 0 or (curr_pos * prev_pos < 0):
+                    trade_results.append(trade_start_val - 1.0)
+                    in_trade = (curr_pos != 0)
+                    trade_start_val = 1.0
+
+        n_trades = len(trade_results)
+        return strategy_ret, n_trades, trade_results, total_cost + funding_cost, long_returns, short_returns
 
 
 # ─────────────────────────────────────────────

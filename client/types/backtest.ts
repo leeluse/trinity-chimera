@@ -65,6 +65,7 @@ export type Results = {
   avgHoldBars?: number;
   longCount?: number;
   shortCount?: number;
+  equityCurve?: { time: number; value: number }[];
 };
 
 export type LeaderboardRow = {

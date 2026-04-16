@@ -16,6 +16,7 @@ interface BacktestControlBarProps {
   strategies: any[];
   setStrategy: (s: string) => void;
   onRun: () => void;
+  onDeploy?: () => void;
 }
 
 export default function BacktestControlBar({
@@ -24,7 +25,7 @@ export default function BacktestControlBar({
   startDate, setStartDate,
   endDate, setEndDate,
   strategy, strategies, setStrategy,
-  onRun
+  onRun, onDeploy
 }: BacktestControlBarProps) {
   const currentStrategyLabel = strategies.find(s => s.key === strategy)?.label || strategy;
 
@@ -69,7 +70,10 @@ export default function BacktestControlBar({
             <Play size={14} className="fill-current capitalize" />
             백테스트 실행
           </button>
-          <button className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 text-white rounded-xl text-xs font-black hover:bg-purple-500 transition-all shadow-lg shadow-purple-600/20 active:scale-95">
+          <button 
+            onClick={onDeploy}
+            className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 text-white rounded-xl text-xs font-black hover:bg-purple-500 transition-all shadow-lg shadow-purple-600/20 active:scale-95"
+          >
             <Zap size={14} className="fill-current" />
             배포
           </button>

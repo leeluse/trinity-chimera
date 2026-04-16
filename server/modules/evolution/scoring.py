@@ -4,10 +4,10 @@
 from typing import Dict, Any
 
 def calculate_trinity_score(
-    total_return: number,
-    sharpe: number,
-    max_drawdown: number,
-    win_rate: number = 0
+    total_return: float,
+    sharpe: float,
+    max_drawdown: float,
+    win_rate: float = 0
 ) -> float:
     """
     Trinity Score 공식:

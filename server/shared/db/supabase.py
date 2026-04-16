@@ -363,6 +363,7 @@ class SupabaseManager:
         code: str,
         params: Dict[str, Any],
         rationale: str = "Seeded from local strategy catalog",
+        name: Optional[str] = None
     ) -> Optional[str]:
         """
         Insert a system strategy if it does not already exist by params.strategy_key.
@@ -383,6 +384,7 @@ class SupabaseManager:
                 "agent_id": system_agent_id,
                 "version": next_version,
                 "code": code,
+                "name": name or strategy_key,
                 "params": params,
                 "rationale": rationale,
                 "source": "system",

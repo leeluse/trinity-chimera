@@ -65,3 +65,12 @@ async def chat_backtest_run(req: ChatBacktestRequest):
     except Exception as exc:
         logger.exception("Chat backtest error")
         return {"success": False, "error": str(exc)}
+
+class DeployRequest(BaseModel):
+    code: str
+    title: Optional[str] = "AI Generated Strategy"
+
+@router.post("/deploy")
+async def chat_deploy(req: DeployRequest, handler: ChatHandler = Depends()):
+    """전략 라이브러리에 저장/배포"""
+    return await handler.deploy_strategy(req.dict())

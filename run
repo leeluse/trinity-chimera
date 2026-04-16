@@ -19,14 +19,33 @@ URL_FILE="$LOG_DIR/backend_tunnel_url.txt"
 
 mkdir -p "$LOG_DIR" "$RUN_DIR"
 
+# Detect virtual environment path (Windows vs Linux/macOS)
+if [ -f "$PROJECT_ROOT/venv/Scripts/activate" ]; then
+  VENV_ACTIVATE="$PROJECT_ROOT/venv/Scripts/activate"
+  VENV_PYTHON="$PROJECT_ROOT/venv/Scripts/python"
+else
+  VENV_ACTIVATE="$PROJECT_ROOT/venv/bin/activate"
+  VENV_PYTHON="$PROJECT_ROOT/venv/bin/python"
+fi
+
 is_port_listening() {
   local port="$1"
-  lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    # Windows fallback
+    netstat -ano | grep ":$port " | grep -q "LISTENING"
+  fi
 }
 
 show_port_owner() {
   local port="$1"
-  lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sed -n '2,$p'
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sed -n '2,$p'
+  else
+    # Windows fallback
+    netstat -ano | grep ":$port " | grep "LISTENING"
+  fi
 }
 
 case $COMMAND in
@@ -78,9 +97,9 @@ case $COMMAND in
     ) &
     
     cd "$PROJECT_ROOT/server/api" && \
-    source "$PROJECT_ROOT/venv/bin/activate" && \
+    source "$VENV_ACTIVATE" && \
     set -a && [ -f "$PROJECT_ROOT/.env" ] && source "$PROJECT_ROOT/.env" && set +a && \
-    PYTHONPATH="$PROJECT_ROOT" python -m server.api.main
+    PYTHONPATH="$PROJECT_ROOT" "$VENV_PYTHON" -m server.api.main
     ;;
   "public"|"tunnel")
     if ! command -v lt >/dev/null 2>&1 && ! command -v npx >/dev/null 2>&1; then
@@ -93,7 +112,7 @@ case $COMMAND in
       show_port_owner "$BACKEND_PORT"
     else
       echo "⚙️ Starting FastAPI server in background..."
-      nohup "$PROJECT_ROOT/venv/bin/python" -m uvicorn server.api.main:app \
+      nohup "$VENV_PYTHON" -m uvicorn server.api.main:app \
         --host 0.0.0.0 --port "$BACKEND_PORT" >> "$API_LOG" 2>&1 &
       echo $! > "$API_PID_FILE"
       
@@ -168,7 +187,7 @@ case $COMMAND in
     ;;
   "test")
     echo "🧪 Running AI Trading Tests..."
-    cd "$PROJECT_ROOT" && ./venv/bin/python -m pytest \
+    cd "$PROJECT_ROOT" && "$VENV_PYTHON" -m pytest \
       server/ai_trading/tests/test_metrics_buffer.py \
       server/ai_trading/tests/test_integration.py \
       server/ai_trading/tests/test_llm_client.py \
