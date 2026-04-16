@@ -1,9 +1,10 @@
 "use client";
 
 import AgentCard from "@/components/cards/AgentCard";
-import { NAMES, COLORS } from "@/constants";
+import { COLORS } from "@/constants";
 
 interface AgentsListProps {
+  agentIds: string[];
   activeAgent: string;
   setActiveAgent: (id: string) => void;
   names?: string[];
@@ -18,17 +19,22 @@ interface AgentsListProps {
   };
 }
 
-export const AgentsList = ({ activeAgent, setActiveAgent, names, metrics }: AgentsListProps) => {
+export const AgentsList = ({ agentIds, activeAgent, setActiveAgent, names, metrics }: AgentsListProps) => {
   const getName = (idx: number, fallback: string) => names && names[idx] ? names[idx] : fallback;
   const getAvatar = (idx: number, fallback: string) => names && names[idx] ? names[idx].charAt(0) : fallback;
   const normalizeRatio = (value: number): number => (Math.abs(value) > 1 ? value / 100 : value);
   const formatPercent = (value: number, digits = 1): string => `${(normalizeRatio(value) * 100).toFixed(digits)}%`;
-
-  const agentIds = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
+  const strategyLabelMap: Record<string, string> = {
+    momentum_hunter: "Donchian Breakout",
+    mean_reverter: "Grid + Mean Rev",
+    macro_trader: "Trend Following",
+    chaos_agent: "Scalping ATR",
+  };
+  const visibleIds = agentIds.length > 0 ? agentIds : ["momentum_hunter"];
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-2">
-      {agentIds.map((id, idx) => {
+      {visibleIds.map((id, idx) => {
         const m = metrics?.[id];
         return (
           <AgentCard
@@ -36,15 +42,11 @@ export const AgentsList = ({ activeAgent, setActiveAgent, names, metrics }: Agen
             id={id}
             name={getName(idx, id)}
             avatar={getAvatar(idx, id.charAt(0).toUpperCase())}
-            strategy={
-              id === 'momentum_hunter' ? 'Donchian Breakout' :
-              id === 'mean_reverter' ? 'Grid + Mean Rev' :
-              id === 'macro_trader' ? 'Trend Following' : 'Scalping ATR'
-            }
+            strategy={strategyLabelMap[id] || "Adaptive Strategy"}
             sharpe={m ? m.current_sharpe.toFixed(2) : '0.00'}
             mdd={m ? formatPercent(m.current_mdd, 1) : '0.0%'}
             winRate={m ? formatPercent(m.current_win_rate, 1) : '0.0%'}
-            color={COLORS[idx]}
+            color={COLORS[idx % COLORS.length]}
             isActive={activeAgent === id}
             onClick={() => setActiveAgent(id)}
           />

@@ -28,10 +28,13 @@ class EvolutionEngine:
         context = context or {}
         symbol = context.get("symbol", "BTCUSDT")
         timeframe = context.get("timeframe", "1h")
+        quick_mode = bool(context.get("quick_mode", False))
+        lookback_days = int(context.get("lookback_days") or (45 if quick_mode else 180))
+        run_test_set = bool(context.get("run_test_set", not quick_mode))
         
-        # 1. 데이터 수집 (최근 180일 데이터를 사용하여 WFO 구간 확보)
+        # 1. 데이터 수집 (quick/full 모드에 따라 기간 조절)
         end_ms = int(datetime.now().timestamp() * 1000)
-        start_ms = end_ms - (180 * 24 * 60 * 60 * 1000)
+        start_ms = end_ms - (lookback_days * 24 * 60 * 60 * 1000)
         
         try:
             df = fetch_ohlcv_dataframe(
@@ -53,6 +56,9 @@ class EvolutionEngine:
 
         # 2. 고급 백테스트 엔진 초기화
         engine = BacktestEngine(df, freq=24 if timeframe == "1h" else 1)
+        if quick_mode:
+            # Quick gate는 비용/시간 절감을 위해 Monte Carlo 샘플 수를 낮춘다.
+            engine.mc.n_sims = min(120, int(engine.mc.n_sims))
         
         try:
             # 3. LLM 코드에서 실행 가능한 전략 함수 추출
@@ -63,7 +69,7 @@ class EvolutionEngine:
             validation_res = engine.run_full_validation(
                 strategy_fn=strategy_fn,
                 strategy_name=f"Evolved_{agent_id}",
-                run_test_set=True
+                run_test_set=run_test_set
             )
             
             # 5. 결과 인덱싱 및 메트릭 산출
@@ -86,6 +92,7 @@ class EvolutionEngine:
 
             return {
                 "success": True,
+                "quick_mode": quick_mode,
                 "is_robust": validation_res.is_robust,
                 "verdict": validation_res.verdict,
                 "metrics": metrics,

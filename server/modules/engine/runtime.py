@@ -40,6 +40,13 @@ _STRATEGY_CACHE_EXPIRY: float = 0
 _CACHE_TTL = 300  # 5 minutes
 
 
+def invalidate_strategy_cache() -> None:
+    """Invalidate in-memory strategy catalog cache."""
+    global _STRATEGY_CACHE, _STRATEGY_CACHE_EXPIRY
+    _STRATEGY_CACHE = []
+    _STRATEGY_CACHE_EXPIRY = 0
+
+
 def _get_supabase_manager() -> Optional[SupabaseManager]:
     global _supabase_manager, _supabase_unavailable
     if _supabase_unavailable:

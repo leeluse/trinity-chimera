@@ -38,6 +38,18 @@ const formatChatRunError = (error: unknown): string => {
   return "알 수 없는 오류";
 };
 
+const normalizeApiBase = (value: string): string =>
+  value.replace(/\/+$/, "").replace(/\/api$/, "");
+
+const resolveBackendBase = (): string => {
+  const envBase = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+  if (envBase) return normalizeApiBase(envBase);
+
+  const currentHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
+  if (currentHost === "localhost" || currentHost === "127.0.0.1") return "http://localhost:8000";
+  return "";
+};
+
 // Removed TypewriterText components to eliminate artificial latency.
 
 export default function ChatInterface({ context = {}, onBacktestGenerated, onApplyCode }: ChatInterfaceProps) {
@@ -64,19 +76,11 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     // 과거 기록 불러오기
     const loadHistory = async () => {
       try {
-        const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-        const backendBase = process.env.NEXT_PUBLIC_API_URL 
-          ? process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, "")
-          : (currentHost === 'localhost' || currentHost === '127.0.0.1') 
-            ? "http://localhost:8000" 
-            : ""; // Relative path will use Next.js rewrite
-        
-        const res = await fetch(`${backendBase}/api/chat/history?session_id=${sid}`, {
-          headers: {
-            "ngrok-skip-browser-warning": "true",
-            "Bypass-Tunnel-Reminder": "true"
-          }
-        });
+        const backendBase = resolveBackendBase();
+        const res = await fetchWithBypass(
+          `${backendBase}/api/chat/history?session_id=${encodeURIComponent(sid)}`,
+          { timeoutMs: 60000 }
+        );
         const data = await res.json();
         if (data.success && data.messages) {
           // DB 포맷을 ChatMessage 포맷으로 변환
@@ -156,22 +160,16 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
         }));
 
       // 🚀 Next.js 프록시 버퍼링을 피하기 위해 가급적 백엔드로 직접 요청
-      const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-      const backendBase = process.env.NEXT_PUBLIC_API_URL 
-        ? process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, "")
-        : (currentHost === 'localhost' || currentHost === '127.0.0.1') 
-          ? "http://localhost:8000" 
-          : ""; // 비로컬 환경에서는 상대 경로(/api/...)를 통해 Next.js 리라이트 활용
+      const backendBase = resolveBackendBase();
       const url = `${backendBase}/api/chat/run?t=${Date.now()}`;
 
-      const response = await fetch(url, {
+      const response = await fetchWithBypass(url, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
+          "Accept": "text/event-stream",
           "Cache-Control": "no-cache",
-          "Pragma": "no-cache",
-          "ngrok-skip-browser-warning": "true",
-          "Bypass-Tunnel-Reminder": "true"
+          "Pragma": "no-cache"
         },
         body: JSON.stringify({
           message: userMessage,
@@ -180,7 +178,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           history,
         }),
         signal: controller.signal,
-        cache: "no-store" // [중요] 브라우저 캐시 무시
+        cache: "no-store", // [중요] 브라우저 캐시 무시
+        timeoutMs: 300000
       });
 
       if (!response.ok) {
@@ -306,10 +305,13 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     } catch (e) {
       console.error(e);
       const errorMessage = formatChatRunError(e);
+      const extraHint = /failed to fetch|networkerror|http 502|http 503|http 504/i.test(errorMessage)
+        ? "\n연결 힌트: 프론트가 백엔드에 접근하지 못했습니다. 터널 URL 또는 NEXT_PUBLIC_API_URL 설정을 확인해 주세요."
+        : "";
       appendMessage({
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: `전략 생성/백테스트 실행 중 오류가 발생했습니다.\n사유: ${errorMessage}`,
+        content: `전략 생성/백테스트 실행 중 오류가 발생했습니다.\n사유: ${errorMessage}${extraHint}`,
         type: "text",
       });
     } finally {

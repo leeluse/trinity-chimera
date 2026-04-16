@@ -2,19 +2,22 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Response
 from typing import Any, Dict, List, Optional
 import asyncio
 import math
+import logging
 from pydantic import BaseModel
 from postgrest import APIError
 
 from server.api.models.agent import AgentImprovementRequest
-from server.modules.evolution.constants import AGENT_IDS
+from server.modules.evolution.constants import AGENT_IDS, ACTIVE_AGENT_IDS
 from server.modules.evolution.orchestrator import get_evolution_orchestrator
 from server.modules.evolution.self_improvement import SelfImprovementService
+from server.shared.db.supabase import SupabaseManager
 
 router = APIRouter(prefix="/agents", tags=["Agents"])
 dashboard_router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 improvement_service = SelfImprovementService()
 evolution_orchestrator = get_evolution_orchestrator()
+logger = logging.getLogger(__name__)
 
 
 class RunLoopRequest(BaseModel):
@@ -158,12 +161,99 @@ def _fallback_current_strategy_id(manager: Any, agent_row: Dict[str, Any]) -> Op
     return rows[0].get("id")
 
 
+def _normalize_decision_event(
+    row: Dict[str, Any],
+    agent_name_map: Dict[str, str],
+) -> Dict[str, Any]:
+    def _guess_agent_alias(name: str) -> str:
+        value = (name or "").lower()
+        if any(token in value for token in ("minara", "momentum", "hunter")):
+            return "momentum_hunter"
+        if any(token in value for token in ("arbiter", "mean", "revert")):
+            return "mean_reverter"
+        if any(token in value for token in ("nim-alpha", "macro", "trend")):
+            return "macro_trader"
+        if any(token in value for token in ("chimera", "chaos", "scalp")):
+            return "chaos_agent"
+        return ""
+
+    expected = row.get("expected_improvement")
+    if not isinstance(expected, dict):
+        expected = {}
+
+    decision = expected.get("decision")
+    if not isinstance(decision, dict):
+        decision = {}
+
+    baseline_metrics = expected.get("baseline_metrics")
+    if not isinstance(baseline_metrics, dict):
+        baseline_metrics = expected.get("baseline") if isinstance(expected.get("baseline"), dict) else {}
+
+    candidate_metrics = expected.get("metrics")
+    if not isinstance(candidate_metrics, dict):
+        candidate_metrics = expected.get("candidate") if isinstance(expected.get("candidate"), dict) else {}
+
+    db_agent_uuid = str(row.get("agent_id") or "")
+    alias = str(decision.get("agent_alias") or "").strip()
+    guessed_alias = _guess_agent_alias(agent_name_map.get(db_agent_uuid) or "")
+    agent_id = alias or guessed_alias or db_agent_uuid or "system"
+    agent_label = (
+        str(decision.get("agent_label") or "").strip()
+        or agent_name_map.get(db_agent_uuid)
+        or agent_id
+    )
+
+    result = str(decision.get("result") or "").strip()
+    if not result:
+        result = "accepted" if row.get("new_strategy_id") else "recorded"
+    stage = str(decision.get("stage") or "decision").strip()
+    reason = str(decision.get("reason") or "").strip()
+    analysis = str(row.get("llm_analysis") or "").strip()
+    message = (
+        str(decision.get("message") or "").strip()
+        or analysis
+        or f"[{agent_label}] {result} ({stage})"
+    )
+
+    lowered = result.lower()
+    level = "info"
+    if lowered == "accepted":
+        level = "success"
+    elif "reject" in lowered or "fail" in lowered or "error" in lowered:
+        level = "warning"
+
+    normalized_decision = dict(decision)
+    normalized_decision.setdefault("result", result)
+    normalized_decision.setdefault("stage", stage)
+    if reason:
+        normalized_decision.setdefault("reason", reason)
+    normalized_decision.setdefault("strategy_id", row.get("new_strategy_id"))
+
+    return {
+        "id": str(row.get("id") or ""),
+        "created_at": row.get("created_at"),
+        "level": level,
+        "phase": stage,
+        "message": message,
+        "agent_id": agent_id,
+        "agent_label": agent_label,
+        "meta": {
+            "decision": normalized_decision,
+            "metrics": candidate_metrics,
+            "baseline_metrics": baseline_metrics,
+            "verdict": expected.get("verdict") or "",
+            "prev_strategy_id": row.get("prev_strategy_id"),
+            "new_strategy_id": row.get("new_strategy_id"),
+        },
+    }
+
+
 # -------------------------------------------------------------------------
 # [API] 수동 루프 실행: 선택된 에이전트들에 대해 즉시 진화 시작 [POST]
 # -------------------------------------------------------------------------
 @router.post("/run-loop")
 async def run_manual_loop(request: Optional[RunLoopRequest] = None):
-    requested = request.agent_ids if request and request.agent_ids else list(AGENT_IDS)
+    requested = request.agent_ids if request and request.agent_ids else list(ACTIVE_AGENT_IDS)
     filtered: List[str] = []
     for agent_id in requested:
         if agent_id in AGENT_IDS and agent_id not in filtered:
@@ -294,6 +384,31 @@ async def get_evolution_log(
         logger.error(f"Evolution log error: {e}")
         return {"events": []}
 
+
+@dashboard_router.get("/logs")
+async def get_dashboard_logs(
+    response: Response,
+    limit: int = Query(220, ge=1, le=1000),
+    agent_id: Optional[str] = Query(None),
+):
+    """
+    DB 누적 로그 조회 (improvement_logs 기반).
+    LOGS 탭의 주 데이터 소스.
+    """
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    try:
+        manager = SupabaseManager()
+        rows = await manager.list_improvement_logs(limit=limit, agent_id=agent_id)
+        agent_name_map = manager.get_agent_name_map(
+            [str(row.get("agent_id") or "") for row in rows]
+        )
+        events = [_normalize_decision_event(row, agent_name_map) for row in rows]
+        return {"events": events}
+    except Exception as e:
+        logger.error(f"Dashboard DB logs error: {e}")
+        return {"events": []}
+
 # -------------------------------------------------------------------------
 # [API] 전체 지표 요약: 에이전트별 순위 및 평균 성과 데이터 [GET]
 # -------------------------------------------------------------------------
@@ -306,7 +421,7 @@ async def get_dashboard_metrics():
         manager = None
 
     if manager is None:
-        all_perf = [_build_agent_performance(aid) for aid in AGENT_IDS]
+        all_perf = [_build_agent_performance(aid) for aid in ACTIVE_AGENT_IDS]
         best = max(all_perf, key=lambda item: item["current_score"])
         agents = {
             perf["agent_id"]: {
@@ -321,6 +436,7 @@ async def get_dashboard_metrics():
         }
         return {
             "total_agents": len(all_perf),
+            "active_agents": list(ACTIVE_AGENT_IDS),
             "agents": agents,
             "overall_metrics": {
                 "avg_trinity_score": round(
@@ -337,7 +453,7 @@ async def get_dashboard_metrics():
     best_performer = ""
     best_score = float("-inf")
 
-    for agent_id in AGENT_IDS:
+    for agent_id in ACTIVE_AGENT_IDS:
         agent_row = manager._resolve_agent_row(agent_id) or {}
         name = str(agent_row.get("name") or agent_id)
         strategy_id = agent_row.get("current_strategy_id") or _fallback_current_strategy_id(manager, agent_row)
@@ -364,11 +480,17 @@ async def get_dashboard_metrics():
         }
 
     if not best_performer:
-        best_performer = AGENT_IDS[0] if AGENT_IDS else ""
+        if ACTIVE_AGENT_IDS:
+            best_performer = ACTIVE_AGENT_IDS[0]
+        elif AGENT_IDS:
+            best_performer = AGENT_IDS[0]
+        else:
+            best_performer = ""
 
     avg_score = round(sum(scores) / len(scores), 4) if scores else 0.0
     return {
-        "total_agents": len(AGENT_IDS),
+        "total_agents": len(ACTIVE_AGENT_IDS),
+        "active_agents": list(ACTIVE_AGENT_IDS),
         "agents": agent_metrics,
         "overall_metrics": {
             "avg_trinity_score": avg_score,

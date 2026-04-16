@@ -1,9 +1,46 @@
-AGENT_IDS = [
+import os
+from typing import List
+
+
+ALL_AGENT_IDS = [
     "momentum_hunter",
     "mean_reverter",
     "macro_trader",
     "chaos_agent",
 ]
+
+
+def _parse_csv_agent_ids(raw: str) -> List[str]:
+    selected: List[str] = []
+    for token in raw.split(","):
+        agent_id = token.strip()
+        if not agent_id:
+            continue
+        if agent_id in ALL_AGENT_IDS and agent_id not in selected:
+            selected.append(agent_id)
+    return selected
+
+
+def _resolve_active_agent_ids() -> List[str]:
+    raw_ids = (os.getenv("EVOLUTION_ACTIVE_AGENT_IDS", "") or "").strip()
+    parsed_ids = _parse_csv_agent_ids(raw_ids)
+    if parsed_ids:
+        return parsed_ids
+
+    raw_count = (os.getenv("EVOLUTION_AGENT_COUNT", "1") or "1").strip()
+    try:
+        count = int(raw_count)
+    except ValueError:
+        count = 1
+    count = max(1, min(count, len(ALL_AGENT_IDS)))
+    return list(ALL_AGENT_IDS[:count])
+
+
+# 전체 에이전트 카탈로그 (유효성 검사/채팅 라우팅용)
+AGENT_IDS = list(ALL_AGENT_IDS)
+
+# 실제 자동 루프 대상 에이전트 목록 (env 제어, 기본값 1개)
+ACTIVE_AGENT_IDS = _resolve_active_agent_ids()
 
 BANNED_INDICATORS = [
     "RSI", "MACD", "볼린저밴드", "이동평균", "SMA", "EMA",

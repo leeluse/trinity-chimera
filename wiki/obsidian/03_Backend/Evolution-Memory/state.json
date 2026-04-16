@@ -1,0 +1,1467 @@
+{
+  "experiments": [
+    {
+      "time": "2026-04-16T11:01:12Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: Code syntax error: name 'StrategyInterface' is not defined",
+      "fingerprint": "d7f9fdc43c75ec83a121318e49e2f710fa16166d4c8834b8723173573fff18d1",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T11:01:12Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T11:01:12Z)",
+      "fingerprint": "d7f9fdc43c75ec83a121318e49e2f710fa16166d4c8834b8723173573fff18d1",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T11:01:12Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T11:01:12Z)",
+      "fingerprint": "d7f9fdc43c75ec83a121318e49e2f710fa16166d4c8834b8723173573fff18d1",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T11:01:12Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T11:01:12Z)",
+      "fingerprint": "d7f9fdc43c75ec83a121318e49e2f710fa16166d4c8834b8723173573fff18d1",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T11:01:12Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T11:01:12Z)",
+      "fingerprint": "d7f9fdc43c75ec83a121318e49e2f710fa16166d4c8834b8723173573fff18d1",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T11:08:08Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.408 < 0.450; profit_factor 1.053 < 1.200",
+      "fingerprint": "bd2c4799a97845f426d74bd6c83087c1caaece718441f59122faa9ee311d711d",
+      "metrics": {
+        "win_rate": 0.40816326530612246,
+        "profit_factor": 1.053359292347993,
+        "total_return": 0.01945448753606316,
+        "max_drawdown": -0.16951541968207023,
+        "total_trades": 49,
+        "sharpe_ratio": 0.733014563450531,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T11:14:16Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.404 < 0.450; profit_factor 1.096 < 1.200",
+      "fingerprint": "d7c2d4df4d8dd0db848a69361fabf62b13089238d11afbb4bf29fe7325e2751c",
+      "metrics": {
+        "win_rate": 0.40350877192982454,
+        "profit_factor": 1.0960639921963016,
+        "total_return": 0.018645927907810833,
+        "max_drawdown": -0.1048880903060621,
+        "total_trades": 57,
+        "sharpe_ratio": 0.7283345143676021,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:05:17Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 코드에서 generate_signal 함수 또는 유효한 Strategy 클래스를 찾을 수 없습니다.",
+      "fingerprint": "51506e8f43717263b8900787a0463afed0619e3d7228bf940b3e23328b0cc088",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:05:18Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T12:05:17Z)",
+      "fingerprint": "51506e8f43717263b8900787a0463afed0619e3d7228bf940b3e23328b0cc088",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:05:18Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T12:05:18Z)",
+      "fingerprint": "51506e8f43717263b8900787a0463afed0619e3d7228bf940b3e23328b0cc088",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:05:19Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T12:05:18Z)",
+      "fingerprint": "51506e8f43717263b8900787a0463afed0619e3d7228bf940b3e23328b0cc088",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:05:20Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T12:05:19Z)",
+      "fingerprint": "51506e8f43717263b8900787a0463afed0619e3d7228bf940b3e23328b0cc088",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:31:02Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:31:03Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:31:12Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:31:12Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:31:21Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:31:22Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:31:31Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:31:31Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:31:40Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:31:41Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:45:00Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:45:10Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:45:19Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:45:28Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:45:38Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:56:16Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:56:26Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:56:29Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:56:35Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:56:38Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:56:44Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:56:47Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:56:54Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:58:32Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:58:40Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:58:47Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:58:56Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T12:59:05Z",
+      "agent_id": "momentum_hunter",
+      "status": "error_generation",
+      "stage": "generate",
+      "reason": "llm_generation_error: LLM upstream connection error: <urlopen error [Errno 61] Connection refused>",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:12:36Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: Code syntax error: name 'StrategyInterface' is not defined",
+      "fingerprint": "61bec521e5ad040ecdb88d46be2f5d8c59836fe0eb40571a66126cec5afd4a6c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:12:36Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:12:36Z)",
+      "fingerprint": "61bec521e5ad040ecdb88d46be2f5d8c59836fe0eb40571a66126cec5afd4a6c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:12:38Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:12:36Z)",
+      "fingerprint": "61bec521e5ad040ecdb88d46be2f5d8c59836fe0eb40571a66126cec5afd4a6c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:12:38Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:12:38Z)",
+      "fingerprint": "61bec521e5ad040ecdb88d46be2f5d8c59836fe0eb40571a66126cec5afd4a6c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:12:39Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:12:38Z)",
+      "fingerprint": "61bec521e5ad040ecdb88d46be2f5d8c59836fe0eb40571a66126cec5afd4a6c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:12:40Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:12:39Z)",
+      "fingerprint": "61bec521e5ad040ecdb88d46be2f5d8c59836fe0eb40571a66126cec5afd4a6c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:12:41Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:12:40Z)",
+      "fingerprint": "61bec521e5ad040ecdb88d46be2f5d8c59836fe0eb40571a66126cec5afd4a6c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:12:41Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:12:41Z)",
+      "fingerprint": "61bec521e5ad040ecdb88d46be2f5d8c59836fe0eb40571a66126cec5afd4a6c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:12:42Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:12:41Z)",
+      "fingerprint": "61bec521e5ad040ecdb88d46be2f5d8c59836fe0eb40571a66126cec5afd4a6c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:12:42Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:12:42Z)",
+      "fingerprint": "61bec521e5ad040ecdb88d46be2f5d8c59836fe0eb40571a66126cec5afd4a6c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:43:58Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 코드에서 generate_signal 함수 또는 유효한 Strategy 클래스를 찾을 수 없습니다.",
+      "fingerprint": "ef9c4390a9f1c3e2200b3da3496c4b8e898e04eb1fc255892d6486cad5c2e90d",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:43:59Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:43:58Z)",
+      "fingerprint": "ef9c4390a9f1c3e2200b3da3496c4b8e898e04eb1fc255892d6486cad5c2e90d",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:43:59Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:43:59Z)",
+      "fingerprint": "ef9c4390a9f1c3e2200b3da3496c4b8e898e04eb1fc255892d6486cad5c2e90d",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:44:00Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:43:59Z)",
+      "fingerprint": "ef9c4390a9f1c3e2200b3da3496c4b8e898e04eb1fc255892d6486cad5c2e90d",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:44:01Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:44:00Z)",
+      "fingerprint": "ef9c4390a9f1c3e2200b3da3496c4b8e898e04eb1fc255892d6486cad5c2e90d",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:51:27Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 코드에서 generate_signal 함수 또는 유효한 Strategy 클래스를 찾을 수 없습니다.",
+      "fingerprint": "50e16f9c7843c91cb7f75aa8984d84e3084e3f621d5ad32d89a11f39c70ad7fd",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:51:28Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:51:27Z)",
+      "fingerprint": "50e16f9c7843c91cb7f75aa8984d84e3084e3f621d5ad32d89a11f39c70ad7fd",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:51:28Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:51:28Z)",
+      "fingerprint": "50e16f9c7843c91cb7f75aa8984d84e3084e3f621d5ad32d89a11f39c70ad7fd",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:51:29Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:51:28Z)",
+      "fingerprint": "50e16f9c7843c91cb7f75aa8984d84e3084e3f621d5ad32d89a11f39c70ad7fd",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T13:51:29Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T13:51:29Z)",
+      "fingerprint": "50e16f9c7843c91cb7f75aa8984d84e3084e3f621d5ad32d89a11f39c70ad7fd",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:04:26Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 코드에서 generate_signal 함수 또는 유효한 Strategy 클래스를 찾을 수 없습니다.",
+      "fingerprint": "f35bf3105e8b63f3f8b871f315167018888accccc3091d5f0a32fd1641a397a6",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:04:27Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:04:26Z)",
+      "fingerprint": "f35bf3105e8b63f3f8b871f315167018888accccc3091d5f0a32fd1641a397a6",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:04:27Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:04:27Z)",
+      "fingerprint": "f35bf3105e8b63f3f8b871f315167018888accccc3091d5f0a32fd1641a397a6",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:04:28Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:04:27Z)",
+      "fingerprint": "f35bf3105e8b63f3f8b871f315167018888accccc3091d5f0a32fd1641a397a6",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:04:28Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:04:28Z)",
+      "fingerprint": "f35bf3105e8b63f3f8b871f315167018888accccc3091d5f0a32fd1641a397a6",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:09:19Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: Code syntax error: name 'StrategyInterface' is not defined",
+      "fingerprint": "50e2af5fa5370918bef7ff3b277f04eae683481b86c889eb910767d29e430e31",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:09:19Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:09:19Z)",
+      "fingerprint": "50e2af5fa5370918bef7ff3b277f04eae683481b86c889eb910767d29e430e31",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:09:20Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:09:19Z)",
+      "fingerprint": "50e2af5fa5370918bef7ff3b277f04eae683481b86c889eb910767d29e430e31",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:09:20Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:09:20Z)",
+      "fingerprint": "50e2af5fa5370918bef7ff3b277f04eae683481b86c889eb910767d29e430e31",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:09:21Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:09:20Z)",
+      "fingerprint": "50e2af5fa5370918bef7ff3b277f04eae683481b86c889eb910767d29e430e31",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:15:15Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 코드에서 generate_signal 함수 또는 유효한 Strategy 클래스를 찾을 수 없습니다.",
+      "fingerprint": "11ec0f1fb6822f2f92edc7de7852fbefb0f594a38c274f108a01f6af517fa0d9",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:15:15Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:15:15Z)",
+      "fingerprint": "11ec0f1fb6822f2f92edc7de7852fbefb0f594a38c274f108a01f6af517fa0d9",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:15:16Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:15:15Z)",
+      "fingerprint": "11ec0f1fb6822f2f92edc7de7852fbefb0f594a38c274f108a01f6af517fa0d9",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:15:16Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:15:16Z)",
+      "fingerprint": "11ec0f1fb6822f2f92edc7de7852fbefb0f594a38c274f108a01f6af517fa0d9",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:15:17Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:15:16Z)",
+      "fingerprint": "11ec0f1fb6822f2f92edc7de7852fbefb0f594a38c274f108a01f6af517fa0d9",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:34:17Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 코드에서 generate_signal 함수 또는 유효한 Strategy 클래스를 찾을 수 없습니다.",
+      "fingerprint": "75a96651c8dc031026af55ef46dbfa0fbfdec4474da8e6b1ec439414d3bed873",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:34:17Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:34:17Z)",
+      "fingerprint": "75a96651c8dc031026af55ef46dbfa0fbfdec4474da8e6b1ec439414d3bed873",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:34:18Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:34:17Z)",
+      "fingerprint": "75a96651c8dc031026af55ef46dbfa0fbfdec4474da8e6b1ec439414d3bed873",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:34:18Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:34:18Z)",
+      "fingerprint": "75a96651c8dc031026af55ef46dbfa0fbfdec4474da8e6b1ec439414d3bed873",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:34:19Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_duplicate",
+      "stage": "precheck",
+      "reason": "duplicate_candidate (previous=2026-04-16T14:34:18Z)",
+      "fingerprint": "75a96651c8dc031026af55ef46dbfa0fbfdec4474da8e6b1ec439414d3bed873",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:50:41Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 유효한 백테스트 결과가 생성되지 않았습니다.",
+      "fingerprint": "067f34aa69cdc352dbe992e0e2236bae40e0c8dc881525676148769c1dd10dd7",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T14:59:50Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 유효한 백테스트 결과가 생성되지 않았습니다.",
+      "fingerprint": "291939d071a1afdf4081219f4c32e8c079747e012aaaefa5387bc9264936ae2c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T15:01:20Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 유효한 백테스트 결과가 생성되지 않았습니다.",
+      "fingerprint": "2f0fe1695dd4c41a72dde55fad876fab71b79c21e6431f5eac4a33eb09dd1529",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T15:03:34Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 유효한 백테스트 결과가 생성되지 않았습니다.",
+      "fingerprint": "50c8d0d00283fde022b4661784e3459f338c656b5110114c905b2543b4e45605",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T15:07:54Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 유효한 백테스트 결과가 생성되지 않았습니다.",
+      "fingerprint": "ab581107fae673c0290eb076a8c20c257e245c6a215d94ef35f7a740e447c12c",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-16T15:17:18Z",
+      "agent_id": "momentum_hunter",
+      "status": "rejected_quick_error",
+      "stage": "quick_gate",
+      "reason": "quick_backtest_failed: 검증 프로세스 에러: 유효한 백테스트 결과가 생성되지 않았습니다.",
+      "fingerprint": "1898d6fd33dd3b60260106cc9d179c903df9b30be9e23ef35cc01b5f1ab23638",
+      "metrics": {
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "total_return": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "sharpe_ratio": 0.0,
+        "trinity_score": 0.0
+      }
+    }
+  ],
+  "accepted": []
+}

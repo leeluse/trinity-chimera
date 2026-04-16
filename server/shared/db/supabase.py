@@ -1,5 +1,6 @@
 import os
 import uuid
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -9,6 +10,8 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(PROJECT_ROOT / ".env", override=False)
+
+logger = logging.getLogger(__name__)
 
 class SupabaseManager:
     """
@@ -268,18 +271,88 @@ class SupabaseManager:
                 print(f"Error saving improvement log: agent not found for {agent_id}")
                 return False
 
+            expected_payload = expected if isinstance(expected, dict) else {}
+            expected_payload = dict(expected_payload)
+            decision_payload = expected_payload.get("decision")
+            if not isinstance(decision_payload, dict):
+                decision_payload = {}
+            decision_payload.setdefault("agent_alias", agent_id)
+            if new_id and not decision_payload.get("result"):
+                decision_payload["result"] = "accepted"
+            expected_payload["decision"] = decision_payload
+
             data = {
                 "agent_id": resolved_agent["id"],
                 "prev_strategy_id": prev_id,
                 "new_strategy_id": new_id,
                 "llm_analysis": analysis,
-                "expected_improvement": expected
+                "expected_improvement": expected_payload
             }
             self.client.table("improvement_logs").insert(data).execute()
             return True
         except APIError as e:
             print(f"Error saving improvement log: {e}")
             return False
+
+    async def list_improvement_logs(
+        self,
+        limit: int = 200,
+        agent_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch recent improvement_logs in descending order.
+        """
+        try:
+            query = (
+                self.client.table("improvement_logs")
+                .select("id,agent_id,prev_strategy_id,new_strategy_id,llm_analysis,expected_improvement,created_at")
+                .order("created_at", desc=True)
+                .limit(max(1, min(limit, 1000)))
+            )
+
+            if agent_id:
+                resolved_agent = self._resolve_agent_row(agent_id)
+                if resolved_agent and resolved_agent.get("id"):
+                    query = query.eq("agent_id", resolved_agent["id"])
+                elif self._is_uuid_like(agent_id):
+                    query = query.eq("agent_id", agent_id)
+
+            res = query.execute()
+            return res.data or []
+        except APIError as e:
+            print(f"Error listing improvement logs: {e}")
+            return []
+
+    def get_agent_name_map(self, agent_ids: List[str]) -> Dict[str, str]:
+        """
+        Build {agent_uuid: agent_name} map for the given agent ids.
+        """
+        unique_ids = []
+        for agent_id in agent_ids:
+            if not agent_id:
+                continue
+            if agent_id not in unique_ids:
+                unique_ids.append(agent_id)
+
+        if not unique_ids:
+            return {}
+
+        try:
+            res = (
+                self.client.table("agents")
+                .select("id,name")
+                .in_("id", unique_ids)
+                .execute()
+            )
+            rows = res.data or []
+            return {
+                str(row.get("id")): str(row.get("name") or row.get("id"))
+                for row in rows
+                if row.get("id")
+            }
+        except APIError as e:
+            print(f"Error fetching agent name map: {e}")
+            return {}
 
     async def get_all_agent_scores(self) -> List[Dict[str, Any]]:
         """
@@ -465,7 +538,7 @@ class SupabaseManager:
             self.client.table("chat_messages").insert(payload).execute()
             return True
         except Exception as e:
-            print(f"Error saving chat message: {e}")
+            logger.error("Error saving chat message: %s", e)
             return False
 
     async def get_chat_history(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
@@ -483,5 +556,5 @@ class SupabaseManager:
             )
             return res.data or []
         except Exception as e:
-            print(f"Error fetching chat history: {e}")
+            logger.error("Error fetching chat history: %s", e)
             return []

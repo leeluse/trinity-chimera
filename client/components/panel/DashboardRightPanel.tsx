@@ -2,12 +2,11 @@
 
 import LogCard from "@/components/cards/LogCard";
 import { PerformanceRow } from "@/types";
-import { DashboardMetrics, DashboardProgress, EvolutionLogEvent } from "@/lib/api";
+import { DashboardMetrics, DashboardProgress, EvolutionLogEvent, DecisionLogEvent } from "@/lib/api";
 
 // Extracted Sections
 import PanelTabs from "./sections/PanelTabs";
 import AgentFilter from "./sections/AgentFilter";
-import PerformanceSummary from "./sections/PerformanceSummary";
 import EvolutionLogPanel from "./sections/EvolutionLogPanel";
 
 import { COLORS } from "@/constants";
@@ -16,15 +15,20 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 interface DashboardRightPanelProps {
+  agentIds: string[];
   activeAgent: string;
   setActiveAgent: (name: string) => void;
   names: string[];
   metricsData?: DashboardMetrics;
   progress?: DashboardProgress;
   evolutionEvents?: EvolutionLogEvent[];
-  isLoopRunning?: boolean;
-  automationEnabled?: boolean;
-  onToggleAutomation?: () => void;
+  decisionLogs?: DecisionLogEvent[];
+  automationStatus?: { 
+    enabled: boolean; 
+    status: string; 
+    next_run_time?: string | null; 
+  } | null;
+  onToggleAutomation?: (enabled: boolean) => void;
 }
 
 export default function DashboardRightPanel(props: DashboardRightPanelProps) {
@@ -35,15 +39,16 @@ export default function DashboardRightPanel(props: DashboardRightPanelProps) {
   );
 }
 
-function DashboardRightPanelContent({
+export function DashboardRightPanelContent({
+  agentIds,
   activeAgent,
   setActiveAgent,
   names,
   metricsData,
   progress,
   evolutionEvents = [],
-  isLoopRunning = false,
-  automationEnabled = false,
+  decisionLogs = [],
+  automationStatus,
   onToggleAutomation,
 }: DashboardRightPanelProps) {
   const pathname = usePathname();
@@ -53,73 +58,116 @@ function DashboardRightPanelContent({
   const isEvolutionView = pathname === "/" && view === "evolution";
   const isLogsView = pathname === "/" && (view === "" || view === "logs");
 
-  const agentIds = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
+  const visibleAgentIds = agentIds.length > 0 ? agentIds : ["momentum_hunter"];
   const normalizeRatio = (value: number): number => (Math.abs(value) > 1 ? value / 100 : value);
-  const formatPercent = (value: number, digits = 2): string => `${(normalizeRatio(value) * 100).toFixed(digits)}%`;
-  const statusLabelMap: Record<string, string> = {
-    idle: "대기 중",
-    triggered: "트리거 감지",
-    generating: "전략 생성 중",
-    backtesting: "백테스트/검증 중",
-    committing: "전략 반영 중",
-    completed: "개선 완료",
-    failed: "개선 실패",
+  const formatMetricDisplay = (metric: string, value: number | undefined): string => {
+    if (typeof value !== "number" || Number.isNaN(value)) return "-";
+    if (metric === "total_trades") return String(Math.round(value));
+    if (metric === "total_return" || metric === "win_rate" || metric === "max_drawdown") {
+      return `${(value * 100).toFixed(2)}%`;
+    }
+    return value.toFixed(3);
+  };
+  const getAgentName = (agentId: string): string => {
+    const idx = visibleAgentIds.indexOf(agentId);
+    if (idx >= 0 && names[idx]) return names[idx];
+    return metricsData?.agents?.[agentId]?.name || agentId;
   };
 
-  // Generate dynamic performance data from API metrics
-  const performanceData: PerformanceRow[] = agentIds.map((id, idx) => {
-    const m = metricsData?.agents[id];
-    const normalizedReturn = m ? normalizeRatio(m.current_return) : 0;
-    return {
-      name: names && names[idx] ? names[idx] : id,
-      color: COLORS[idx],
-      ret: m ? formatPercent(m.current_return, 2) : '0.00%',
-      sh: m ? m.current_sharpe.toFixed(2) : '0.00',
-      mdd: m ? formatPercent(m.current_mdd, 1) : '0.0%',
-      pos: normalizedReturn > 0,
-    };
-  });
+  const phaseLabelMap: Record<string, string> = {
+    loop: "루프",
+    triggered: "트리거",
+    generating: "생성",
+    generated: "생성완료",
+    baseline: "기준로딩",
+    validation: "검증",
+    decision: "결정",
+    committing: "반영",
+    completed: "완료",
+    failed: "실패",
+    retry: "재시도",
+    skipped: "스킵",
+  };
 
-  // Map API latest_improvements to LogCard format
-  const logsData = (progress?.latest_improvements || []).map((imp) => {
-    const agentName = names && names[agentIds.indexOf(imp.agent_id)] ? names[agentIds.indexOf(imp.agent_id)] : imp.agent_id;
-    const colorIdx = agentIds.indexOf(imp.agent_id);
-    const statusKey = (imp.status || "idle").toLowerCase();
-    const statusLabel = statusLabelMap[statusKey] || imp.status;
-    const detailText = imp.detail || `에이전트 ${imp.agent_id}의 자동 진화 프로세스가 실행되었습니다.`;
+  const dbLogsData = (decisionLogs || [])
+    .filter(event => {
+      const result = (event.meta?.decision?.result || "").toLowerCase();
+      // Only show accepted or those with strategy_id (meaning it was successful)
+      return result === 'accepted' || !!event.meta?.decision?.strategy_id;
+    })
+    .map((event) => {
+      const decision = event.meta?.decision || {};
+      const improvements = Array.isArray(decision.improvement_summary) ? decision.improvement_summary : [];
+      const resultLabel = decision.result ? String(decision.result) : event.phase;
+      const phaseLabel = phaseLabelMap[String(event.phase || "").toLowerCase()] || event.phase || "log";
+      const agentId = event.agent_id || "system";
+      const agentName = event.agent_label || getAgentName(agentId);
+      const colorIdx = Math.max(0, visibleAgentIds.indexOf(agentId));
 
-    return {
-      agentId: imp.agent_id,
-      agentName: agentName,
-      avatar: (agentName || "A").charAt(0),
-      avatarBg: "rgba(255,255,255,0.1)",
-      color: `var(--agent-${colorIdx + 1})`,
-      time: new Date(imp.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) + ' · ' +
-        new Date(imp.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }),
-      analysis: `${statusLabel} (진행률 ${imp.progress}%)`,
-      reason: detailText,
-      params: []
-    };
-  });
+      const detailLines: string[] = [];
+      if (decision.reason) detailLines.push(`사유: ${decision.reason}`);
+      if (improvements.length > 0) {
+        detailLines.push("개선 상세:");
+        improvements.slice(0, 5).forEach((item) => {
+          const metricName = String(item.label || item.metric || "metric");
+          const baselineDisplay = item.baseline_display || formatMetricDisplay(String(item.metric), Number(item.baseline));
+          const candidateDisplay = item.candidate_display || formatMetricDisplay(String(item.metric), Number(item.candidate));
+          detailLines.push(`- ${metricName}: ${baselineDisplay} → ${candidateDisplay}`);
+        });
+      }
+
+      return {
+        agentId,
+        agentName,
+        avatar: (agentName || "A").charAt(0),
+        avatarBg: "rgba(255,255,255,0.05)",
+        color: `var(--agent-${(colorIdx % 4) + 1})`,
+        time: new Date(event.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+        analysis: `[${phaseLabel}] ${resultLabel}`,
+        reason: detailLines.length > 0 ? detailLines.join("\n") : event.message,
+        params: improvements.slice(0, 6).map((item) => {
+          const delta = Number(item.delta || 0);
+          return {
+            name: String(item.label || item.metric || "metric"),
+            oldVal: String(item.baseline_display || "-"),
+            newVal: String(item.candidate_display || "-"),
+            trend: delta > 0 ? "up" as const : delta < 0 ? "down" as const : "neutral" as const,
+          };
+        }),
+        meta: event.meta,
+      };
+    });
+
+  const logsData = dbLogsData;
+  const activeAgentName = getAgentName(activeAgent);
 
   const filteredLogs = (activeAgent === "전체" || activeAgent === "ALL")
     ? logsData
-    : logsData.filter(log => log.agentId === activeAgent || log.agentName === activeAgent);
+    : logsData.filter(
+        (log) =>
+          log.agentId === activeAgent ||
+          log.agentName === activeAgent ||
+          log.agentName === activeAgentName
+      );
 
   return (
     <>
       <PanelTabs />
 
       {isLogsView && (
-        <AgentFilter names={names} activeAgent={activeAgent} setActiveAgent={setActiveAgent} />
+        <AgentFilter
+          agentIds={visibleAgentIds}
+          names={names}
+          activeAgent={activeAgent}
+          setActiveAgent={setActiveAgent}
+        />
       )}
 
       {isEvolutionView && (
         <EvolutionLogPanel
           events={evolutionEvents}
           activeAgent={activeAgent}
-          isLoopRunning={isLoopRunning}
-          automationEnabled={automationEnabled}
+          automationStatus={automationStatus}
           onToggleAutomation={onToggleAutomation}
         />
       )}
@@ -142,18 +190,6 @@ function DashboardRightPanelContent({
             )}
           </div>
         </div>
-      )}
-
-      {/* Show summary only on logs view */}
-      {isLogsView && (
-        <PerformanceSummary
-          performanceData={performanceData}
-          activeAgent={activeAgent}
-          onAgentClick={(name) => {
-            const idx = performanceData.findIndex(row => row.name === name);
-            if (idx !== -1) setActiveAgent(agentIds[idx]);
-          }}
-        />
       )}
     </>
   );

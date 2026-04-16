@@ -5,7 +5,14 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import Chart from "chart.js/auto";
 import Head from "next/head";
-import { APIClient, DashboardMetrics, DashboardProgress, EvolutionLogEvent } from "../lib/api";
+import {
+  APIClient,
+  DashboardMetrics,
+  DashboardProgress,
+  EvolutionLogEvent,
+  DecisionLogEvent,
+  AGENT_IDS as DEFAULT_AGENT_IDS
+} from "../lib/api";
 
 // Centralized Components Import
 import {
@@ -46,8 +53,10 @@ export default function Dashboard() {
   const [dashboardProgress, setDashboardProgress] = useState<DashboardProgress | null>(null);
   const [metricsData, setMetricsData] = useState<DashboardMetrics | null>(null);
   const [evolutionEvents, setEvolutionEvents] = useState<EvolutionLogEvent[]>([]);
-  const [automationStatus, setAutomationStatus] = useState<{enabled: boolean, status: string} | null>(null);
+  const [decisionLogs, setDecisionLogs] = useState<DecisionLogEvent[]>([]);
+  const [automationStatus, setAutomationStatus] = useState<{enabled: boolean, status: string, next_run_time?: string | null} | null>(null);
   const [timeseriesData, setTimeseriesData] = useState<Record<string, number[]>>({});
+  const [runtimeAgentIds, setRuntimeAgentIds] = useState<string[]>(Array.from(DEFAULT_AGENT_IDS.slice(0, 1)));
   
   const [isLoadingProgress, setIsLoadingProgress] = useState(true);
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
@@ -56,16 +65,28 @@ export default function Dashboard() {
   // 데이터 fetch 로직
   const fetchAllData = async () => {
     try {
-      const [prog, met, logs, auto] = await Promise.all([
+      const [prog, met, evoLogs, dbLogs, auto] = await Promise.all([
         APIClient.getDashboardProgress(),
         APIClient.getDashboardMetrics(),
         APIClient.getEvolutionLog(220),
+        APIClient.getDecisionLogs(260),
         APIClient.getAutomationStatus()
       ]);
       setDashboardProgress(prog);
       setMetricsData(met);
-      setEvolutionEvents(logs);
+      setEvolutionEvents(evoLogs);
+      setDecisionLogs(dbLogs);
       setAutomationStatus(auto);
+      const idsFromProgress = (prog.active_agents && prog.active_agents.length > 0)
+        ? prog.active_agents
+        : (prog.agents || []);
+      const idsFromMetrics = Object.keys(met?.agents || {});
+      const nextIds = idsFromProgress.length > 0
+        ? idsFromProgress
+        : (idsFromMetrics.length > 0 ? idsFromMetrics : Array.from(DEFAULT_AGENT_IDS));
+      setRuntimeAgentIds(nextIds);
+      setChartActiveAgent((prev) => (prev !== "ALL" && !nextIds.includes(prev) ? "ALL" : prev));
+      setLogActiveAgent((prev) => (prev !== "ALL" && !nextIds.includes(prev) ? "ALL" : prev));
       setIsLoadingProgress(false);
       setIsLoadingMetrics(false);
       setIsLoadingEvents(false);
@@ -74,13 +95,13 @@ export default function Dashboard() {
     }
   };
 
-  const fetchTimeseries = async (metric: MetricKey) => {
-    const ids = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
+  const fetchTimeseries = async (metric: MetricKey, ids: string[]) => {
+    const targetIds = ids.length > 0 ? ids : runtimeAgentIds;
     const results: Record<string, number[]> = {};
-    await Promise.all(ids.map(async (id) => {
+    await Promise.all(targetIds.map(async (id) => {
       try {
         results[id] = await APIClient.getAgentTimeseries(id, metric);
-      } catch (e) {
+      } catch {
         results[id] = [];
       }
     }));
@@ -90,16 +111,21 @@ export default function Dashboard() {
   // 폴링 설정
   useEffect(() => {
     fetchAllData();
-    fetchTimeseries(currentMetric);
-
     const mainInterval = setInterval(fetchAllData, 4000);
-    const tsInterval = setInterval(() => fetchTimeseries(currentMetric), 4000);
 
     return () => {
       clearInterval(mainInterval);
+    };
+  }, []);
+
+  const runtimeAgentSignature = runtimeAgentIds.join("|");
+  useEffect(() => {
+    fetchTimeseries(currentMetric, runtimeAgentIds);
+    const tsInterval = setInterval(() => fetchTimeseries(currentMetric, runtimeAgentIds), 4000);
+    return () => {
       clearInterval(tsInterval);
     };
-  }, [currentMetric]);
+  }, [currentMetric, runtimeAgentSignature]);
 
   const isLoading = isLoadingProgress || isLoadingMetrics || isLoadingEvents;
   const [isLoopRunning, setIsLoopRunning] = useState(false);
@@ -111,11 +137,12 @@ export default function Dashboard() {
   const timeseriesSignature = JSON.stringify(timeseriesData);
 
   const agentNames = useMemo(() => {
-    const ids = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent'];
-    const newNames = ids.map(id => metricsData?.agents[id]?.name || NAMES[ids.indexOf(id)]);
-    newNames.push("BTC BnH"); // Benchmark always stays
-    return newNames;
-  }, [metricsDataSignature]);
+    return runtimeAgentIds.map((id, idx) => metricsData?.agents[id]?.name || NAMES[idx] || id);
+  }, [metricsDataSignature, runtimeAgentSignature]);
+
+  const chartNames = useMemo(() => {
+    return [...agentNames, "BTC BnH"];
+  }, [agentNames]);
 
   useEffect(() => {
     if (!loopNotice) return;
@@ -138,10 +165,9 @@ export default function Dashboard() {
     }
   };
 
-  const handleToggleAutomation = async () => {
+  const handleToggleAutomation = async (enabled: boolean) => {
     try {
-      const current = automationStatus?.enabled ?? false;
-      await APIClient.setAutomationStatus(!current);
+      await APIClient.setAutomationStatus(enabled);
       const newStatus = await APIClient.getAutomationStatus();
       setAutomationStatus(newStatus);
     } catch (error) {
@@ -150,7 +176,7 @@ export default function Dashboard() {
   };
 
   const buildDynamicDatasets = (metric: MetricKey, names: string[]) => {
-    const ids = ['momentum_hunter', 'mean_reverter', 'macro_trader', 'chaos_agent', 'BTC BnH'];
+    const ids = [...runtimeAgentIds, 'BTC BnH'];
     const metricFieldMap: Record<
       MetricKey,
       "current_score" | "current_return" | "current_sharpe" | "current_mdd" | "current_win_rate"
@@ -164,8 +190,9 @@ export default function Dashboard() {
 
     return ids.map((id, i) => {
       let data: number[] = [];
+      const isBenchmark = id === "BTC BnH";
 
-      if (id === "BTC BnH") {
+      if (isBenchmark) {
         let base = 50, step = 0.2;
         if (metric === "return") { base = 0.05; step = 0.001; }
         else if (metric === "sharpe") { base = 0.5; step = 0.002; }
@@ -194,18 +221,18 @@ export default function Dashboard() {
         data = Array(DAYS).fill(0);
       }
 
-      const isHidden = chartActiveAgent !== "ALL" && id !== chartActiveAgent && i !== 4;
+      const isHidden = chartActiveAgent !== "ALL" && id !== chartActiveAgent && !isBenchmark;
 
       return {
         label: names[i] || NAMES[i],
         data,
-        borderColor: COLORS[i],
+        borderColor: COLORS[i % COLORS.length],
         backgroundColor: 'transparent',
-        borderWidth: i === 0 ? 1.4 : (i === 4 ? 0.8 : 1),
+        borderWidth: i === 0 ? 1.4 : (isBenchmark ? 0.8 : 1),
         pointRadius: 0,
         tension: 0.42,
         fill: false,
-        borderDash: i === 3 ? [5, 4] : (i === 4 ? [1, 5] : []),
+        borderDash: isBenchmark ? [1, 5] : (i === 3 ? [5, 4] : []),
         hidden: isHidden
       };
     });
@@ -242,7 +269,7 @@ export default function Dashboard() {
           }
         }
       }],
-      data: { labels, datasets: buildDynamicDatasets(currentMetric, agentNames) },
+      data: { labels, datasets: buildDynamicDatasets(currentMetric, chartNames) },
       options: {
         responsive: true, maintainAspectRatio: false,
         layout: { padding: { right: 20, left: 10 } },
@@ -265,14 +292,14 @@ export default function Dashboard() {
       }
     });
     return () => chartInstance.current?.destroy();
-  }, [agentNames]);
+  }, [chartNames, runtimeAgentSignature]);
 
   useEffect(() => {
     if (chartInstance.current) {
-      chartInstance.current.data.datasets = buildDynamicDatasets(currentMetric, agentNames);
+      chartInstance.current.data.datasets = buildDynamicDatasets(currentMetric, chartNames);
       chartInstance.current.update('none'); // Update without animation to prevent bounce on tick
     }
-  }, [currentMetric, agentNames, chartActiveAgent, metricsDataSignature, timeseriesSignature]);
+  }, [currentMetric, chartNames, chartActiveAgent, metricsDataSignature, timeseriesSignature, runtimeAgentSignature]);
 
   return (
     <>
@@ -284,14 +311,15 @@ export default function Dashboard() {
       <PageLayout>
         <PageLayout.Side>
           <DashboardRightPanel
+            agentIds={runtimeAgentIds}
             activeAgent={logActiveAgent}
             setActiveAgent={setLogActiveAgent}
             names={agentNames}
             metricsData={metricsData ?? undefined}
             progress={dashboardProgress ?? undefined}
             evolutionEvents={evolutionEvents}
-            isLoopRunning={isLoopRunning}
-            automationEnabled={automationStatus?.enabled ?? false}
+            decisionLogs={decisionLogs}
+            automationStatus={automationStatus}
             onToggleAutomation={handleToggleAutomation}
           />
         </PageLayout.Side>
@@ -328,6 +356,7 @@ export default function Dashboard() {
               <MetricSelector currentMetric={currentMetric} setCurrentMetric={setCurrentMetric} />
 
               <AgentsList
+                agentIds={runtimeAgentIds}
                 activeAgent={chartActiveAgent}
                 setActiveAgent={setChartActiveAgent}
                 names={agentNames}
@@ -335,7 +364,7 @@ export default function Dashboard() {
               />
 
               <div className="flex flex-col min-h-0 gap-3 mt-2">
-                <ChartLegend names={agentNames} />
+                <ChartLegend names={chartNames} />
                 <PerformanceChart
                   chartRef={chartRef}
                   labelPositions={labelPositions}

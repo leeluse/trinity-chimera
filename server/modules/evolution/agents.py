@@ -91,7 +91,14 @@ class AgentStateManager:
     # -------------------------------------------------------------------------
     # 이벤트 로그 추가: 대시보드 하단 로그 패널에 표시될 새로운 메시지 추가
     # -------------------------------------------------------------------------
-    def add_event(self, level: str, phase: str, message: str, agent_id: str = None):
+    def add_event(
+        self,
+        level: str,
+        phase: str,
+        message: str,
+        agent_id: str = None,
+        meta: Optional[Dict[str, Any]] = None,
+    ):
         self._event_seq += 1
         self._event_logs.append({
             "id": self._event_seq,
@@ -100,7 +107,8 @@ class AgentStateManager:
             "phase": phase,
             "message": message,
             "agent_id": agent_id,
-            "agent_label": self.resolve_label(agent_id) if agent_id else None
+            "agent_label": self.resolve_label(agent_id) if agent_id else None,
+            "meta": meta or {},
         })
 
     # -------------------------------------------------------------------------

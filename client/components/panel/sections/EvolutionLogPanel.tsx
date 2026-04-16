@@ -1,16 +1,21 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { EvolutionLogEvent } from "@/lib/api";
-import { FiActivity, FiTerminal, FiCpu, FiAlertTriangle, FiCheckCircle } from "react-icons/fi";
+import { FiActivity, FiTerminal, FiCpu, FiAlertTriangle, FiCheckCircle, FiPlay, FiSquare, FiClock } from "react-icons/fi";
 import type { IconType } from "react-icons";
 import { COLORS } from "@/constants";
 
 interface EvolutionLogPanelProps {
   events: EvolutionLogEvent[];
   activeAgent: string;
-  isLoopRunning?: boolean;
   automationEnabled?: boolean;
-  onToggleAutomation?: () => void;
+  automationStatus?: {
+     enabled: boolean;
+     status: string;
+     next_run_time?: string | null;
+  } | null;
+  onToggleAutomation?: (enabled: boolean) => void;
 }
 
 const PHASE_CONFIG: Record<string, { color: string; icon: IconType; label: string }> = {
@@ -24,6 +29,7 @@ const PHASE_CONFIG: Record<string, { color: string; icon: IconType; label: strin
   generated: { color: "#c678dd", icon: FiTerminal, label: "코드" },
   backtesting: { color: "#56b6c2", icon: FiActivity, label: "검증" },
   validation: { color: "#56b6c2", icon: FiActivity, label: "검증" },
+  decision: { color: "#e5c07b", icon: FiActivity, label: "판정" },
   retry: { color: "#e5c07b", icon: FiAlertTriangle, label: "재시도" },
   committing: { color: "#98c379", icon: FiCheckCircle, label: "반영" },
   completed: { color: "#98c379", icon: FiCheckCircle, label: "완료" },
@@ -71,10 +77,36 @@ const withAlpha = (hex: string, alpha: string) => {
 export default function EvolutionLogPanel({
   events,
   activeAgent,
-  isLoopRunning = false,
-  automationEnabled = false,
+  automationStatus,
   onToggleAutomation,
 }: EvolutionLogPanelProps) {
+  const [timeLeft, setTimeLeft] = useState<string>("");
+
+  const automationEnabled = automationStatus?.enabled ?? false;
+
+  useEffect(() => {
+    if (!automationEnabled || !automationStatus?.next_run_time) {
+      setTimeLeft("");
+      return;
+    }
+
+    const timer = setInterval(() => {
+      const now = new Date().getTime();
+      const next = new Date(automationStatus.next_run_time!).getTime();
+      const diff = next - now;
+
+      if (diff <= 0) {
+        setTimeLeft("연결 중...");
+      } else {
+        const minutes = Math.floor(diff / 60000);
+        const seconds = Math.floor((diff % 60000) / 1000);
+        setTimeLeft(`${minutes}m ${seconds}s`);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [automationEnabled, automationStatus?.next_run_time]);
+
   const filtered = (activeAgent === "ALL" || activeAgent === "전체")
     ? events
     : events.filter((event) => event.agent_id === activeAgent);
@@ -86,26 +118,39 @@ export default function EvolutionLogPanel({
         <div className="flex items-center gap-2.5">
           <div className="relative">
             <FiTerminal className="text-purple-400 w-4 h-4" />
-            <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-purple-400 rounded-full animate-ping" />
+            <div className={`absolute -top-1 -right-1 w-1.5 h-1.5 bg-purple-400 rounded-full ${automationEnabled ? 'animate-ping' : 'opacity-30'}`} />
           </div>
-          <h3 className="text-[11px] font-black tracking-[0.2em] text-white uppercase">
-            진화 로그 모니터
-          </h3>
+          <div className="flex flex-col">
+             <h3 className="text-[11px] font-black tracking-[0.2em] text-white uppercase">
+               Evolution Terminal
+             </h3>
+             {automationEnabled && timeLeft && (
+                <span className="text-[9px] text-emerald-400 font-mono mt-0.5 flex items-center gap-1">
+                   <FiClock className="w-2.5 h-2.5" /> Next Cycle in {timeLeft}
+                </span>
+             )}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onToggleAutomation}
-            className={`flex items-center gap-2 px-3 py-1 rounded-full border transition-all ${
-              automationEnabled
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
-                : "bg-slate-500/10 border-slate-500/30 text-slate-400 hover:bg-slate-500/20"
-            }`}
-          >
-            <div className={`w-1.5 h-1.5 rounded-full ${automationEnabled ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)] animate-pulse' : 'bg-slate-600'}`} />
-            <span className="text-[9px] font-black tracking-widest uppercase">
-              {automationEnabled ? "Auto Live" : "Auto Paused"}
-            </span>
-          </button>
+        
+        <div className="flex items-center gap-2">
+          {/* Conditional Rendering of Control Buttons */}
+          {automationEnabled ? (
+            <button
+              onClick={() => onToggleAutomation?.(false)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all font-black text-[10px] tracking-widest uppercase shadow-[0_0_15px_rgba(239,68,68,0.1)]"
+            >
+              <FiSquare className="w-3 h-3 fill-current" />
+              STOP
+            </button>
+          ) : (
+            <button
+              onClick={() => onToggleAutomation?.(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all font-black text-[10px] tracking-widest uppercase"
+            >
+              <FiPlay className="w-3 h-3 fill-current" />
+              START LOOP
+            </button>
+          )}
         </div>
       </div>
 
@@ -114,7 +159,9 @@ export default function EvolutionLogPanel({
         {filtered.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center opacity-20">
             <FiActivity className="w-8 h-8 mb-3 text-purple-400" />
-            <p className="text-[10px] uppercase font-bold tracking-widest text-white">Awaiting System Pulse...</p>
+            <p className="text-[10px] uppercase font-bold tracking-widest text-white">
+               {automationEnabled ? "Monitoring Evolutionary Pulse..." : "Loop Standby..."}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -127,7 +174,6 @@ export default function EvolutionLogPanel({
                   className="group/item font-mono border-l-2 transition-all pl-3"
                   style={{ borderLeftColor: withAlpha(agentColor, "66") }}
                 >
-                  {/* Header Line: [LOG] Agent_Name (Time) */}
                   <div className="flex items-center gap-2 text-[10px]">
                     <span className="font-black" style={{ color: config.color }}>
                       [{config.label}]
@@ -142,8 +188,7 @@ export default function EvolutionLogPanel({
                     </span>
                   </div>
 
-                  {/* Message Line: Indented */}
-                  <div className="pl-6 mt-1.5">
+                  <div className="pl-6 mt-1.5 text-white/90">
                     <p className="text-[11px] leading-relaxed text-slate-300 antialiased break-words tracking-tight group-hover/item:text-white transition-colors">
                       {event.message}
                     </p>
@@ -153,7 +198,7 @@ export default function EvolutionLogPanel({
             })}
           </div>
         )}
-        <div className="h-20" /> {/* Bottom Spacing for scrolling */}
+        <div className="h-20" />
       </div>
 
       {/* Footer Info */}
@@ -161,9 +206,17 @@ export default function EvolutionLogPanel({
         <span className="text-[9px] font-bold text-slate-600 tracking-widest flex items-center gap-2">
           <FiCpu className="w-3 h-3" /> TRINITY_ORCH_V1.1
         </span>
-        <span className="text-[9px] font-mono text-slate-500">
-          SEQ_{Math.max(0, ...filtered.map(e => e.id)).toString().padStart(4, '0')}
-        </span>
+        <div className="flex items-center gap-4">
+           {automationEnabled && (
+              <div className="flex items-center gap-1.5">
+                 <div className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_5px_#10b981]" />
+                 <span className="text-[9px] font-bold text-emerald-500/80 uppercase tracking-tighter">Auto Processing</span>
+              </div>
+           )}
+           <span className="text-[9px] font-mono text-slate-500">
+             SEQ_{Math.max(0, ...filtered.map(e => e.id)).toString().padStart(4, '0')}
+           </span>
+        </div>
       </div>
     </div>
   );

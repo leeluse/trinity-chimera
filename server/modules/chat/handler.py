@@ -11,10 +11,13 @@ from server.shared.llm.client import stream_chat_reply
 from server.modules.backtest.chat.chat_backtester import ChatBacktester
 from server.shared.db.supabase import SupabaseManager
 from server.modules.evolution.constants import (
+    AGENT_IDS,
     PERSONAS, 
     CROSS_DOMAIN_SEEDS, 
     BANNED_INDICATORS
 )
+from server.modules.evolution.scoring import evaluate_hard_gates
+from server.modules.evolution.wiki_memory import EvolutionWikiMemory
 from server.modules.chat.prompts import (
     SYSTEM_PROMPT,
     REASONING_PROMPT_TEMPLATE, 
@@ -23,6 +26,7 @@ from server.modules.chat.prompts import (
     TIPS_PROMPT_TEMPLATE,
     MINING_PROMPT_TEMPLATE
 )
+from server.modules.engine.runtime import invalidate_strategy_cache
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +85,84 @@ class ChatHandler:
         except Exception as e:
             logger.error(f"STRATEGY.md 로그 기록 실패: {e}")
 
+    @staticmethod
+    def _normalize_ratio(value: float) -> float:
+        if 1.0 < abs(value) <= 100.0:
+            return value / 100.0
+        return value
+
+    @classmethod
+    def _normalize_metrics_for_gate(cls, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        total_return = cls._normalize_ratio(float(metrics.get("total_return", 0.0) or 0.0))
+        win_rate = cls._normalize_ratio(float(metrics.get("win_rate", 0.0) or 0.0))
+        max_drawdown_raw = float(metrics.get("max_drawdown", 0.0) or 0.0)
+        max_drawdown = cls._normalize_ratio(max_drawdown_raw)
+        if max_drawdown > 0:
+            max_drawdown = -max_drawdown
+
+        return {
+            "total_return": total_return,
+            "win_rate": win_rate,
+            "max_drawdown": max_drawdown,
+            "profit_factor": float(metrics.get("profit_factor", 0.0) or 0.0),
+            "total_trades": int(metrics.get("total_trades", 0) or 0),
+            "sharpe_ratio": float(metrics.get("sharpe_ratio", 0.0) or 0.0),
+            "trinity_score": float(metrics.get("trinity_score", 0.0) or 0.0),
+        }
+
+    @staticmethod
+    def _resolve_target_agent(context: Dict[str, Any], message: str) -> str:
+        for key in ("agent_id", "active_agent", "agent"):
+            value = str(context.get(key) or "").strip()
+            if value in AGENT_IDS:
+                return value
+
+        text = (message or "").lower()
+        for agent_id in AGENT_IDS:
+            if agent_id in text:
+                return agent_id
+
+        return "chat_global"
+
+    @staticmethod
+    def _build_memory_guardrail(memory_context: Dict[str, Any]) -> str:
+        hard_gates = memory_context.get("hard_gates") or {}
+        failures = memory_context.get("recent_failures") or []
+        successes = memory_context.get("recent_successes") or []
+
+        fail_lines = []
+        for row in failures[:5]:
+            fail_lines.append(f"- {str(row.get('reason') or 'unknown')}")
+        if not fail_lines:
+            fail_lines = ["- (최근 실패 이력 없음)"]
+
+        success_lines = []
+        for row in successes[:3]:
+            m = row.get("metrics") or {}
+            success_lines.append(
+                f"- win={float(m.get('win_rate', 0.0)):.3f}, pf={float(m.get('profit_factor', 0.0)):.3f}, "
+                f"ret={float(m.get('total_return', 0.0)):.3f}, mdd={float(m.get('max_drawdown', 0.0)):.3f}, "
+                f"trades={int(m.get('total_trades', 0))}"
+            )
+        if not success_lines:
+            success_lines = ["- (최근 성공 이력 없음)"]
+
+        return (
+            "\n\n[QUALITY_GUARDRAIL]\n"
+            "아래 하드 게이트를 만족할 가능성이 낮은 전략은 피하고,\n"
+            "최근 실패 패턴을 반복하지 마세요.\n"
+            f"- min_win_rate: {hard_gates.get('min_win_rate', 0.0)}\n"
+            f"- min_profit_factor: {hard_gates.get('min_profit_factor', 0.0)}\n"
+            f"- min_total_return: {hard_gates.get('min_total_return', 0.0)}\n"
+            f"- max_drawdown(abs): {hard_gates.get('max_drawdown', 1.0)}\n"
+            f"- min_total_trades: {hard_gates.get('min_total_trades', 0)}\n"
+            f"- min_sharpe_ratio: {hard_gates.get('min_sharpe_ratio', 0.0)}\n"
+            "[RECENT_FAILURES]\n"
+            + "\n".join(fail_lines)
+            + "\n[RECENT_SUCCESSES]\n"
+            + "\n".join(success_lines)
+        )
+
     async def deploy_strategy(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """사용자가 선택한 전략을 시스템 전략 라이브러리에 영구 저장"""
         try:
@@ -99,7 +181,7 @@ class ChatHandler:
             strategy_key = f"deployed_{datetime.now().strftime('%y%m%d_%H%M%S')}"
             
             # DB 저장
-            db.save_system_strategy(
+            strategy_id = db.save_system_strategy(
                 strategy_key=strategy_key,
                 code=code,
                 name=title, # [IMPROVEMENT] name 컬럼에 직접 저장
@@ -111,8 +193,19 @@ class ChatHandler:
                 },
                 rationale="User manually deployed via Chat Desktop UI."
             )
-            
-            return {"success": True, "strategy_key": strategy_key}
+
+            if not strategy_id:
+                return {
+                    "success": False,
+                    "error": "전략 저장은 요청되었지만 DB에서 strategy_id를 반환하지 않았습니다."
+                }
+
+            invalidate_strategy_cache()
+            return {
+                "success": True,
+                "strategy_key": strategy_key,
+                "strategy_id": strategy_id,
+            }
         except Exception as e:
             logger.exception("Strategy deployment failed")
             return {"success": False, "error": str(e)}
@@ -135,6 +228,18 @@ class ChatHandler:
         # [REFINED] 키워드 여부에 따른 가동 조건 설정
         is_mining = "에볼루션" in message
         enable_full_pipeline = "전략" in message or is_mining
+        memory = None
+        constitution: Dict[str, Any] = {}
+        target_agent = "chat_global"
+        memory_context: Dict[str, Any] = {}
+        guardrail_block = ""
+
+        if enable_full_pipeline:
+            memory = EvolutionWikiMemory()
+            constitution = memory.load_constitution()
+            target_agent = self._resolve_target_agent(context, message)
+            memory_context = memory.build_prompt_context(target_agent, constitution)
+            guardrail_block = self._build_memory_guardrail(memory_context)
 
         try:
             # STAGE 1: Reasoning (Conversational Response)
@@ -153,10 +258,10 @@ class ChatHandler:
                     persona_style=persona['style'],
                     seed=seed,
                     banned_indicators=", ".join(BANNED_INDICATORS)
-                )
+                ) + guardrail_block
             else:
                 yield self.format_sse({"type": "stage", "stage": 1, "label": "🧠 의도 파악 및 분석 중..."})
-                prompt1 = REASONING_PROMPT_TEMPLATE.format(message=message)
+                prompt1 = REASONING_PROMPT_TEMPLATE.format(message=message) + guardrail_block
             
             reasoning_full = ""
             async for chunk in stream_chat_reply(
@@ -183,7 +288,7 @@ class ChatHandler:
 
             # STAGE 2: Design
             yield self.format_sse({"type": "stage", "stage": 2, "label": "📋 전략 설계도 작성 중..."})
-            prompt2 = DESIGN_PROMPT_TEMPLATE.format(reasoning=reasoning_full)
+            prompt2 = DESIGN_PROMPT_TEMPLATE.format(reasoning=reasoning_full) + guardrail_block
             design_full = ""
             async for chunk in stream_chat_reply(prompt2, {}, []):
                 design_full += chunk
@@ -192,13 +297,45 @@ class ChatHandler:
 
             # STAGE 3: Code
             yield self.format_sse({"type": "stage", "stage": 3, "label": "⚙️ Python 전략 코드 구현 중..."})
-            prompt3 = CODE_PROMPT_TEMPLATE.format(design=design_full)
+            prompt3 = CODE_PROMPT_TEMPLATE.format(design=design_full) + guardrail_block
             code_full = ""
             async for chunk in stream_chat_reply(prompt3, {}, []):
                 code_full += chunk
             
             strategy_code = self.extract_python_code(code_full)
             if strategy_code:
+                strategy_fingerprint = memory.compute_fingerprint(strategy_code) if memory else ""
+
+                if memory and constitution:
+                    dedupe_window = int((constitution.get("memory") or {}).get("dedupe_window", 120))
+                    is_dup, dup_row = memory.is_duplicate(
+                        target_agent,
+                        strategy_fingerprint,
+                        dedupe_window=dedupe_window,
+                    )
+                    if is_dup:
+                        reason = f"duplicate_candidate_chat previous={dup_row.get('time') if dup_row else 'unknown'}"
+                        memory.log_experiment(
+                            agent_id=target_agent,
+                            status="rejected_duplicate_chat",
+                            stage="precheck",
+                            reason=reason,
+                            fingerprint=strategy_fingerprint,
+                            metrics={},
+                        )
+                        memory.log_failure_pattern(
+                            agent_id=target_agent,
+                            reason=reason,
+                            fingerprint=strategy_fingerprint,
+                            metrics={},
+                        )
+                        yield self.format_sse({
+                            "type": "analysis",
+                            "content": "\n⚠️ 이전 실험과 거의 동일한 코드로 감지되어 중복 후보를 중단했습니다. 다른 구조로 다시 시도합니다.\n",
+                        })
+                        yield self.format_sse({"type": "done"})
+                        return
+
                 # [IMPROVEMENT] AI가 제안한 제목 추출
                 strategy_title = self.extract_strategy_title(code_full)
                 if strategy_title == "AI Generated Strategy":
@@ -328,6 +465,40 @@ class ChatHandler:
                 
                 if bt_res.get("success"):
                     metrics = bt_res.get("metrics", {})
+                    gate_metrics = self._normalize_metrics_for_gate(metrics)
+                    hard_ok = True
+                    hard_reasons: List[str] = []
+                    if memory and constitution:
+                        hard_ok, hard_reasons = evaluate_hard_gates(
+                            gate_metrics,
+                            constitution.get("hard_gates", {}),
+                        )
+                        status = "accepted_chat_gate" if hard_ok else "rejected_chat_gate"
+                        reason = "hard_gate_passed" if hard_ok else "; ".join(hard_reasons)
+                        fingerprint = memory.compute_fingerprint(strategy_code)
+                        memory.log_experiment(
+                            agent_id=target_agent,
+                            status=status,
+                            stage="chat_backtest",
+                            reason=reason,
+                            fingerprint=fingerprint,
+                            metrics=gate_metrics,
+                        )
+                        if hard_ok:
+                            memory.log_accepted(
+                                agent_id=target_agent,
+                                strategy_id=None,
+                                fingerprint=fingerprint,
+                                metrics=gate_metrics,
+                            )
+                        else:
+                            memory.log_failure_pattern(
+                                agent_id=target_agent,
+                                reason=f"chat_hard_gate_failed: {reason}",
+                                fingerprint=fingerprint,
+                                metrics=gate_metrics,
+                            )
+
                     backtest_data = {
                         "ret": f"{metrics.get('total_return', 0):+.2f}%",
                         "mdd": f"{metrics.get('max_drawdown', 0):.2f}%",
@@ -340,6 +511,16 @@ class ChatHandler:
                         "payload": bt_res.get("backtest_payload")
                     })
                     await db.save_chat_message(session_id, "assistant", "", "backtest", backtest_data)
+
+                    if not hard_ok:
+                        yield self.format_sse({
+                            "type": "analysis",
+                            "content": (
+                                "\n⚠️ 하드게이트 미통과 전략입니다. 자동 채택/배포 비권장.\n"
+                                + "\n".join([f"- {r}" for r in hard_reasons])
+                                + "\n"
+                            ),
+                        })
                     
                     # Tips
                     prompt4 = TIPS_PROMPT_TEMPLATE.format(metrics=metrics)

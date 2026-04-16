@@ -3,13 +3,22 @@
 
 const API_BASE_URL = '/api';
 const normalizeApiBase = (value: string): string => value.replace(/\/+$/, "").replace(/\/api$/, "");
-// [RECOVERY] Use relative paths to leverage Next.js rewrites for stability
-export const API_BASE = "" as string; 
+// Use explicit public backend URL first (Vercel), then fallback to Next.js rewrite (/api).
+const rawPublicApiBase = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+export const API_BASE = rawPublicApiBase ? normalizeApiBase(rawPublicApiBase) : "";
+const DEFAULT_TUNNEL_SUBDOMAIN = (process.env.NEXT_PUBLIC_TUNNEL_SUBDOMAIN || "lsy-super-trend").trim();
+const DEFAULT_TUNNEL_HOST = (process.env.NEXT_PUBLIC_TUNNEL_HOST || "https://loca.lt").trim();
+const normalizedTunnelHost = DEFAULT_TUNNEL_HOST.replace(/\/+$/, "").replace(/^http:\/\//, "https://");
+const tunnelHostNoScheme = normalizedTunnelHost.replace(/^https?:\/\//, "");
+const DEFAULT_TUNNEL_BASE =
+  DEFAULT_TUNNEL_SUBDOMAIN && tunnelHostNoScheme
+    ? normalizeApiBase(`https://${DEFAULT_TUNNEL_SUBDOMAIN}.${tunnelHostNoScheme}`)
+    : "";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
-const RAW_FETCH_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_API_FETCH_TIMEOUT_MS || "12000");
+const RAW_FETCH_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_API_FETCH_TIMEOUT_MS || "30000");
 const FETCH_TIMEOUT_MS = Number.isFinite(RAW_FETCH_TIMEOUT_MS)
   ? Math.max(3000, Math.min(RAW_FETCH_TIMEOUT_MS, 60000))
-  : 12000;
+  : 30000;
 const LOCAL_API_FALLBACKS = [
   "http://localhost:8000",
   "http://127.0.0.1:8000",
@@ -62,6 +71,48 @@ export interface EvolutionLogEvent {
   message: string;
   agent_id?: string | null;
   agent_label?: string | null;
+  meta?: {
+    decision?: {
+      result?: string;
+      status?: string;
+      stage?: string;
+      reason?: string;
+      attempt?: number;
+      attempt_budget?: number;
+      llm_mode?: string;
+      fingerprint?: string;
+      improved?: boolean;
+      strategy_id?: string | null;
+      gate_reasons?: string[];
+      gate_thresholds?: Record<string, any>;
+      improvement_summary?: Array<{
+        metric: string;
+        label?: string;
+        baseline?: number;
+        candidate?: number;
+        delta?: number;
+        baseline_display?: string;
+        candidate_display?: string;
+        delta_display?: string;
+      }>;
+      hard_gates?: Record<string, any>;
+      quick_gates?: Record<string, any>;
+    };
+    metrics?: Record<string, any>;
+    baseline_metrics?: Record<string, any>;
+    verdict?: string;
+  } | null;
+}
+
+export interface DecisionLogEvent {
+  id: string | number;
+  created_at: string;
+  level: string;
+  phase: string;
+  message: string;
+  agent_id?: string | null;
+  agent_label?: string | null;
+  meta?: EvolutionLogEvent["meta"];
 }
 
 export interface DashboardProgress {
@@ -70,6 +121,7 @@ export interface DashboardProgress {
   failed_improvements: number;
   total_improvements: number;
   agents: string[];
+  active_agents?: string[];
   latest_improvements: Array<{
     agent_id: string;
     status: string;
@@ -162,17 +214,34 @@ export class APIClient {
     return response.json();
   }
 
-  static async getEvolutionLog(limit = 160, agentId?: string): Promise<EvolutionLogEvent[]> {
+  static async getEvolutionLog(limit = 160, agent_id?: string): Promise<EvolutionLogEvent[]> {
     const params = new URLSearchParams();
     params.set("limit", String(limit));
     params.set("_ts", String(Date.now()));
-    if (agentId && agentId !== "ALL" && agentId !== "전체") {
-      params.set("agent_id", agentId);
+    if (agent_id && agent_id !== "ALL" && agent_id !== "전체") {
+      params.set("agent_id", agent_id);
     }
 
     const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/evolution-log?${params.toString()}`);
     if (!response.ok) {
-      throw new Error(`진화 로그 조회 실패: ${response.status}`);
+      throw new Error(`Failed to fetch evolution log: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    return Array.isArray(payload?.events) ? payload.events : [];
+  }
+
+  static async getDecisionLogs(limit = 220, agent_id?: string): Promise<DecisionLogEvent[]> {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    params.set("_ts", String(Date.now()));
+    if (agent_id && agent_id !== "ALL" && agent_id !== "전체") {
+      params.set("agent_id", agent_id);
+    }
+
+    const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/logs?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch decision logs: ${response.status}`);
     }
 
     const payload = await response.json();
@@ -228,7 +297,7 @@ export class APIClient {
     const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/metrics`);
 
     if (!response.ok) {
-      throw new Error(`대시보드 메트릭 조회 실패: ${response.status}`);
+      throw new Error(`Failed to fetch dashboard metrics: ${response.status}`);
     }
 
     return response.json();
@@ -236,7 +305,7 @@ export class APIClient {
 
   static async getAutomationStatus(): Promise<{ enabled: boolean, status: string }> {
     const response = await fetchWithBypass(`${API_BASE_URL}/system/automation`);
-    if (!response.ok) throw new Error("자동화 상태 조회 실패");
+    if (!response.ok) throw new Error("Failed to fetch automation status");
     return response.json();
   }
 
@@ -288,6 +357,7 @@ export interface AgentPerformanceMetrics {
 
 export interface DashboardMetrics {
   total_agents: number;
+  active_agents?: string[];
   agents: {
     [agentId: string]: {
       name: string;
@@ -327,6 +397,11 @@ const buildCandidates = (url: string): string[] => {
       if (isHttpsPage && localBase.startsWith("http://")) continue;
       candidates.push(`${localBase}${path}`);
     }
+  }
+
+  // Vercel(HTTPS) + local backend 조합에서 /api rewrite 실패 시 고정 터널로 자동 재시도.
+  if (isHttpsPage && !configuredRemote && DEFAULT_TUNNEL_BASE) {
+    candidates.push(`${DEFAULT_TUNNEL_BASE}${path}`);
   }
 
   return [...new Set(candidates)];

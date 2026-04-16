@@ -4,7 +4,7 @@ import { PerformanceRow } from "@/types";
 
 interface PerformanceSummaryProps {
   performanceData: PerformanceRow[];
-  onAgentClick?: (name: string) => void;
+  onAgentClick?: (agentId: string) => void;
   activeAgent?: string;
 }
 
@@ -30,12 +30,13 @@ export const PerformanceSummary = ({ performanceData, onAgentClick, activeAgent 
             </tr>
           </thead>
           <tbody className="text-[12px] font-mono">
-            {performanceData.map((row, idx) => (
+            {performanceData.map((row) => (
               <tr 
                 key={row.name} 
                 className={`group transition-colors ${
-                  activeAgent?.toLowerCase().includes(row.name.toLowerCase().split(' ')[0]) ? 'bg-white/[0.03]' : ''
+                  (row.agentId && activeAgent === row.agentId) ? 'bg-white/[0.03]' : ''
                 }`}
+                onClick={() => row.agentId && onAgentClick?.(row.agentId)}
               >
                 <td className="py-2.5 px-3 font-medium tracking-tighter border-b border-white/[0.02]" style={{ color: row.color }}>{row.name}</td>
                 <td className={`py-2.5 px-2 text-center border-b border-white/[0.02] font-semibold ${row.pos ? 'text-[#4ade80]' : 'text-[#fb7185]'}`}>{row.ret}</td>

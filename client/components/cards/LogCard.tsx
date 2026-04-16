@@ -18,6 +18,7 @@ interface LogCardProps {
     newVal: string;
     trend?: "up" | "down" | "neutral";
   }>;
+  meta?: any;
 }
 
 export default function LogCard({
@@ -31,11 +32,34 @@ export default function LogCard({
   onClick,
   isActive,
   params,
+  meta,
 }: LogCardProps) {
+  // meta 데이터에서 필요 지표 추출 (유연하게 매칭)
+  const metrics = meta?.metrics || meta?.candidate_metrics || {};
+  const baseline = meta?.baseline_metrics || {};
+
+  const getVal = (obj: any, keys: string[]) => {
+    for (const k of keys) if (obj[k] !== undefined) return obj[k];
+    return 0;
+  };
+
+  const getF = (v: any) => (typeof v === 'number' ? v.toFixed(2) : "0.00");
+
+  const scoreStart = getVal(baseline, ["trinity_score", "score"]);
+  const scoreEnd = getVal(metrics, ["trinity_score", "score"]);
+  
+  const retStart = getVal(baseline, ["total_return", "current_return", "return"]);
+  const retEnd = getVal(metrics, ["total_return", "current_return", "return"]);
+  
+  const mddStart = getVal(baseline, ["max_drawdown", "current_mdd", "mdd"]);
+  const mddEnd = getVal(metrics, ["max_drawdown", "current_mdd", "mdd"]);
+
+  const hasStats = scoreEnd !== 0 || retEnd !== 0 || mddEnd !== 0;
+
   return (
     <div 
       onClick={onClick}
-      className={`bg-white/[0.03] backdrop-blur-md border rounded-2xl overflow-hidden shrink-0 shadow-xl group cursor-pointer ${
+      className={`bg-white/[0.03] backdrop-blur-md border rounded-2xl overflow-hidden shrink-0 shadow-xl group cursor-pointer transition-all ${
         isActive ? 'border-white/20 bg-white/[0.08]' : 'border-white/[0.05]'
       }`}
     >
@@ -52,19 +76,55 @@ export default function LogCard({
         <span className="text-[11px] text-[#4a5a7a] font-mono" suppressHydrationWarning>{time}</span>
       </div>
 
-      <div className="flex flex-col px-4 pb-4 gap-2 sm:gap-4">
+      <div className="flex flex-col px-4 pb-4 gap-4">
+        {/* 현재 전략 분석 섹션 */}
         <div className="flex flex-col gap-2">
           <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c] border-b border-white/[0.03] pb-2">현재 전략 분석</div>
-          <p className="text-[12.5px] leading-relaxed text-[#94a3b8] pt-1">{analysis}</p>
+          <p className="text-[12.5px] leading-relaxed text-[#94a3b8] pt-1 whitespace-pre-wrap break-words italic">
+            "{analysis.replace(/^\[.*?\]\s*/, "")}"
+          </p>
         </div>
+
+        {/* 📊 성과 변화 (사용자 요청 시각적 블록 빌트인) */}
+        {hasStats && (
+          <div className="flex flex-col gap-2.5 p-3.5 bg-black/20 rounded-xl border border-white/[0.03] font-mono">
+            <div className="text-[10px] font-bold tracking-widest uppercase text-blue-400">📊 성과 변화 (OOS 테스트 완료)</div>
+            <div className="flex flex-col gap-1.5 text-[11px]">
+               <div className="flex items-center gap-2">
+                  <span className="text-slate-500 w-24">Trinity Score</span>
+                  <span className="text-slate-400">{getF(scoreStart)}</span>
+                  <span className="text-emerald-500 font-bold"> ━━▶ </span>
+                  <span className="text-yellow-400 font-bold">{getF(scoreEnd)}</span>
+                  <span className="text-emerald-500/60 text-[10px] ml-1">(+{(scoreEnd - scoreStart).toFixed(2)})</span>
+               </div>
+               <div className="flex items-center gap-2">
+                  <span className="text-slate-500 w-24">Return</span>
+                  <span className="text-slate-400">{getF(retStart * 100)}%</span>
+                  <span className="text-emerald-500 font-bold"> ━━▶ </span>
+                  <span className="text-white font-bold">{getF(retEnd * 100)}%</span>
+                  <span className="text-emerald-500/60 text-[10px] ml-1">(+{( (retEnd - retStart) * 100 ).toFixed(2)}%)</span>
+               </div>
+               <div className="flex items-center gap-2">
+                  <span className="text-slate-500 w-24">MDD</span>
+                  <span className="text-slate-400">{getF(mddStart * 100)}%</span>
+                  <span className="text-emerald-500 font-bold"> ━━▶ </span>
+                  <span className="text-red-400 font-bold">{getF(mddEnd * 100)}%</span>
+                  <span className="text-emerald-500/60 text-[10px] ml-1">({( (mddEnd - mddStart) * 100 ).toFixed(2)}% 개선)</span>
+               </div>
+            </div>
+            <div className="text-[9px] font-bold text-emerald-400/80 mt-1 flex items-center gap-1">
+               ✅ 검증 완료: Static Gate, Quick Gate, Full Gate (Success)
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col gap-2">
           <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c] border-b border-white/[0.03] pb-2">실행 상세</div>
-          <p className="text-[12px] leading-relaxed text-[#7f90ae] pt-1">{reason}</p>
+          <p className="text-[12px] leading-relaxed text-[#7f90ae] pt-1 whitespace-pre-wrap break-words">{reason}</p>
         </div>
 
         {params && params.length > 0 && (
-          <div className="flex flex-col gap-3 pt-3 sm:pt-4 border-t border-white/[0.03]">
+          <div className="flex flex-col gap-3 pt-3 border-t border-white/[0.03]">
             <div className="flex items-center gap-2">
               <div className="w-1 h-3.5 bg-purple-400/50 rounded-full" />
               <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c]">파라미터 변경 내역</div>

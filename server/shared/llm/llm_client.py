@@ -4,11 +4,12 @@ import os
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
 
 from server.shared.market.strategy_loader import StrategyLoader, SecurityError
+from litellm import acompletion
 
 
 class LLMUnavailableError(Exception):
@@ -47,6 +48,34 @@ def _anthropic_env() -> Dict[str, str]:
         "api_key": (os.getenv("ANTHROPIC_API_KEY") or "").strip(),
         "model": (os.getenv("ANTHROPIC_MODEL") or "claude-3-5-sonnet").strip(),
     }
+
+
+def _litellm_provider() -> str:
+    provider = (os.getenv("EVOLUTION_LITELLM_PROVIDER") or "openai").strip()
+    return provider or "openai"
+
+
+def _normalize_litellm_model(model: str) -> str:
+    model = (model or "").strip()
+    if not model:
+        return model
+    if "/" in model:
+        return model
+    return f"{_litellm_provider()}/{model}"
+
+
+def _litellm_fallback_models(primary_model: str) -> List[str]:
+    raw = (
+        os.getenv("EVOLUTION_LLM_FALLBACK_MODELS")
+        or "claude-haiku-4-5,claude-3-5-haiku-20241022"
+    )
+    items = [part.strip() for part in raw.split(",") if part.strip()]
+    normalized: List[str] = []
+    for item in items:
+        model_name = _normalize_litellm_model(item)
+        if model_name and model_name != primary_model and model_name not in normalized:
+            normalized.append(model_name)
+    return normalized
 
 
 def _timeout_seconds() -> Optional[float]:
@@ -225,10 +254,52 @@ class OpenAICompatLLMService:
         raise RuntimeError("OpenAI-compatible provider returned empty content.")
 
 
+class LiteLLMProxyService:
+    """LiteLLM SDK service with native retry + fallback support."""
+
+    def __init__(self, base_url: str, api_key: str, model: str):
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.model = _normalize_litellm_model(model)
+        self.fallback_models = _litellm_fallback_models(self.model)
+        self.timeout = _timeout_seconds()
+        self.request_retries = _request_retries()
+        self.max_tokens = _max_tokens()
+
+    async def generate(self, prompt: str) -> str:
+        kwargs: Dict[str, Any] = {}
+        if self.fallback_models:
+            kwargs["fallbacks"] = self.fallback_models
+
+        response = await acompletion(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=self.max_tokens,
+            stream=False,
+            api_base=self.base_url,
+            api_key=self.api_key,
+            timeout=self.timeout,
+            num_retries=self.request_retries,
+            **kwargs,
+        )
+        content = _extract_openai_text(response)
+        if not content:
+            raise RuntimeError("LiteLLM provider returned empty content.")
+        return content
+
+
 def build_default_llm_service() -> Optional[Any]:
     # 1. Try Anthropic/Claude proxy first (preferred by user)
     acfg = _anthropic_env()
     if acfg["base_url"] and acfg["api_key"]:
+        use_litellm = (os.getenv("EVOLUTION_LITELLM_ENABLE") or "1").strip().lower() not in {"0", "false", "no"}
+        if use_litellm:
+            return LiteLLMProxyService(
+                base_url=acfg["base_url"],
+                api_key=acfg["api_key"],
+                model=acfg["model"],
+            )
         return OpenAICompatLLMService(
             base_url=acfg["base_url"],
             api_key=acfg["api_key"],

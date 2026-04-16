@@ -9,6 +9,7 @@ COMMAND=$1
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 TUNNEL_SUBDOMAIN="${TUNNEL_SUBDOMAIN:-lsy-super-trend}"
 LT_LOCAL_HOST="${LT_LOCAL_HOST:-127.0.0.1}"
+LT_HOST="${LT_HOST:-https://loca.lt}"
 LOG_DIR="$PROJECT_ROOT/logs"
 RUN_DIR="$PROJECT_ROOT/tmp/always_on"
 API_PID_FILE="$RUN_DIR/api.pid"
@@ -48,6 +49,33 @@ show_port_owner() {
   fi
 }
 
+kill_tunnel_processes() {
+  local pids
+  pids="$(
+    ps ax -o pid= -o command= \
+      | awk -v needle="--port ${BACKEND_PORT}" '
+          index($0, needle) && ($0 ~ /localtunnel/ || $0 ~ /(^|[[:space:]])lt([[:space:]]|$)|\/lt([[:space:]]|$)/) { print $1 }
+        '
+  )"
+  if [ -n "$pids" ]; then
+    echo "$pids" | xargs kill >/dev/null 2>&1 || true
+    sleep 1
+  fi
+}
+
+run_localtunnel_once() {
+  local cmd=()
+  if command -v lt >/dev/null 2>&1; then
+    cmd=(lt --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
+  else
+    cmd=(npx --yes localtunnel --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
+  fi
+  if [ -n "${LT_HOST:-}" ]; then
+    cmd+=(--host "$LT_HOST")
+  fi
+  "${cmd[@]}"
+}
+
 case $COMMAND in
   "client"|"front")
     if is_port_listening 3000; then
@@ -59,41 +87,42 @@ case $COMMAND in
     cd "$PROJECT_ROOT/client" && npm run dev
     ;;
   "server"|"api")
-    if is_port_listening 8000; then
-      echo "ℹ️ server is already running on port 8000."
-      show_port_owner 8000
+    if is_port_listening "$BACKEND_PORT"; then
+      echo "ℹ️ server is already running on port ${BACKEND_PORT}."
+      show_port_owner "$BACKEND_PORT"
       exit 0
     fi
     echo "⚙️ Starting FastAPI server..."
     
     # Background tunnel starter: waits for port 8000 then runs localtunnel
     (
-      echo "⏳ Waiting for backend to bind to port 8000..." > "$LOG_DIR/auto_tunnel.log"
+      echo "⏳ Waiting for backend to bind to port ${BACKEND_PORT}..." > "$LOG_DIR/auto_tunnel.log"
       for i in {1..20}; do
-        if is_port_listening 8000; then
-          echo "✅ Backend is up on port 8000. Starting localtunnel..." >> "$LOG_DIR/auto_tunnel.log"
+        if is_port_listening "$BACKEND_PORT"; then
+          echo "✅ Backend is up on port ${BACKEND_PORT}. Starting localtunnel..." >> "$LOG_DIR/auto_tunnel.log"
           
           # Kill existing tunnels for this port
-          pkill -f "localtunnel --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
-          pkill -f "lt --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
+          kill_tunnel_processes
           
           TUNNEL_URL="https://${TUNNEL_SUBDOMAIN}.loca.lt"
           echo "$TUNNEL_URL" > "$URL_FILE"
           
-          if command -v lt >/dev/null 2>&1; then
-            LT_CMD=(lt --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
-          else
-            LT_CMD=(npx --yes localtunnel --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
-          fi
-          
-          # Start tunnel in background from this subshell
-          nohup "${LT_CMD[@]}" >> "$TUNNEL_LOG" 2>&1 &
+          # Start tunnel in background with auto-reconnect
+          (
+            while true; do
+              run_localtunnel_once >> "$TUNNEL_LOG" 2>&1
+              EXIT_CODE=$?
+              echo "[$(date '+%F %T')] localtunnel exited (code=$EXIT_CODE). reconnect in 3s..." >> "$TUNNEL_LOG"
+              sleep 3
+            done
+          ) &
+          echo $! > "$TUNNEL_PID_FILE"
           echo "🌐 Tunnel started: $TUNNEL_URL" >> "$LOG_DIR/auto_tunnel.log"
           exit 0
         fi
         sleep 1
       done
-      echo "❌ Timeout waiting for backend on port 8000" >> "$LOG_DIR/auto_tunnel.log"
+      echo "❌ Timeout waiting for backend on port ${BACKEND_PORT}" >> "$LOG_DIR/auto_tunnel.log"
     ) &
     
     cd "$PROJECT_ROOT/server/api" && \
@@ -128,31 +157,34 @@ case $COMMAND in
       exit 1
     fi
 
-    pkill -f "localtunnel --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
-    pkill -f "lt --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
+    kill_tunnel_processes
     : > "$TUNNEL_LOG"
 
     TUNNEL_URL="https://${TUNNEL_SUBDOMAIN}.loca.lt"
     echo "$TUNNEL_URL" > "$URL_FILE"
     echo "🌐 Localtunnel 시작 — ${TUNNEL_URL} → 포트 ${BACKEND_PORT}"
-    if command -v lt >/dev/null 2>&1; then
-      LT_CMD=(lt --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
-    else
-      LT_CMD=(npx --yes localtunnel --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
-    fi
-    if [ -n "${LT_HOST:-}" ]; then
-      LT_CMD+=(--host "$LT_HOST")
-    fi
     echo
     echo "✅ Public tunnel starting (foreground)"
     echo "   API Local : http://127.0.0.1:${BACKEND_PORT}"
     echo "   API Public: ${TUNNEL_URL} (fixed by subdomain)"
+    echo "   LT Host   : ${LT_HOST}"
     echo "   URL file  : $URL_FILE"
     echo "   API log   : $API_LOG"
     echo "   Tunnel log: $TUNNEL_LOG"
-    echo "   Stop      : Ctrl+C"
+    echo "   Stop      : Ctrl+C (auto-reconnect enabled)"
     echo
-    "${LT_CMD[@]}" 2>&1 | tee -a "$TUNNEL_LOG"
+    KEEP_RUNNING=1
+    trap 'KEEP_RUNNING=0' INT TERM
+    while [ "$KEEP_RUNNING" -eq 1 ]; do
+      run_localtunnel_once 2>&1 | tee -a "$TUNNEL_LOG"
+      EXIT_CODE=${PIPESTATUS[0]}
+      if [ "$KEEP_RUNNING" -eq 0 ] || [ "$EXIT_CODE" -eq 130 ]; then
+        break
+      fi
+      echo "[$(date '+%F %T')] localtunnel exited (code=$EXIT_CODE). reconnect in 3s..." | tee -a "$TUNNEL_LOG"
+      sleep 3
+    done
+    trap - INT TERM
     ;;
   "public-stop"|"tunnel-stop")
     if [ -f "$TUNNEL_PID_FILE" ]; then
@@ -163,8 +195,7 @@ case $COMMAND in
       fi
       rm -f "$TUNNEL_PID_FILE"
     fi
-    pkill -f "localtunnel --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
-    pkill -f "lt --port ${BACKEND_PORT}" >/dev/null 2>&1 || true
+    kill_tunnel_processes
     echo "✅ tunnel stopped."
     ;;
   "public-status"|"tunnel-status")
@@ -199,7 +230,7 @@ case $COMMAND in
     echo "  client: Start the Next.js dashboard (alias: front)"
     echo "  server: Start the FastAPI server (alias: api)"
     echo "  public: Start/attach backend + localtunnel fixed subdomain"
-    echo "          env: TUNNEL_SUBDOMAIN=<name> BACKEND_PORT=<port> LT_LOCAL_HOST=<ip>"
+    echo "          env: TUNNEL_SUBDOMAIN=<name> BACKEND_PORT=<port> LT_LOCAL_HOST=<ip> LT_HOST=<https://loca.lt>"
     echo "  public-status: Show backend/tunnel status"
     echo "  public-stop: Stop localtunnel"
     echo "  test: Run AI trading pytest suite"

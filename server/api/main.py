@@ -21,11 +21,36 @@ from server.modules.chat.router import router as chat_router
 from server.modules.evolution.router import router as evolution_router, dashboard_router
 from server.modules.engine.router import router as engine_router
 from server.modules.evolution.orchestrator import get_evolution_orchestrator
-from server.modules.evolution.constants import AGENT_IDS
+from server.modules.evolution.constants import AGENT_IDS, ACTIVE_AGENT_IDS
 
 # Logging setup
-logging.basicConfig(level=logging.INFO)
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
+
+LOGS_DIR = PROJECT_ROOT / "server" / "logs" / "evolution"
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+# 1. 기본 콘솔 로그
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# 2. 진화 루프 및 LLM 관련 파일 로그 설정
+log_subjects = ["server.modules.evolution", "server.shared.llm"]
+evo_file_handler = TimedRotatingFileHandler(
+    filename=LOGS_DIR / "loop.log",
+    when="midnight",
+    interval=1,
+    backupCount=7,
+    encoding="utf-8"
+)
+evo_file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+
+for subject in log_subjects:
+    sub_logger = logging.getLogger(subject)
+    sub_logger.addHandler(evo_file_handler)
+    sub_logger.propagate = True # 콘솔에도 계속 나오게 함
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -57,8 +82,8 @@ async def scheduled_evolution_poll():
     """Periodic job to check all agents for evolution triggers."""
     logger.info("Running scheduled evolution poll...")
     if hasattr(evolution_orchestrator, "start_scheduled_loop"):
-        evolution_orchestrator.start_scheduled_loop(list(AGENT_IDS))
-    for agent_id in AGENT_IDS:
+        evolution_orchestrator.start_scheduled_loop(list(ACTIVE_AGENT_IDS))
+    for agent_id in ACTIVE_AGENT_IDS:
         await evolution_orchestrator.run_evolution_cycle(agent_id)
 
 @app.on_event("startup")
@@ -84,7 +109,10 @@ async def startup_event():
         job.pause()
         
     scheduler.start()
-    logger.info("APScheduler started: Evolution poll added (PAUSED by default).")
+    logger.info(
+        "APScheduler started: Evolution poll added (PAUSED by default). active_agents=%s",
+        ACTIVE_AGENT_IDS,
+    )
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -110,7 +138,8 @@ async def get_system_status():
     status = {
         "agents": {},
         "metrics_buffer": {},
-        "evolution_states": {}
+        "evolution_states": {},
+        "active_agents": list(ACTIVE_AGENT_IDS),
     }
 
     for agent_id in AGENT_IDS:
@@ -134,7 +163,11 @@ async def get_automation_status():
 
     # next_run_time이 None이면 일시정지 상태임
     enabled = job.next_run_time is not None
-    return {"enabled": enabled, "status": "running" if enabled else "paused"}
+    return {
+        "enabled": enabled,
+        "status": "running" if enabled else "paused",
+        "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None
+    }
 
 
 @app.post("/api/system/automation")

@@ -179,30 +179,30 @@ def compute_metrics(returns: pd.Series, n_trades: int, name: str,
         max_cons_wins = max(max_cons_wins, curr_wins)
         max_cons_losses = max(max_cons_losses, curr_losses)
 
-        return PeriodResult(
-            name=name, start=start, end=end,
-            total_return=total_ret, sharpe=sharpe, sortino=sortino,
-            max_drawdown=max_dd, win_rate=trade_win_rate, n_trades=n_trades,
-            profit_factor=profit_factor, calmar=calmar,
-            trade_win_rate=trade_win_rate,
-            best_trade=max(trade_results) if trade_results else 0,
-            worst_trade=min(trade_results) if trade_results else 0,
-            avg_profit=np.mean(t_wins) if t_wins else 0,
-            avg_loss=np.mean(t_losses) if t_losses else 0,
-            max_consecutive_wins=max_cons_wins,
-            max_consecutive_losses=max_cons_losses,
-            buy_hold_return=bh_ret,
-            total_fees=total_fees,
-            long_return=l_ret,
-            long_pf=l_pf,
-            short_return=s_ret,
-            short_pf=s_pf,
-            expected_return=expected_return,
-            win_count=len(t_wins),
-            loss_count=len(t_losses),
-            long_count=len(long_returns[long_returns != 0]) if long_returns is not None else 0,
-            short_count=len(short_returns[short_returns != 0]) if short_returns is not None else 0
-        )
+    return PeriodResult(
+        name=name, start=start, end=end,
+        total_return=total_ret, sharpe=sharpe, sortino=sortino,
+        max_drawdown=max_dd, win_rate=trade_win_rate, n_trades=n_trades,
+        profit_factor=profit_factor, calmar=calmar,
+        trade_win_rate=trade_win_rate,
+        best_trade=max(trade_results) if trade_results else 0,
+        worst_trade=min(trade_results) if trade_results else 0,
+        avg_profit=np.mean(t_wins) if t_wins else 0,
+        avg_loss=np.mean(t_losses) if t_losses else 0,
+        max_consecutive_wins=max_cons_wins,
+        max_consecutive_losses=max_cons_losses,
+        buy_hold_return=bh_ret,
+        total_fees=total_fees,
+        long_return=l_ret,
+        long_pf=l_pf,
+        short_return=s_ret,
+        short_pf=s_pf,
+        expected_return=expected_return,
+        win_count=len(t_wins),
+        loss_count=len(t_losses),
+        long_count=len(long_returns[long_returns != 0]) if long_returns is not None else 0,
+        short_count=len(short_returns[short_returns != 0]) if short_returns is not None else 0
+    )
 
 
 # ─────────────────────────────────────────────
@@ -326,7 +326,7 @@ class WalkForwardValidator:
             try:
                 # 전략 함수: train 데이터로 파라미터 최적화 후 signal 반환
                 signal = strategy_fn(train_df, test_df)
-                returns, n_trades = simulator.run(test_df, signal)
+                returns, n_trades, *_ = simulator.run(test_df, signal)
 
                 result = compute_metrics(
                     returns, n_trades,
@@ -509,7 +509,7 @@ class BacktestEngine:
                 train_start = max(0, test_start_idx - self.wfo.train_bars)
                 train_df = self.df.iloc[train_start:test_start_idx]
                 signal = strategy_fn(train_df, sub_df)
-                rets, _ = self.sim.run(sub_df, signal)
+                rets, _, *_ = self.sim.run(sub_df, signal)
                 all_wfo_returns.append(rets)
                 total_trades += r.n_trades
             except Exception:
@@ -542,7 +542,7 @@ class BacktestEngine:
             train_df = self.df.iloc[self.train_end:self.test_start]
             try:
                 signal = strategy_fn(train_df, test_df)
-                rets, n_trades = self.sim.run(test_df, signal)
+                rets, n_trades, *_ = self.sim.run(test_df, signal)
                 result.period_results.append(compute_metrics(
                     rets, n_trades, "FINAL_TEST",
                     str(test_df.index[0])[:10],
@@ -581,7 +581,7 @@ class BacktestEngine:
                 train_df = self.df.iloc[max(0, self.train_end - self.wfo.train_bars):self.train_end]
                 try:
                     signal = strategy_fn(train_df, seg_df)
-                    r, _ = self.sim.run(seg_df, signal)
+                    r, _, *_ = self.sim.run(seg_df, signal)
                     if len(r) > 0:
                         m = compute_metrics(r, 0, reg, "", "")
                         sharpes.append(m.sharpe)
@@ -676,6 +676,7 @@ def strategy_from_code(code: str) -> Callable:
     """
     import pandas as pd
     import numpy as np
+    from server.shared.market.strategy_interface import StrategyInterface
 
     # 하이브리드 지원을 위한 기본 클래스 정의
     class Signal:
@@ -692,6 +693,7 @@ def strategy_from_code(code: str) -> Callable:
         "pd": pd,
         "np": np,
         "Strategy": Strategy,
+        "StrategyInterface": StrategyInterface,
         "Signal": Signal,
         "DataFrame": pd.DataFrame,
         "Series": pd.Series
@@ -724,14 +726,47 @@ def strategy_from_code(code: str) -> Callable:
 
         return safe_generate_signal
 
+    def _normalize_signal(raw_signal, current_val: int) -> int:
+        if raw_signal is None:
+            return current_val
+
+        if isinstance(raw_signal, bool):
+            return 1 if raw_signal else 0
+
+        if isinstance(raw_signal, (int, float)):
+            return 1 if raw_signal > 0 else -1 if raw_signal < 0 else 0
+
+        if isinstance(raw_signal, dict):
+            signal_val = raw_signal.get("signal")
+            if isinstance(signal_val, (int, float)):
+                return 1 if signal_val > 0 else -1 if signal_val < 0 else 0
+            entry = bool(raw_signal.get("entry", False))
+            exit_signal = bool(raw_signal.get("exit", False))
+            direction = str(raw_signal.get("direction", "long")).lower()
+            if entry:
+                return 1 if direction != "short" else -1
+            if exit_signal:
+                return 0
+            return current_val
+
+        entry = bool(getattr(raw_signal, "entry", False))
+        exit_signal = bool(getattr(raw_signal, "exit", False))
+        direction = str(getattr(raw_signal, "direction", "long")).lower()
+        if entry:
+            return 1 if direction != "short" else -1
+        if exit_signal:
+            return 0
+        return current_val
+
     # 2. 구형/하이브리드 클래스 방식 호환 처리
     for name, obj in namespace.items():
-        # (Strategy) 상속을 받았거나, 혹은 generate_signals 메서드를 직접 가지고 있는 클래스 탐색
-        if isinstance(obj, type) and obj is not Strategy:
-            has_method = hasattr(obj, 'generate_signals')
-            is_sub = issubclass(obj, Strategy) if 'Strategy' in locals() or 'Strategy' in globals() or 'Strategy' in namespace else False
-            
-            if has_method or is_sub:
+        # Strategy/StrategyInterface를 제외하고, 유효한 시그널 메서드가 있는 전략 클래스 탐색
+        if isinstance(obj, type) and obj is not Strategy and obj is not StrategyInterface:
+            has_generate_signals = callable(getattr(obj, "generate_signals", None))
+            has_generate_signal = callable(getattr(obj, "generate_signal", None))
+            is_sub = issubclass(obj, Strategy) or issubclass(obj, StrategyInterface)
+
+            if has_generate_signals or has_generate_signal or is_sub:
                 def wrapped_strategy(train_df, test_df):
                     try:
                         inst = obj()
@@ -745,13 +780,12 @@ def strategy_from_code(code: str) -> Callable:
                                 
                             # 매 루프마다 현재까지의 데이터만 전달
                             sub_df = test_df.iloc[:i+1]
-                            s = inst.generate_signals(sub_df, {})
-                            
-                            if hasattr(s, 'entry') and s.entry: 
-                                current_val = 1 if getattr(s, 'direction', 'long') == 'long' else -1
-                            elif hasattr(s, 'exit') and s.exit: 
-                                current_val = 0
-                                
+                            if callable(getattr(inst, "generate_signals", None)):
+                                s = inst.generate_signals(sub_df, {})
+                            else:
+                                s = inst.generate_signal(sub_df)
+
+                            current_val = _normalize_signal(s, current_val)
                             signals.append(current_val)
                         return pd.Series(signals, index=test_df.index).fillna(0)
                     except Exception as e:
