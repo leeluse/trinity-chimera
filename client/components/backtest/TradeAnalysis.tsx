@@ -28,8 +28,8 @@ export const TradeAnalysis = ({ results }: TradeAnalysisProps) => {
         <div className="space-y-6 py-2">
            <div className="flex items-center justify-between px-1">
               <div className="flex flex-col">
-                 <span className="text-[9.5px] font-black text-[#6272a4] uppercase tracking-widest mb-2">Winning Probability</span>
-                 <span className="text-xl font-black text-[#f8f8f2] tracking-tighter leading-none">{winRate.toFixed(1)}%</span>
+                 <span className="text-[9.5px] font-black text-[#6272a4] uppercase tracking-widest">Winning Probability</span>
+                 <span className="text-xl font-black text-[#f8f8f2] tracking-tighter leading-none py-4">{winRate.toFixed(1)}%</span>
               </div>
               
               <div className="flex flex-col gap-3 items-end">

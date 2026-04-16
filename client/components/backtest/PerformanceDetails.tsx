@@ -36,8 +36,8 @@ export const PerformanceDetails = ({ results }: PerformanceDetailsProps) => {
         {/* Core Return Segment - Restored Styled Layout */}
         <div className="space-y-2">
            <div className="flex flex-col">
-              <span className="text-[9.5px] font-black text-[#6272a4] uppercase tracking-widest mb-2">Total Strategy Return</span>
-              <span className={`text-xl font-black tracking-tighter leading-none ${colorClass(results.totalReturnNum)}`}>
+              <span className="text-[9.5px] font-black text-[#6272a4] uppercase tracking-widest">Total Strategy Return</span>
+              <span className={`text-xl font-black tracking-tighter leading-none pb-4 pt-2 ${colorClass(results.totalReturnNum)}`}>
                 {fmtPct(results.totalReturnNum)}
               </span>
            </div>
