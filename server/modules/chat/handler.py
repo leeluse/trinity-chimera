@@ -143,6 +143,8 @@ class ChatHandler:
         try:
             # 즉시 빈 메시지 생성 (플레이스홀더)
             msg_id = await db.save_chat_message(session_id, "assistant", "...", "text")
+            # SSE first-byte를 빠르게 보내 타임아웃/무응답 체감을 줄인다.
+            yield format_sse({"type": "analysis", "content": "요청을 분류하고 있어요..."})
 
             async for chunk in stream_chat_reply(
                 user_message=message,

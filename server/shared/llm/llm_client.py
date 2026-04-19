@@ -3,6 +3,7 @@ import traceback
 import os
 import json
 import asyncio
+import httpx
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from urllib import request as urlrequest
@@ -274,22 +275,42 @@ class LiteLLMProxyService:
         if self.fallback_models:
             kwargs["fallbacks"] = self.fallback_models
 
-        response = await acompletion(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=self.max_tokens,
-            stream=False,
-            api_base=self.base_url,
-            api_key=self.api_key,
-            timeout=self.timeout,
-            num_retries=self.request_retries,
-            **kwargs,
-        )
-        content = _extract_openai_text(response)
-        if not content:
-            raise RuntimeError("LiteLLM provider returned empty content.")
-        return content
+        try:
+            response = await acompletion(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=self.max_tokens,
+                stream=False,
+                api_base=self.base_url,
+                api_key=self.api_key,
+                timeout=self.timeout,
+                num_retries=self.request_retries,
+                **kwargs,
+            )
+            content = _extract_openai_text(response)
+            if not content:
+                raise RuntimeError("LiteLLM provider returned empty content.")
+            return content
+        except Exception as exc:
+            # Local resilience path: fallback to direct Ollama when LiteLLM is unreachable.
+            logger.warning("LiteLLM generate failed, fallback to Ollama: %s", exc)
+            ollama_base = (os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/")
+            ollama_model = (os.getenv("OLLAMA_MODEL") or "gpt-oss:120b-cloud").strip()
+            payload = {
+                "model": ollama_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "options": {"temperature": 0.2},
+            }
+            async with httpx.AsyncClient(timeout=self.timeout or 120.0) as client:
+                res = await client.post(f"{ollama_base}/api/chat", json=payload)
+                res.raise_for_status()
+                data = res.json()
+            content = ((data.get("message") or {}).get("content") or "").strip()
+            if not content:
+                raise RuntimeError("Ollama fallback returned empty content.")
+            return content
 
 
 def build_default_llm_service() -> Optional[Any]:

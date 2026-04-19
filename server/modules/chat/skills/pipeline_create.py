@@ -66,6 +66,8 @@ async def run_create_pipeline(
     async for chunk in stream_chat_reply(user_message=prompt1, context=context,
                                          history=history, custom_system_prompt=SYSTEM_PROMPT,
                                          model=(os.getenv("QUICK_MODEL") or None)):
+        if chunk is None or chunk == "":
+            continue
         reasoning_full += chunk
         yield format_sse({"type": "thought", "content": chunk})
     await db.save_chat_message(session_id, "assistant", reasoning_full, "thought")

@@ -41,6 +41,15 @@ def _timeout_seconds() -> float:
     except:
         return 120.0
 
+
+def _litellm_failover_timeout_seconds() -> float:
+    """Short timeout for primary LiteLLM call before local fallback."""
+    try:
+        raw = float(os.getenv("LITELLM_FAILOVER_TIMEOUT", "12.0"))
+    except Exception:
+        raw = 12.0
+    return max(3.0, min(raw, _timeout_seconds()))
+
 def _get_llm_config() -> Dict[str, str]:
     provider = os.getenv("LLM_PROVIDER", "ollama").lower()
     if provider == "litellm":
@@ -56,8 +65,8 @@ def _get_llm_config() -> Dict[str, str]:
         "model": (os.getenv("OLLAMA_MODEL") or "gpt-oss:120b-cloud").strip(),
     }
 
-def _normalize_model(model: Any) -> str:
-    """Ensure model name is a string and prepend provider if missing."""
+def _normalize_model(model: Any, provider: str = "litellm") -> str:
+    """Ensure model name is a string and prepend provider if missing (litellm only)."""
     if not model:
         return ""
     if isinstance(model, list):
@@ -66,6 +75,10 @@ def _normalize_model(model: Any) -> str:
     model_str = str(model).strip()
     if not model_str:
         return ""
+
+    if provider == "ollama":
+        # Ollama model ids are used as-is (e.g. gpt-oss:120b-cloud).
+        return model_str
         
     known_providers = ["openai/", "ollama/", "anthropic/", "google/", "vertex_ai/", "bedrock/", "azure/", "mistral/", "replicate/", "huggingface/"]
     if any(model_str.startswith(p) for p in known_providers):
@@ -75,6 +88,27 @@ def _normalize_model(model: Any) -> str:
     # LiteLLM이 자체적으로 추론하게 두거나 기본값인 openai/를 명시함.
     # 하지만 litellm 프록시 연동 시에는 openai/ 접두사가 가장 범용적임.
     return f"openai/{model_str}"
+
+
+def _strip_provider_prefix(model_name: str) -> str:
+    text = str(model_name or "").strip()
+    if not text:
+        return ""
+    if "/" in text:
+        return text.split("/", 1)[1].strip()
+    return text
+
+
+def _ollama_base_url() -> str:
+    return (os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/")
+
+
+def _ollama_model_fallback(preferred_model: str) -> str:
+    preferred = _strip_provider_prefix(preferred_model)
+    # If a stage-specific model points to OpenAI/other provider, fallback to local default.
+    if preferred and (":" in preferred or preferred.startswith("qwen") or preferred.startswith("gpt") or preferred.startswith("glm")):
+        return preferred
+    return (os.getenv("OLLAMA_MODEL") or "gpt-oss:120b-cloud").strip()
 
 def _build_messages(
     user_message: str,
@@ -126,7 +160,7 @@ async def generate_chat_reply(
 ) -> Dict[str, Any]:
     """Unified LLM API non-streaming call"""
     cfg = _get_llm_config()
-    target_model = _normalize_model(model or cfg["model"])
+    target_model = _normalize_model(model or cfg["model"], provider=cfg["provider"])
     messages = _build_messages(user_message, context, history, system_appendix, custom_system_prompt)
     
     if cfg["provider"] == "litellm":
@@ -137,7 +171,8 @@ async def generate_chat_reply(
                 api_base=cfg["base_url"],
                 api_key=cfg.get("api_key"),
                 temperature=float(temperature),
-                timeout=timeout_sec or _timeout_seconds(),
+                timeout=timeout_sec or _litellm_failover_timeout_seconds(),
+                num_retries=0,
                 stream=False
             )
             return {
@@ -148,7 +183,29 @@ async def generate_chat_reply(
             }
         except Exception as e:
             logger.error(f"LiteLLM error: {e}")
-            return {"content": _local_fallback(user_message, context), "fallback": True}
+            # Automatic local fallback (Ollama) when LiteLLM proxy is unavailable.
+            try:
+                ollama_model = _ollama_model_fallback(target_model)
+                ollama_url = f"{_ollama_base_url()}/api/chat"
+                payload = {
+                    "model": ollama_model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {"temperature": float(temperature)},
+                }
+                async with httpx.AsyncClient(timeout=timeout_sec or _timeout_seconds()) as client:
+                    response = await client.post(ollama_url, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                    return {
+                        "content": data["message"]["content"],
+                        "provider": "ollama_fallback",
+                        "model": ollama_model,
+                        "fallback": True,
+                    }
+            except Exception as fb_err:
+                logger.error(f"Ollama fallback error: {fb_err}")
+                return {"content": _local_fallback(user_message, context), "fallback": True}
     
     # Ollama Fallback
     url = f"{cfg['base_url']}/api/chat"
@@ -179,7 +236,7 @@ async def stream_chat_reply(
 ) -> AsyncGenerator[str, None]:
     """Unified LLM API streaming call"""
     cfg = _get_llm_config()
-    target_model = _normalize_model(model or cfg["model"])
+    target_model = _normalize_model(model or cfg["model"], provider=cfg["provider"])
     messages = _build_messages(user_message, context, history, system_appendix, custom_system_prompt)
     
     if cfg["provider"] == "litellm":
@@ -190,7 +247,8 @@ async def stream_chat_reply(
                 api_base=cfg["base_url"],
                 api_key=cfg.get("api_key"),
                 temperature=float(temperature),
-                timeout=_timeout_seconds(),
+                timeout=_litellm_failover_timeout_seconds(),
+                num_retries=0,
                 stream=True
             )
             async for chunk in response:
@@ -200,8 +258,32 @@ async def stream_chat_reply(
             return
         except Exception as e:
             logger.error(f"LiteLLM stream error: {e}")
-            yield f"\n[LLM 연결 오류: {str(e)}]"
-            return
+            # Automatic streaming fallback to local Ollama
+            try:
+                ollama_model = _ollama_model_fallback(target_model)
+                ollama_url = f"{_ollama_base_url()}/api/chat"
+                payload = {
+                    "model": ollama_model,
+                    "messages": messages,
+                    "stream": True,
+                    "options": {"temperature": float(temperature)},
+                }
+                async with httpx.AsyncClient(timeout=_timeout_seconds()) as client:
+                    async with client.stream("POST", ollama_url, json=payload) as response:
+                        async for line in response.aiter_lines():
+                            if not line:
+                                continue
+                            try:
+                                chunk = json.loads(line)
+                                if "message" in chunk and "content" in chunk["message"]:
+                                    yield chunk["message"]["content"]
+                            except Exception:
+                                continue
+                return
+            except Exception as fb_err:
+                logger.error(f"Ollama stream fallback error: {fb_err}")
+                yield f"\n[LLM 연결 오류: {str(e)}]"
+                return
 
     # Ollama Fallback
     url = f"{cfg['base_url']}/api/chat"

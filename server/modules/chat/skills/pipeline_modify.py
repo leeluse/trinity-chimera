@@ -65,6 +65,8 @@ async def run_modify_pipeline(
     async for chunk in stream_chat_reply(user_message=prompt_analyze, context=context,
                                           history=history, custom_system_prompt=SYSTEM_PROMPT,
                                           model=(os.getenv("QUICK_MODEL") or None)):
+        if chunk is None or chunk == "":
+            continue
         analysis_full += chunk
         yield format_sse({"type": "thought", "content": chunk})
     await db.save_chat_message(session_id, "assistant", analysis_full, "thought")
