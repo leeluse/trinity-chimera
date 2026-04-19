@@ -1,11 +1,11 @@
 // API 클라이언트 유틸리티
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const API_BASE_URL = '/api';
 const normalizeApiBase = (value: string): string => value.replace(/\/+$/, "").replace(/\/api$/, "");
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
 // Use explicit public backend URL first (Vercel), then fallback to Next.js rewrite (/api).
 const rawPublicApiBase = (process.env.NEXT_PUBLIC_API_URL || "").trim();
-export const API_BASE = rawPublicApiBase ? normalizeApiBase(rawPublicApiBase) : "";
 const DEFAULT_TUNNEL_SUBDOMAIN = (process.env.NEXT_PUBLIC_TUNNEL_SUBDOMAIN || "lsy-super-trend").trim();
 const DEFAULT_TUNNEL_HOST = (process.env.NEXT_PUBLIC_TUNNEL_HOST || "https://loca.lt").trim();
 const normalizedTunnelHost = DEFAULT_TUNNEL_HOST.replace(/\/+$/, "").replace(/^http:\/\//, "https://");
@@ -14,7 +14,13 @@ const DEFAULT_TUNNEL_BASE =
   DEFAULT_TUNNEL_SUBDOMAIN && tunnelHostNoScheme
     ? normalizeApiBase(`https://${DEFAULT_TUNNEL_SUBDOMAIN}.${tunnelHostNoScheme}`)
     : "";
-const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+// In production, if no explicit API URL is provided, default to the tunnel base to ensure connectivity.
+export const API_BASE = rawPublicApiBase 
+  ? normalizeApiBase(rawPublicApiBase) 
+  : (IS_PRODUCTION ? DEFAULT_TUNNEL_BASE : "");
+
+const API_BASE_URL = '/api';
 const RAW_FETCH_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_API_FETCH_TIMEOUT_MS || "30000");
 const FETCH_TIMEOUT_MS = Number.isFinite(RAW_FETCH_TIMEOUT_MS)
   ? Math.max(3000, Math.min(RAW_FETCH_TIMEOUT_MS, 60000))
@@ -83,6 +89,8 @@ export interface EvolutionLogEvent {
       fingerprint?: string;
       improved?: boolean;
       strategy_id?: string | null;
+      agent_alias?: string;
+      agent_label?: string;
       gate_reasons?: string[];
       gate_thresholds?: Record<string, any>;
       improvement_summary?: Array<{
@@ -478,9 +486,10 @@ const shouldRetryFallback = (candidate: string, response: Response): boolean => 
   if (!isConfiguredRemote) return false;
 
   const tunnelUnavailable = response.headers.get("x-localtunnel-status") === "Tunnel Unavailable";
-  const retryableStatus = response.status >= 500;
+  const vercelProxyError = response.headers.get("x-vercel-error");
+  const retryableStatus = response.status === 404 || response.status >= 500;
   const contentType = response.headers.get("content-type") || "";
   const htmlResponse = contentType.includes("text/html");
 
-  return tunnelUnavailable || retryableStatus || htmlResponse;
+  return tunnelUnavailable || retryableStatus || htmlResponse || !!vercelProxyError;
 };

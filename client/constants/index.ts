@@ -6,7 +6,7 @@ export const COLORS = [
   '#5c6370'  // One Dark Gray (Benchmark)
 ];
 
-export const NAMES = ['MINARA V2', 'ARBITER V1', 'NIM-ALPHA', 'CHIMERA-β', 'BTC BnH'];
+export const NAMES = ['NaN', 'NaN', 'NaN', 'NaN', 'BTC BnH'];
 
 export const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 export const TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h"] as const;

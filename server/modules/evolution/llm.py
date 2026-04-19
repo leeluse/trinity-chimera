@@ -66,11 +66,25 @@ class EvolutionLLM:
     # 진화 모드 결정: 시장 상황(Regime)과 현재 성과를 바탕으로 전략 수정 강도 결정
     # -------------------------------------------------------------------------
     def _select_evolution_mode(self, pkg: Dict[str, Any]) -> str:
+        forced_mode = str(os.getenv("EVOLUTION_FORCE_MODE") or "").strip().lower()
+        if forced_mode in {"mode1", "1", "parameter_tuning", "parameter-tuning", "tuning"}:
+            return "parameter_tuning"
+        if forced_mode in {"mode2", "2", "free_generation", "free-generation", "free"}:
+            return "free_generation"
+
+        # L1/L2 트리거 = HIGH intensity → 완전 신규 전략 생성
+        trigger_level = str(pkg.get("trigger_level") or "L4").strip().upper()
+        if trigger_level in {"L1", "L2"}:
+            return "free_generation"
+
         metrics = pkg.get("metrics", {})
         score = float(metrics.get("trinity_score") or 0.0)
-        
-        # 성과가 너무 낮거나( < 50), 너무 높아서 정체기인 경우 자유 생성(Free Generation) 모드로 전환
-        if score < 50 or score > 85:
+
+        # Trinity Score 0-100 기준:
+        # < 30: 전략이 너무 나쁨 → 완전 재설계
+        # > 70: 고성능 정체 → 다양성 탐색
+        # 30-70: 점진적 개선
+        if score < 30 or score > 70:
             return "free_generation"
         return "parameter_tuning"
 
@@ -87,6 +101,10 @@ class EvolutionLLM:
         hard_gates = memory_context.get("hard_gates") or {}
         recent_failures = memory_context.get("recent_failures") or []
         recent_successes = memory_context.get("recent_successes") or []
+        failure_summary = memory_context.get("failure_summary") or []
+        best_accepted = memory_context.get("best_accepted") or {}
+        unexplored_mutations = memory_context.get("unexplored_mutations") or []
+        next_mutation = str(memory_context.get("next_mutation") or "").strip()
         
         mode_instruction = (
             "기존 파라미터만 조정해라." if mode == "parameter_tuning" 
@@ -118,9 +136,43 @@ class EvolutionLLM:
         blocked_block = "\n".join(blocked_lines) if blocked_lines else "- (이번 사이클 중 차단된 fingerprint 없음)"
         last_reason_block = last_reason if last_reason else "(직전 실패 사유 없음)"
 
+        summary_lines = []
+        for row in failure_summary[:6]:
+            tag = str(row.get("tag") or "other").strip()
+            cnt = int(row.get("count") or 0)
+            summary_lines.append(f"- {tag}: {cnt}")
+        failure_summary_block = "\n".join(summary_lines) if summary_lines else "- (태그 집계 없음)"
+
+        best_metrics = best_accepted.get("metrics") if isinstance(best_accepted, dict) else {}
+        if isinstance(best_metrics, dict) and best_metrics:
+            best_block = (
+                f"- strategy_id={best_accepted.get('strategy_id') or '-'}, "
+                f"pf={float(best_metrics.get('profit_factor', 0.0)):.3f}, "
+                f"win={float(best_metrics.get('win_rate', 0.0)):.3f}, "
+                f"ret={float(best_metrics.get('total_return', 0.0)):.3f}, "
+                f"mdd={float(best_metrics.get('max_drawdown', 0.0)):.3f}, "
+                f"trades={int(best_metrics.get('total_trades', 0))}"
+            )
+        else:
+            best_block = "- (아직 채택된 전략 없음)"
+
+        unexplored_lines = []
+        for item in unexplored_mutations[:6]:
+            text = str(item).strip()
+            if text:
+                unexplored_lines.append(f"- {text}")
+        unexplored_block = "\n".join(unexplored_lines) if unexplored_lines else "- (미탐색 방향 정보 없음)"
+        next_mutation_block = next_mutation or "structural_novelty"
+
         return f"""
-### [Trinity Strategy Evolution]
-지시사항: 현재 전략의 성과를 분석하고 최신 시장 상황에 맞춰 개선해라.
+### [Trinity Strategy Evolution: High-Performance Quant Mode]
+지시사항: 당신은 세계 최고의 퀀트 트레이더이자 알고리즘 개발자입니다.
+제시된 현재 전략의 성과를 기반으로, 승률·리스크 대비 수익비(RR)가 극대화된 차세대 전략을 설계하십시오.
+
+[반드시 준수할 분석 프로세스]
+1. (Critical Analysis) <think> 태그 내에서 현재 전략의 코드와 성과를 철저히 비판하십시오.
+2. (Market Hypothesis) 현재 시장 국면에 가장 적합한 새로운 가설을 설정하십시오.
+3. (Systemic Improvement) 지표 간의 시너지를 고려한 새로운 진입/청산 로직을 설계하십시오.
 수정 모드: {mode} ({mode_instruction})
 시도 번호: {attempt}
 
@@ -129,7 +181,7 @@ class EvolutionLLM:
 - 수익률: {metrics.get('return', 0):.4f}
 - MDD: {metrics.get('mdd', 0):.4f}
 
-#### 2.5. 하드 게이트 (절대 미충족 금지)
+#### 2. 하드 게이트 (절대 미충족 금지)
 - min_win_rate: {hard_gates.get('min_win_rate', 0.0)}
 - min_profit_factor: {hard_gates.get('min_profit_factor', 0.0)}
 - min_total_return: {hard_gates.get('min_total_return', 0.0)}
@@ -137,40 +189,91 @@ class EvolutionLLM:
 - min_total_trades: {hard_gates.get('min_total_trades', 0)}
 - min_sharpe_ratio: {hard_gates.get('min_sharpe_ratio', 0.0)}
 
-#### 2.6. 최근 실패 패턴 (반드시 회피)
+#### 3. 최근 실패 패턴 (반드시 회피)
 {failure_block}
 
-#### 2.7. 최근 성공 패턴 (참고)
+#### 4. 최근 성공 패턴 (참고)
 {success_block}
 
-#### 2.8. 이번 사이클 즉시 피드백 (강제 반영)
+#### 5. 이번 사이클 즉시 피드백
 - 직전 실패 사유: {last_reason_block}
 - 차단된 후보 fingerprint:
 {blocked_block}
 
-#### 3. 현재 코드
+#### 6. 실패 이유 태그 집계
+{failure_summary_block}
+
+#### 7. 지금까지 최고 성능 전략 (기준점)
+{best_block}
+
+#### 8. 아직 덜 시도한 탐색 방향
+{unexplored_block}
+
+#### 9. 이번 시도에서 반드시 우선할 방향
+- next_mutation: {next_mutation_block}
+
+#### 10. 현재 코드 (참고/개선 대상)
 ```python
 {current_code}
 ```
 
-#### 4. 호환성 필수 규칙 (미준수 시 즉시 폐기)
-1) `from server.shared.market.strategy_interface import StrategyInterface` 를 절대 사용하지 마라.
-2) 클래스 이름은 정확히 `CustomStrategy` 여야 하며, 반드시 `class CustomStrategy(Strategy):` 형태여야 한다.
-3) 메서드는 반드시 `def generate_signals(self, data, params):` 를 구현해야 한다.
-4) 반환은 반드시 `Signal(...)` 객체여야 한다. (정수/문자열 단독 반환 금지)
-5) 이번 결과는 위의 차단 fingerprint들과 AST 기준으로 실질적으로 달라야 한다. 지표/조건/파라미터를 최소 2개 이상 변경해라.
-6) 결과는 설명 없이 오직 하나의 ```python 코드 블록```만 출력해라.
+#### 11. 출력 규격 (반드시 이 형식으로만 출력)
 
-#### 5. 출력 템플릿 (형식 강제)
+**함수 시그니처 (변경 불가):**
 ```python
-class CustomStrategy(Strategy):
-    name = "CustomStrategy"
-    params = {{}}
+def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
+```
+- `train_df` / `test_df`: DatetimeIndex, 컬럼 = open / high / low / close / volume
+- 반환: `test_df.index`와 동일한 인덱스의 `pd.Series` (값: 1=롱, -1=숏, 0=관망)
+- import는 `numpy as np`, `pandas as pd`만 사용 가능
 
-    def generate_signals(self, data, params):
-        # data: pandas DataFrame with open/high/low/close/volume
-        # return Signal(entry=..., exit=..., direction="long"|"short")
-        ...
+**거래 수 경고:** 진입 조건이 지나치게 엄격하면 신호가 0건이 되어 즉시 폐기된다.
+테스트 기간(수백~수천 행) 중 **최소 30건 이상** 신호가 발생하도록 설계해라.
+
+**지표 구현 레시피 (numpy/pandas 전용):**
+```
+# EMA
+ema = close.ewm(span=n, adjust=False).mean()
+# RSI
+d = close.diff(); g = d.clip(lower=0).rolling(14).mean(); l = -d.clip(upper=0).rolling(14).mean()
+rsi = 100 - 100 / (1 + g / l.replace(0, 1e-9))
+# Bollinger Bands
+sma = close.rolling(20).mean(); std = close.rolling(20).std()
+upper = sma + 2*std; lower = sma - 2*std
+# ATR
+tr = pd.concat([(high-low), (high-close.shift()).abs(), (low-close.shift()).abs()], axis=1).max(axis=1)
+atr = tr.ewm(span=14, adjust=False).mean()
+# MACD
+macd = close.ewm(span=12,adjust=False).mean() - close.ewm(span=26,adjust=False).mean()
+signal_line = macd.ewm(span=9,adjust=False).mean()
+```
+
+**이번 결과는 차단된 fingerprint들과 AST 기준으로 실질적으로 달라야 한다.
+지표/조건/파라미터를 최소 2개 이상 변경해라.**
+
+모든 추론은 `<think>` 태그 안에, 최종 코드 블록 하나만 마지막에 출력해라.
+
+**출력 템플릿:**
+```python
+import numpy as np
+import pandas as pd
+
+def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
+    close = test_df['close']
+    high  = test_df['high']
+    low   = test_df['low']
+    vol   = test_df['volume']
+
+    # --- 지표 계산 ---
+    ema_fast = close.ewm(span=12, adjust=False).mean()
+    ema_slow = close.ewm(span=26, adjust=False).mean()
+
+    # --- 신호 생성 ---
+    sig = pd.Series(0, index=test_df.index, dtype=int)
+    sig[ema_fast > ema_slow] = 1
+    sig[ema_fast < ema_slow] = -1
+
+    return sig.fillna(0).astype(int)
 ```
 """
 
@@ -179,5 +282,7 @@ class CustomStrategy(Strategy):
     # -------------------------------------------------------------------------
     def _clean_code(self, text: str) -> str:
         if "```python" in text:
-            return text.split("```python")[1].split("```")[0].strip()
+            # 여러 블록이 있을 때 think 예시 블록이 아닌 마지막 블록을 사용
+            blocks = text.split("```python")
+            return blocks[-1].split("```")[0].strip()
         return text.strip()

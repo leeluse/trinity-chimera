@@ -1,4 +1,5 @@
 import ast
+from collections import Counter
 import hashlib
 import json
 import re
@@ -30,14 +31,35 @@ DEFAULT_CONSTITUTION: Dict[str, Any] = {
         "min_sharpe_ratio": -0.10,
     },
     "budgets": {
-        "max_candidates_per_cycle": 5,
-        "max_llm_calls_per_cycle": 5,
+        "max_candidates_per_cycle": 2,
+        "max_llm_calls_per_cycle": 2,
     },
     "memory": {
         "recent_failures_for_prompt": 5,
         "recent_successes_for_prompt": 3,
         "dedupe_window": 120,
     },
+}
+
+MUTATION_DIRECTIONS: List[str] = [
+    "risk_reduction",
+    "entry_quality",
+    "regime_filtering",
+    "trade_frequency_increase",
+    "volatility_adaptation",
+    "structural_novelty",
+]
+
+FAILURE_TO_MUTATION: Dict[str, str] = {
+    "mdd_exceeded": "risk_reduction",
+    "profit_factor_low": "entry_quality",
+    "win_rate_low": "regime_filtering",
+    "trades_too_low": "trade_frequency_increase",
+    "no_improvement": "structural_novelty",
+    "duplicate_candidate": "structural_novelty",
+    "interface_invalid": "structural_novelty",
+    "quick_backtest_error": "structural_novelty",
+    "full_backtest_error": "structural_novelty",
 }
 
 
@@ -197,18 +219,149 @@ class EvolutionWikiMemory:
             return len(state.get("experiments", []))
         return sum(1 for row in state.get("experiments", []) if row.get("agent_id") == agent_id)
 
+    def classify_reason_tag(self, reason: str) -> str:
+        text = (reason or "").strip().lower()
+
+        if "duplicate_candidate" in text:
+            return "duplicate_candidate"
+        if "strategyinterface" in text:
+            return "interface_invalid"
+        if "generate_signal 함수" in text or ("generate_signals" in text and "찾을 수 없습니다" in text):
+            return "interface_invalid"
+        if "code syntax error" in text or "static_gate_failed" in text:
+            return "interface_invalid"
+
+        if "|max_drawdown|" in text or ("max_drawdown" in text and ">" in text):
+            return "mdd_exceeded"
+        if "profit_factor" in text and "<" in text:
+            return "profit_factor_low"
+        if "win_rate" in text and "<" in text:
+            return "win_rate_low"
+        if "total_trades" in text and "<" in text:
+            return "trades_too_low"
+        if "sharpe_ratio" in text and "<" in text:
+            return "sharpe_too_low"
+        if "total_return" in text and "<" in text:
+            return "return_too_low"
+
+        if "no_oos_improvement" in text or "no_improvement" in text:
+            return "no_improvement"
+        if "quick_backtest_failed" in text:
+            return "quick_backtest_error"
+        if "full_backtest_failed" in text:
+            return "full_backtest_error"
+        if "llm_generation_error" in text:
+            return "llm_generation_error"
+        if "quick_gate_failed" in text:
+            return "quick_gate_failed"
+        if "hard_gate_failed" in text:
+            return "hard_gate_failed"
+        return "other"
+
+    def _failure_tag_counts(self, agent_id: Optional[str], limit: int = 120) -> Dict[str, int]:
+        failures = self.get_recent_failures(agent_id, limit=limit)
+        counter: Counter[str] = Counter()
+        for row in failures:
+            tag = str(row.get("reason_tag") or "").strip()
+            if not tag:
+                tag = self.classify_reason_tag(str(row.get("reason") or ""))
+            counter[tag or "other"] += 1
+        return dict(counter)
+
+    def _mutation_counts(self, agent_id: Optional[str], limit: int = 120) -> Dict[str, int]:
+        state = self._load_state()
+        counter: Counter[str] = Counter()
+        checked = 0
+        for row in reversed(state.get("experiments", [])):
+            if agent_id and row.get("agent_id") != agent_id:
+                continue
+            hint = str(row.get("mutation_hint") or "").strip()
+            if hint:
+                counter[hint] += 1
+            checked += 1
+            if checked >= max(1, limit):
+                break
+        return dict(counter)
+
+    def _best_accepted(self, agent_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        state = self._load_state()
+        rows: List[Dict[str, Any]] = []
+        for row in state.get("accepted", []):
+            if agent_id and row.get("agent_id") != agent_id:
+                continue
+            rows.append(row)
+        if not rows:
+            return None
+
+        def _score(item: Dict[str, Any]) -> Tuple[float, float, float]:
+            m = item.get("metrics") or {}
+            return (
+                float(m.get("profit_factor") or 0.0),
+                float(m.get("trinity_score") or 0.0),
+                float(m.get("win_rate") or 0.0),
+            )
+
+        best = max(rows, key=_score)
+        return {
+            "time": best.get("time"),
+            "strategy_id": best.get("strategy_id"),
+            "fingerprint": str(best.get("fingerprint") or "")[:12],
+            "metrics": best.get("metrics") or {},
+        }
+
+    def _pick_next_mutation(self, failure_counts: Dict[str, int], mutation_counts: Dict[str, int]) -> str:
+        if failure_counts:
+            dominant_tag = max(
+                failure_counts.items(),
+                key=lambda item: (int(item[1]), item[0]),
+            )[0]
+            mapped = FAILURE_TO_MUTATION.get(dominant_tag)
+            if mapped:
+                return mapped
+
+        unexplored = [name for name in MUTATION_DIRECTIONS if mutation_counts.get(name, 0) == 0]
+        if unexplored:
+            return unexplored[0]
+
+        return min(MUTATION_DIRECTIONS, key=lambda name: mutation_counts.get(name, 0))
+
     def build_prompt_context(self, agent_id: Optional[str], constitution: Dict[str, Any]) -> Dict[str, Any]:
         memory_cfg = constitution.get("memory", {})
         fail_limit = int(memory_cfg.get("recent_failures_for_prompt", 5))
         success_limit = int(memory_cfg.get("recent_successes_for_prompt", 3))
+        summary_limit = max(30, fail_limit * 20)
 
         failures = self.get_recent_failures(agent_id, limit=fail_limit)
         successes = self.get_recent_successes(agent_id, limit=success_limit)
+        failure_counts = self._failure_tag_counts(agent_id, limit=summary_limit)
+        mutation_counts = self._mutation_counts(agent_id, limit=summary_limit)
+        failure_summary = [
+            {"tag": tag, "count": count}
+            for tag, count in sorted(
+                failure_counts.items(),
+                key=lambda item: (-int(item[1]), item[0]),
+            )[:6]
+        ]
+        unexplored = [name for name in MUTATION_DIRECTIONS if mutation_counts.get(name, 0) == 0]
+        if not unexplored:
+            unexplored = [
+                name
+                for name, _count in sorted(
+                    ((name, mutation_counts.get(name, 0)) for name in MUTATION_DIRECTIONS),
+                    key=lambda item: (item[1], item[0]),
+                )[:3]
+            ]
+        next_mutation = self._pick_next_mutation(failure_counts, mutation_counts)
+        best_accepted = self._best_accepted(agent_id)
 
         return {
             "hard_gates": constitution.get("hard_gates", {}),
             "recent_failures": failures,
             "recent_successes": successes,
+            "failure_summary": failure_summary,
+            "best_accepted": best_accepted,
+            "unexplored_mutations": unexplored,
+            "next_mutation": next_mutation,
         }
 
     def log_failure_pattern(
@@ -219,9 +372,10 @@ class EvolutionWikiMemory:
         metrics: Optional[Dict[str, Any]] = None,
     ) -> None:
         metrics = metrics or {}
+        reason_tag = self.classify_reason_tag(reason)
         line = (
             f"- `{_utc_now()}` [{agent_id}] `{fingerprint[:12]}` "
-            f"- reason: {_sanitize_cell(reason)} "
+            f"- reason_tag: `{reason_tag}` / reason: {_sanitize_cell(reason)} "
             f"(win={metrics.get('win_rate', 0):.3f}, pf={metrics.get('profit_factor', 0):.3f}, "
             f"ret={metrics.get('total_return', 0):.3f}, mdd={metrics.get('max_drawdown', 0):.3f}, "
             f"trades={metrics.get('total_trades', 0)})\n"
@@ -237,15 +391,19 @@ class EvolutionWikiMemory:
         reason: str,
         fingerprint: str,
         metrics: Optional[Dict[str, Any]] = None,
+        mutation_hint: Optional[str] = None,
     ) -> Dict[str, Any]:
         metrics = metrics or {}
+        reason_tag = self.classify_reason_tag(reason)
         row = {
             "time": _utc_now(),
             "agent_id": agent_id,
             "status": status,
             "stage": stage,
             "reason": reason,
+            "reason_tag": reason_tag,
             "fingerprint": fingerprint,
+            "mutation_hint": (mutation_hint or "").strip(),
             "metrics": {
                 "win_rate": float(metrics.get("win_rate") or 0.0),
                 "profit_factor": float(metrics.get("profit_factor") or 0.0),
@@ -265,7 +423,8 @@ class EvolutionWikiMemory:
         line = (
             f"| {row['time']} | {agent_id} | {_sanitize_cell(status)} | {_sanitize_cell(stage)} | "
             f"{m['win_rate']:.3f} | {m['profit_factor']:.3f} | {m['total_return']:.3f} | "
-            f"{m['max_drawdown']:.3f} | {m['total_trades']} | {fingerprint[:12]} | {_sanitize_cell(reason)} |\n"
+            f"{m['max_drawdown']:.3f} | {m['total_trades']} | {fingerprint[:12]} | "
+            f"{_sanitize_cell(reason_tag)}: {_sanitize_cell(reason)} |\n"
         )
         with self.ledger_path.open("a", encoding="utf-8") as handle:
             handle.write(line)

@@ -7,6 +7,7 @@ export { MetricSelector } from "./dashboard/MetricSelector";
 export { AgentsList } from "./dashboard/AgentsList";
 export { ChartLegend } from "./dashboard/ChartLegend";
 export { PerformanceChart } from "./dashboard/PerformanceChart";
+export { default as ModelSettingsModal } from "./dashboard/ModelSettingsModal";
 
 // Backtest 
 export { StatsGrid } from "./backtest/StatsGrid";

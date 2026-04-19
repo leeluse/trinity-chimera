@@ -20,6 +20,8 @@ import {
   TradeAnalysis
 } from "@/components";
 
+import { useDashboardQueries } from "@/hooks/useDashboardQueries";
+
 // Externalized
 import { Results, TimeFrame } from "@/types/backtest";
 import { cardClass, ambientGlows } from "@/styles/common";
@@ -73,6 +75,8 @@ export default function BacktestPage() {
   const [endDate, setEndDate] = useState("2024-04-15");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
+
+  const { evolutionEvents, decisionLogs, automationStatus, toggleAutomation } = useDashboardQueries();
 
   const [aiOpen, setAiOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -302,6 +306,10 @@ export default function BacktestPage() {
           results={results}
           onBacktestGenerated={applyBacktestPayload}
           onApplyCode={applyGeneratedCode}
+          evolutionEvents={evolutionEvents}
+          decisionLogs={decisionLogs}
+          automationStatus={automationStatus}
+          onToggleAutomation={toggleAutomation}
         />
       </PageLayout.Side>
 

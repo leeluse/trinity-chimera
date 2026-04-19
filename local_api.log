@@ -1,0 +1,164 @@
+INFO:     Will watch for changes in these directories: ['/Users/lsy/Desktop/project/trinity-chimery']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [73072] using StatReload
+INFO:     Started server process [73083]
+INFO:     Waiting for application startup.
+2026-04-18 15:38:04,333 - server.api.main - INFO - APScheduler started: Evolution poll added (PAUSED by default). active_agents=['momentum_hunter']
+INFO:     Application startup complete.
+INFO:     127.0.0.1:53273 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53272 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53271 - "GET /api/dashboard/improvement?_ts=1776494282537 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53275 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776494282621 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53277 - "GET /api/dashboard/logs?limit=260&_ts=1776494282642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53289 - "GET /api/dashboard/improvement?_ts=1776494290152 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53291 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53292 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53294 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776494290153 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53299 - "GET /api/dashboard/logs?limit=260&_ts=1776494290492 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53309 - "GET /api/dashboard/improvement?_ts=1776494294564 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53310 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53312 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53313 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776494294565 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53317 - "GET /api/dashboard/logs?limit=260&_ts=1776494294856 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53325 - "GET /api/dashboard/improvement?_ts=1776494298893 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53326 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53328 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53330 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776494298894 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53334 - "GET /api/dashboard/logs?limit=260&_ts=1776494299324 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53342 - "GET /api/dashboard/improvement?_ts=1776494303166 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53343 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53346 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53347 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776494303167 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53351 - "GET /api/dashboard/logs?limit=260&_ts=1776494303612 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53360 - "GET /api/dashboard/improvement?_ts=1776494307483 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53361 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53362 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53364 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776494307484 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53368 - "GET /api/dashboard/logs?limit=260&_ts=1776494307890 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53384 - "GET /api/dashboard/improvement?_ts=1776494311823 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53385 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53387 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53388 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776494311823 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53392 - "GET /api/dashboard/logs?limit=260&_ts=1776494312156 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53527 - "GET /api/system/status HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/uvicorn/protocols/http/h11_impl.py", line 415, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/fastapi/applications.py", line 1163, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/middleware/cors.py", line 88, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/fastapi/routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/fastapi/routing.py", line 120, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/fastapi/routing.py", line 674, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/Users/lsy/Desktop/project/trinity-chimery/venv/lib/python3.14/site-packages/fastapi/routing.py", line 328, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lsy/Desktop/project/trinity-chimery/server/api/main.py", line 147, in get_system_status
+    buffer_stats = orchestrator.metrics_buffer.get_buffer_status(agent_id)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'EvolutionOrchestrator' object has no attribute 'metrics_buffer'
+INFO:     127.0.0.1:53546 - "GET /api/dashboard/improvement?_ts=1776495179807 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53548 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53549 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53552 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776495179899 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53553 - "GET /api/dashboard/logs?limit=260&_ts=1776495179900 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53699 - "GET /api/dashboard/logs?limit=260&_ts=1776495649050 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53701 - "GET /api/dashboard/improvement?_ts=1776495649051 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53703 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53704 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53706 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776495649108 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53711 - "GET /api/dashboard/logs?limit=260&_ts=1776495654904 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53720 - "GET /api/dashboard/improvement?_ts=1776495655201 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53721 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53723 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53724 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776495655203 HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'server/shared/db/supabase.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [73083]
+INFO:     Started server process [75582]
+INFO:     Waiting for application startup.
+2026-04-18 16:02:57,376 - server.api.main - INFO - APScheduler started: Evolution poll added (PAUSED by default). active_agents=['momentum_hunter']
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'server/modules/chat/router.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [75582]
+INFO:     Started server process [75633]
+INFO:     Waiting for application startup.
+2026-04-18 16:03:08,597 - server.api.main - INFO - APScheduler started: Evolution poll added (PAUSED by default). active_agents=['momentum_hunter']
+INFO:     Application startup complete.
+INFO:     127.0.0.1:53764 - "GET /api/chat/history?t=1776495799322&limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53964 - "GET /api/dashboard/logs?limit=260&_ts=1776496267506 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53972 - "GET /api/dashboard/improvement?_ts=1776496267852 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53973 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53975 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53976 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776496267853 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54008 - "GET /api/chat/sessions?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54007 - "GET /api/chat/history?t=1776496335325&limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54014 - "GET /api/chat/sessions?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54304 - "OPTIONS /api/market/ohlcv?symbol=BTC%2FUSDT&timeframe=1h&limit=240 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54304 - "GET /api/market/ohlcv?symbol=BTC%2FUSDT&timeframe=1h&limit=240 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54304 - "OPTIONS /api/dashboard/improvement?_ts=1776497891511 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54304 - "GET /api/dashboard/improvement?_ts=1776497891511 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54312 - "OPTIONS /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54314 - "OPTIONS /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54316 - "OPTIONS /api/dashboard/evolution-log?limit=220&_ts=1776497891523 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54318 - "OPTIONS /api/dashboard/logs?limit=260&_ts=1776497891526 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54314 - "GET /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54312 - "GET /api/system/automation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54318 - "GET /api/dashboard/evolution-log?limit=220&_ts=1776497891523 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54316 - "GET /api/dashboard/logs?limit=260&_ts=1776497891526 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54325 - "OPTIONS /api/dashboard/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54326 - "OPTIONS /api/dashboard/evolution-log?limit=220&_ts=1776497891523 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54327 - "OPTIONS /api/dashboard/logs?limit=260&_ts=1776497891526 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54328 - "OPTIONS /api/system/automation HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [75633]
+INFO:     Stopping reloader process [73072]

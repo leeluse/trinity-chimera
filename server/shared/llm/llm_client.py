@@ -59,8 +59,11 @@ def _normalize_litellm_model(model: str) -> str:
     model = (model or "").strip()
     if not model:
         return model
-    if "/" in model:
+    # If it already starts with a known provider, keep it
+    known_providers = ["openai/", "ollama/", "anthropic/", "google/", "vertex_ai/", "bedrock/", "azure/"]
+    if any(model.startswith(p) for p in known_providers):
         return model
+    # Otherwise prepend the default provider
     return f"{_litellm_provider()}/{model}"
 
 
@@ -290,23 +293,29 @@ class LiteLLMProxyService:
 
 
 def build_default_llm_service() -> Optional[Any]:
-    # 1. Try Anthropic/Claude proxy first (preferred by user)
+    # 0. Unified liteLLM configuration (Highest Priority)
+    provider = (os.getenv("LLM_PROVIDER") or "").lower()
+    base_url = os.getenv("LITELLM_BASE_URL")
+    api_key = os.getenv("LITELLM_API_KEY")
+    model = os.getenv("LITELLM_MODEL") or os.getenv("ANTHROPIC_MODEL") or "gpt-oss:120b-cloud"
+
+    if provider == "litellm" and base_url:
+        return LiteLLMProxyService(
+            base_url=base_url,
+            api_key=api_key or "sk-dummy",
+            model=model,
+        )
+
+    # 1. Fallback to Legacy Try Anthropic/Claude proxy
     acfg = _anthropic_env()
     if acfg["base_url"] and acfg["api_key"]:
-        use_litellm = (os.getenv("EVOLUTION_LITELLM_ENABLE") or "1").strip().lower() not in {"0", "false", "no"}
-        if use_litellm:
-            return LiteLLMProxyService(
-                base_url=acfg["base_url"],
-                api_key=acfg["api_key"],
-                model=acfg["model"],
-            )
-        return OpenAICompatLLMService(
+        return LiteLLMProxyService(
             base_url=acfg["base_url"],
             api_key=acfg["api_key"],
             model=acfg["model"],
         )
 
-    # 2. Try generic OpenAI compatible
+    # 2. Fallback to generic OpenAI compatible
     cfg = _openai_compat_env()
     if cfg["base_url"] and cfg["api_key"]:
         return OpenAICompatLLMService(
@@ -471,7 +480,8 @@ class EvolutionLLMClient:
    - 예: `return Signal(entry=True, exit=False, direction='long', ...)`
    - **주의**: 과거의 1, -1, 0 정수 반환 방식은 절대 금지한다.
 3. **Fields**: 오직 `entry`, `exit`, `direction`, `stop_loss`, `take_profit` 필드만 사용하라.
-4. **Code Only**: 설명 없이 오직 ```python ... ``` 코드 블록만 출력하라.
+4. **Columns**: Pandas DataFrame의 모든 열 이름은 반드시 소문자(`open`, `high`, `low`, `close`, `volume`)를 사용하라. 절대 `Close`나 `Open`처럼 대문자를 사용하지 마라.
+5. **Code Only**: 설명 없이 오직 ```python ... ``` 코드 블록만 출력하라.
 """
         
         if is_free_gen:

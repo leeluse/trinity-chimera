@@ -3,10 +3,10 @@
 import AgentCard from "@/components/cards/AgentCard";
 import { COLORS } from "@/constants";
 
+import { useDashboardStore } from "@/store/useDashboardStore";
+
 interface AgentsListProps {
   agentIds: string[];
-  activeAgent: string;
-  setActiveAgent: (id: string) => void;
   names?: string[];
   metrics?: {
     [agentId: string]: {
@@ -19,7 +19,8 @@ interface AgentsListProps {
   };
 }
 
-export const AgentsList = ({ agentIds, activeAgent, setActiveAgent, names, metrics }: AgentsListProps) => {
+export const AgentsList = ({ agentIds, names, metrics }: AgentsListProps) => {
+  const { chartActiveAgent: activeAgent, setChartActiveAgent: setActiveAgent } = useDashboardStore();
   const getName = (idx: number, fallback: string) => names && names[idx] ? names[idx] : fallback;
   const getAvatar = (idx: number, fallback: string) => names && names[idx] ? names[idx].charAt(0) : fallback;
   const normalizeRatio = (value: number): number => (Math.abs(value) > 1 ? value / 100 : value);

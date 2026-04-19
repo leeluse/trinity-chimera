@@ -13,6 +13,8 @@ LT_HOST="${LT_HOST:-https://loca.lt}"
 LOG_DIR="$PROJECT_ROOT/logs"
 RUN_DIR="$PROJECT_ROOT/tmp/always_on"
 API_PID_FILE="$RUN_DIR/api.pid"
+PROXY_PID_FILE="$RUN_DIR/proxy.pid"
+PROXY_LOG="$LOG_DIR/proxy-8082.log"
 TUNNEL_PID_FILE="$RUN_DIR/localtunnel.pid"
 API_LOG="$LOG_DIR/api-${BACKEND_PORT}.log"
 TUNNEL_LOG="$LOG_DIR/localtunnel-${BACKEND_PORT}.log"
@@ -63,6 +65,27 @@ kill_tunnel_processes() {
   fi
 }
 
+kill_proxy_processes() {
+  local pids
+  pids="$(lsof -t -iTCP:8082 -sTCP:LISTEN 2>/dev/null)"
+  if [ -n "$pids" ]; then
+    echo "🛑 Stopping existing NIM proxy (pids: $pids)..."
+    echo "$pids" | xargs kill >/dev/null 2>&1 || true
+    sleep 1
+  fi
+}
+
+start_nim_proxy() {
+  echo "🚀 Starting NIM Proxy on port 8082..."
+  (
+    cd "$PROJECT_ROOT/proxy" && \
+    source "$VENV_ACTIVATE" && \
+    PYTHONPATH="$PROJECT_ROOT" nohup "$VENV_PYTHON" server.py >> "$PROXY_LOG" 2>&1 &
+    echo $! > "$PROXY_PID_FILE"
+    echo "✅ NIM Proxy started. Log: $PROXY_LOG"
+  )
+}
+
 run_localtunnel_once() {
   local cmd=()
   if command -v lt >/dev/null 2>&1; then
@@ -92,6 +115,11 @@ case $COMMAND in
       show_port_owner "$BACKEND_PORT"
       exit 0
     fi
+
+    # Start NIM Proxy first (Disabled by user request)
+    # kill_proxy_processes
+    # start_nim_proxy
+
     echo "⚙️ Starting FastAPI server..."
     
     # Background tunnel starter: waits for port 8000 then runs localtunnel

@@ -5,8 +5,30 @@ import asyncio
 import logging
 import httpx
 from typing import Any, Dict, List, Optional, AsyncGenerator
+from litellm import acompletion
 
 logger = logging.getLogger(__name__)
+
+
+async def stream_code_gen_reply(prompt: str) -> AsyncGenerator[str, None]:
+    """Stage 3 코드 생성 전용. CODE_GEN_MODEL(코더/툴콜 역할) 사용."""
+    model = (os.getenv("CODE_GEN_MODEL") or "").strip()
+    async for chunk in stream_chat_reply(prompt, model=model or None):
+        yield chunk
+
+
+async def stream_analysis_reply(prompt: str) -> AsyncGenerator[str, None]:
+    """Stage 2 전략 설계 전용. ANALYSIS_MODEL(장문 분석 역할) 사용."""
+    model = (os.getenv("ANALYSIS_MODEL") or "").strip()
+    async for chunk in stream_chat_reply(prompt, model=model or None):
+        yield chunk
+
+
+async def stream_quick_reply(prompt: str) -> AsyncGenerator[str, None]:
+    """빠른 응답 전용. QUICK_MODEL(빠른 응답 역할) 사용."""
+    model = (os.getenv("QUICK_MODEL") or "").strip()
+    async for chunk in stream_chat_reply(prompt, model=model or None):
+        yield chunk
 
 def _safe_context(context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not context:
@@ -19,11 +41,40 @@ def _timeout_seconds() -> float:
     except:
         return 120.0
 
-def _ollama_config() -> Dict[str, str]:
+def _get_llm_config() -> Dict[str, str]:
+    provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+    if provider == "litellm":
+        return {
+            "provider": "litellm",
+            "base_url": (os.getenv("LITELLM_BASE_URL") or "http://192.168.0.3:4000/v1").rstrip("/"),
+            "model": (os.getenv("LITELLM_MODEL") or os.getenv("OLLAMA_MODEL") or "gpt-oss:120b-cloud").strip(),
+            "api_key": (os.getenv("LITELLM_API_KEY") or "sk-dummy").strip(),
+        }
     return {
+        "provider": "ollama",
         "base_url": (os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/"),
-        "model": (os.getenv("OLLAMA_MODEL") or (os.getenv("NIM_MODEL") or "deepseek-ai/deepseek-v3.2") if os.getenv("LLM_PROVIDER") == "ollama" else "gpt-oss:20b").strip(),
+        "model": (os.getenv("OLLAMA_MODEL") or "gpt-oss:120b-cloud").strip(),
     }
+
+def _normalize_model(model: Any) -> str:
+    """Ensure model name is a string and prepend provider if missing."""
+    if not model:
+        return ""
+    if isinstance(model, list):
+        model = str(model[0]) if model else ""
+    
+    model_str = str(model).strip()
+    if not model_str:
+        return ""
+        
+    known_providers = ["openai/", "ollama/", "anthropic/", "google/", "vertex_ai/", "bedrock/", "azure/", "mistral/", "replicate/", "huggingface/"]
+    if any(model_str.startswith(p) for p in known_providers):
+        return model_str
+    
+    # 만약 환경변수에서 이미 복잡한 이름을 사용 중이라면 (예: minimax-m2.5) 
+    # LiteLLM이 자체적으로 추론하게 두거나 기본값인 openai/를 명시함.
+    # 하지만 litellm 프록시 연동 시에는 openai/ 접두사가 가장 범용적임.
+    return f"openai/{model_str}"
 
 def _build_messages(
     user_message: str,
@@ -60,8 +111,8 @@ def _local_fallback(user_message: str, context: Optional[Dict[str, Any]]) -> str
     ctx = _safe_context(context)
     profit = ctx.get("netProfitAmt")
     if profit is not None:
-        return f"죄송합니다. 현재 로컬 Ollama 연결이 원활하지 않습니다. 하지만 백테스트 결과 순이익 {profit}을 기록한 것은 확인했습니다."
-    return "현재 로컬 Ollama 모델과 연결할 수 없습니다. Ollama가 실행 중인지 확인해 주세요."
+        return f"죄송합니다. 현재 LLM 연결이 원활하지 않습니다. 하지만 백테스트 결과 순이익 {profit}을 기록한 것은 확인했습니다."
+    return "현재 LLM 모델과 연결할 수 없습니다. 서비스 상태를 확인해 주세요."
 
 async def generate_chat_reply(
     user_message: str,
@@ -73,29 +124,40 @@ async def generate_chat_reply(
     custom_system_prompt: Optional[str] = None,
     timeout_sec: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Ollama API direct non-streaming call"""
-    cfg = _ollama_config()
-    target_model = model or cfg["model"]
+    """Unified LLM API non-streaming call"""
+    cfg = _get_llm_config()
+    target_model = _normalize_model(model or cfg["model"])
     messages = _build_messages(user_message, context, history, system_appendix, custom_system_prompt)
     
-    url = f"{cfg['base_url']}/api/chat"
-    payload = {
-        "model": target_model,
-        "messages": messages,
-        "stream": False,
-        "options": {
-            "temperature": float(temperature)
-        }
-    }
-
-    timeout = httpx.Timeout(timeout_sec or _timeout_seconds())
+    if cfg["provider"] == "litellm":
+        try:
+            response = await acompletion(
+                model=target_model,
+                messages=messages,
+                api_base=cfg["base_url"],
+                api_key=cfg.get("api_key"),
+                temperature=float(temperature),
+                timeout=timeout_sec or _timeout_seconds(),
+                stream=False
+            )
+            return {
+                "content": response.choices[0].message.content,
+                "provider": "litellm",
+                "model": target_model,
+                "fallback": False
+            }
+        except Exception as e:
+            logger.error(f"LiteLLM error: {e}")
+            return {"content": _local_fallback(user_message, context), "fallback": True}
     
+    # Ollama Fallback
+    url = f"{cfg['base_url']}/api/chat"
+    payload = {"model": target_model, "messages": messages, "stream": False, "options": {"temperature": float(temperature)}}
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout_sec or _timeout_seconds()) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
-            
             return {
                 "content": data["message"]["content"],
                 "provider": "ollama_direct",
@@ -103,13 +165,8 @@ async def generate_chat_reply(
                 "fallback": False
             }
     except Exception as e:
-        logger.error(f"Ollama direct error: {e}")
-        return {
-            "content": _local_fallback(user_message, context),
-            "provider": "local",
-            "model": "fallback",
-            "fallback": True
-        }
+        logger.error(f"Ollama error: {e}")
+        return {"content": _local_fallback(user_message, context), "fallback": True}
 
 async def stream_chat_reply(
     user_message: str,
@@ -120,41 +177,45 @@ async def stream_chat_reply(
     system_appendix: Optional[str] = None,
     custom_system_prompt: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
-    """Ollama API direct streaming call"""
-    cfg = _ollama_config()
-    target_model = model or cfg["model"]
+    """Unified LLM API streaming call"""
+    cfg = _get_llm_config()
+    target_model = _normalize_model(model or cfg["model"])
     messages = _build_messages(user_message, context, history, system_appendix, custom_system_prompt)
     
-    url = f"{cfg['base_url']}/api/chat"
-    payload = {
-        "model": target_model,
-        "messages": messages,
-        "stream": True,
-        "options": {
-            "temperature": float(temperature)
-        }
-    }
+    if cfg["provider"] == "litellm":
+        try:
+            response = await acompletion(
+                model=target_model,
+                messages=messages,
+                api_base=cfg["base_url"],
+                api_key=cfg.get("api_key"),
+                temperature=float(temperature),
+                timeout=_timeout_seconds(),
+                stream=True
+            )
+            async for chunk in response:
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield content
+            return
+        except Exception as e:
+            logger.error(f"LiteLLM stream error: {e}")
+            yield f"\n[LLM 연결 오류: {str(e)}]"
+            return
 
-    timeout = httpx.Timeout(_timeout_seconds())
-    
+    # Ollama Fallback
+    url = f"{cfg['base_url']}/api/chat"
+    payload = {"model": target_model, "messages": messages, "stream": True, "options": {"temperature": float(temperature)}}
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=_timeout_seconds()) as client:
             async with client.stream("POST", url, json=payload) as response:
-                if response.status_code != 200:
-                    error_text = await response.aread()
-                    raise RuntimeError(f"Ollama error {response.status_code}: {error_text.decode()}")
-                
                 async for line in response.aiter_lines():
-                    if not line:
-                        continue
+                    if not line: continue
                     try:
                         chunk = json.loads(line)
                         if "message" in chunk and "content" in chunk["message"]:
                             yield chunk["message"]["content"]
-                        if chunk.get("done"):
-                            break
-                    except json.JSONDecodeError:
-                        continue
+                    except: continue
     except Exception as e:
-        logger.error(f"Ollama direct stream error: {e}")
+        logger.error(f"Ollama stream error: {e}")
         yield f"\n[로컬 Ollama 연결 오류: {str(e)}]"

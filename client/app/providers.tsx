@@ -5,10 +5,17 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useState } from "react";
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  // React Query has been disabled at the page level.
-  // This provider is kept minimal for now to avoid breaking other potential consumers,
-  // but it no longer manages the main dashboard state.
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 60 * 1000,
+            refetchOnWindowFocus: false,
+          },
+        },
+      })
+  );
 
   return (
     <QueryClientProvider client={queryClient}>

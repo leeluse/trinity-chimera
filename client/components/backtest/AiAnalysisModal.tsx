@@ -36,8 +36,8 @@ export const AiAnalysisModal = ({ isOpen, onClose, isLoading, report }: AiAnalys
         </div>
         <div className="p-6 overflow-y-auto custom-scrollbar">
           {isLoading ? (
-            <div className="flex flex-col items-center py-16">
-              <div className="w-8 h-8 rounded-full border-2 border-purple-500/30 border-l-purple-500 animate-spin mb-4" />
+            <div className="flex flex-col items-center justify-center py-12">
+              <div className="w-8 h-8 rounded-full border-2 border-purple-500/30 border-l-purple-500 animate-spin mb-2" />
               <p className="text-purple-500 font-bold text-xs uppercase">Analyzing data...</p>
             </div>
           ) : (

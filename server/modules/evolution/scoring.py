@@ -10,36 +10,60 @@ def calculate_trinity_score(
     win_rate: float = 0
 ) -> float:
     """
-    Trinity Score 공식:
-    Return(40%) + Sharpe(35%) + Safety/MDD(25%)
+    Trinity Score — 0~100 점 척도 (가중 합산)
+
+    각 컴포넌트를 동일 스케일(0~100)로 정규화한 뒤 가중치 적용.
+
+    - Return  (40%): -50%~+100% 수익률을 0~40 로 선형 매핑
+    - Sharpe  (35%): 0~3.0 범위를 0~35 로 매핑 (음수 = 0)
+    - MDD     (25%): MDD 0%~-50% 를 25~0 으로 역매핑
+
+    Args:
+        total_return:  소수 기준 (예: 0.15 = 15%)
+        sharpe:        샤프 비율 (무차원)
+        max_drawdown:  소수 기준, 음수 (예: -0.20 = -20%)
+        win_rate:      미사용, 하위호환 유지
     """
-    # 1. Return Component (40%) - 수익률
-    return_comp = total_return * 0.4
-    
-    # 2. Sharpe Component (35%) - 위험 대비 수익률 (샤프 25 기준 정규화)
-    sharpe_comp = sharpe * 25 * 0.35
-    
-    # 3. MDD Component (25%) - 낙폭 방어력 (MDD -30% 이내 시 가점)
-    # MDD가 -0.3보다 크면(즉 -20% 등) 더 안전한 것으로 간주
-    mdd_val = max(max_drawdown, -0.3)
-    mdd_comp = (1 + mdd_val) * 100 * 0.25
-    
+    # 1. Return Component (40%) — [-50%, +100%] → [0, 40]
+    ret_pct = max(-0.5, min(1.0, total_return))       # clamp
+    return_comp = ((ret_pct + 0.5) / 1.5) * 40.0     # -50%→0, +100%→40
+
+    # 2. Sharpe Component (35%) — [0, 3.0] → [0, 35]
+    sharpe_comp = max(0.0, min(35.0, (sharpe / 3.0) * 35.0))
+
+    # 3. MDD Component (25%) — [0%, -50%] → [25, 0]
+    mdd_abs = abs(min(0.0, max_drawdown))             # 0 → 0, -0.5 → 0.5
+    mdd_comp = max(0.0, (1.0 - mdd_abs / 0.5) * 25.0)
+
     return float(return_comp + sharpe_comp + mdd_comp)
 
 def evaluate_improvement(baseline_metrics: Dict[str, Any], candidate_metrics: Dict[str, Any]) -> bool:
-    """후보 전략이 기준 전략보다 개선되었는지 판단"""
+    """후보 전략이 기준 전략보다 개선되었는지 판단.
+
+    baseline MDD=0, return=0인 '빈 전략' 케이스:
+    - trinity_score = 25 (MDD 컴포넌트만 만점)
+    - 실제로 거래하는 후보는 MDD가 생겨 항상 불리 → 버그
+    - 수정: baseline의 거래 수가 0이면 후보가 거래만 해도 채택.
+    """
+    baseline_trades = int(baseline_metrics.get('total_trades', 0) or 0)
+    candidate_trades = int(candidate_metrics.get('total_trades', 0) or 0)
+
+    if baseline_trades == 0:
+        return candidate_trades > 0
+
+    if candidate_trades == 0:
+        return False
+
     baseline_score = calculate_trinity_score(
         baseline_metrics.get('total_return', 0),
         baseline_metrics.get('sharpe_ratio', 0),
         baseline_metrics.get('max_drawdown', 0)
     )
-    
     candidate_score = calculate_trinity_score(
         candidate_metrics.get('total_return', 0),
         candidate_metrics.get('sharpe_ratio', 0),
         candidate_metrics.get('max_drawdown', 0)
     )
-    
     return candidate_score > baseline_score
 
 

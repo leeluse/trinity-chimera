@@ -11,17 +11,18 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 
-# [CRITICAL] Load .env variables BEFORE importing any services
+# [CRITICAL] Load root .env variables BEFORE importing any services
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(PROJECT_ROOT / ".env", override=False)
-load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 # Routes - New Modular Structure
 from server.modules.chat.router import router as chat_router
 from server.modules.evolution.router import router as evolution_router, dashboard_router
 from server.modules.engine.router import router as engine_router
+from server.modules.settings.router import router as settings_router
 from server.modules.evolution.orchestrator import get_evolution_orchestrator
 from server.modules.evolution.constants import AGENT_IDS, ACTIVE_AGENT_IDS
+from server.shared.market.metrics_buffer import get_metrics_buffer
 
 # Logging setup
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
@@ -73,6 +74,7 @@ app.include_router(chat_router, prefix="/api")
 app.include_router(evolution_router, prefix="/api")  # /api/agents ...
 app.include_router(dashboard_router, prefix="/api")  # /api/dashboard ...
 app.include_router(engine_router, prefix="/api/backtest")
+app.include_router(settings_router, prefix="/api/system")
 
 # Scheduler setup
 scheduler = AsyncIOScheduler()
@@ -134,6 +136,7 @@ async def serve_client():
 async def get_system_status():
     """시스템 상태 정보 반환"""
     orchestrator = get_evolution_orchestrator()
+    metrics_buffer = get_metrics_buffer()
 
     status = {
         "agents": {},
@@ -143,8 +146,8 @@ async def get_system_status():
     }
 
     for agent_id in AGENT_IDS:
-        buffer_stats = orchestrator.metrics_buffer.get_buffer_status(agent_id)
-        evolution_state = orchestrator.states.get(agent_id, "IDLE")
+        buffer_stats = metrics_buffer.get_buffer_status(agent_id)
+        evolution_state = orchestrator.agent_manager.get_state(agent_id).value
 
         status["agents"][agent_id] = {
             "buffer": buffer_stats,

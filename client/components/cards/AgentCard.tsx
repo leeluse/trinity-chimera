@@ -55,10 +55,9 @@ export default function AgentCard({
 
   return (
     <div
-      onClick={onClick}
-      className={`relative overflow-hidden cursor-pointer rounded-xl p-[14px] border ${isActive
-          ? "bg-white/[0.08] backdrop-blur-2xl border-white/20"
-          : "bg-white/[0.02] backdrop-blur-md border-white/[0.05]"
+      className={`relative overflow-hidden rounded-xl p-[14px] border ${isActive
+        ? "bg-white/[0.08] backdrop-blur-2xl border-white/20"
+        : "bg-white/[0.02] backdrop-blur-md border-white/[0.05]"
         }`}
       style={{
         boxShadow: isActive ? `0 15px 35px -5px color-mix(in srgb, ${color}, transparent 80%), 0 20px 40px -15px rgba(0,0,0,0.3)` : 'none'

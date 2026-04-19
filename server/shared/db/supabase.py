@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 import logging
@@ -517,44 +518,109 @@ class SupabaseManager:
     # Chat History methods
     # -----------------------------
     async def save_chat_message(
-        self, 
-        session_id: str, 
-        role: str, 
-        content: str, 
-        msg_type: str = "text", 
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        msg_type: str = "text",
         data: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """
-        Save a chat message to Supabase.
-        """
+    ) -> Optional[str]:
         try:
             payload = {
                 "session_id": session_id,
                 "role": role,
-                "content": content,
+                "content": content or "",
                 "type": msg_type,
                 "data": data or {}
             }
-            self.client.table("chat_messages").insert(payload).execute()
+            res = await asyncio.to_thread(
+                lambda: self.client.table("chat_messages").insert(payload).execute()
+            )
+            data_out = res.data or []
+            if data_out:
+                return str(data_out[0].get("id"))
+            return None
+        except Exception as e:
+            logger.exception("Error saving chat message (session=%s type=%s): %s", session_id, msg_type, e)
+            return None
+
+    async def update_chat_message(self, message_id: str, content: str, msg_type: Optional[str] = None, data: Optional[Dict[str, Any]] = None) -> bool:
+        try:
+            payload: Dict[str, Any] = {"content": content or ""}
+            if msg_type:
+                payload["type"] = msg_type
+            if data:
+                payload["data"] = data
+            
+            await asyncio.to_thread(
+                lambda: self.client.table("chat_messages").update(payload).eq("id", message_id).execute()
+            )
             return True
         except Exception as e:
-            logger.error("Error saving chat message: %s", e)
+            logger.error(f"Error updating chat message {message_id}: {e}")
             return False
 
-    async def get_chat_history(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-        """
-        Fetch chat history for a given session.
-        """
+    async def get_chat_history(self, session_id: Optional[str] = None, limit: int = 200) -> List[Dict[str, Any]]:
         try:
-            res = (
-                self.client.table("chat_messages")
-                .select("*")
-                .eq("session_id", session_id)
-                .order("created_at", desc=False) # 오래된 순서대로 (대화 흐름)
-                .limit(limit)
-                .execute()
-            )
+            def _query():
+                q = self.client.table("chat_messages").select("*")
+                if session_id:
+                    q = q.eq("session_id", session_id)
+                
+                # type이 'thought'가 아니거나 NULL인 것을 모두 가져오도록 (Postgrest .or 사용)
+                q = q.or_(f"type.neq.thought,type.is.null")
+                
+                return q.order("created_at", desc=False).limit(limit).execute()
+
+            res = await asyncio.to_thread(_query)
             return res.data or []
         except Exception as e:
-            logger.error("Error fetching chat history: %s", e)
+            logger.exception("Error fetching chat history (session=%s): %s", session_id, e)
+            return []
+
+    async def delete_chat_messages(self, session_id: str) -> bool:
+        """특정 세션의 채팅 메시지 전체 삭제"""
+        try:
+            await asyncio.to_thread(
+                lambda: self.client.table("chat_messages").delete().eq("session_id", session_id).execute()
+            )
+            return True
+        except Exception as e:
+            logger.exception("Error deleting chat messages (session=%s): %s", session_id, e)
+            return False
+
+    async def list_chat_sessions(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """최근 세션 목록 + 메시지 수 조회"""
+        try:
+            def _query():
+                # To find unique sessions efficiently without a specialized 'sessions' table,
+                # we fetch latest messages. We reduce payload by selecting only necessary columns.
+                return (
+                    self.client.table("chat_messages")
+                    .select("session_id,created_at")
+                    .or_("type.neq.thought,type.is.null")
+                    .order("created_at", desc=True)
+                    .limit(500)
+                    .execute()
+                )
+            res = await asyncio.to_thread(_query)
+            rows = res.data or []
+            
+            seen: dict = {}
+            for row in rows:
+                sid = row["session_id"]
+                if not sid: continue
+                if sid not in seen:
+                    seen[sid] = {
+                        "session_id": sid, 
+                        "last_message_at": row["created_at"], 
+                        "count": 0
+                    }
+                seen[sid]["count"] += 1
+            
+            # Sort by latest message first
+            sessions = sorted(seen.values(), key=lambda x: x["last_message_at"], reverse=True)
+            return sessions[:limit]
+        except Exception as e:
+            logger.exception("Error listing chat sessions: %s", e)
             return []

@@ -14,10 +14,10 @@ import { COLORS } from "@/constants";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
+import { useDashboardStore } from "@/store/useDashboardStore";
+
 interface DashboardRightPanelProps {
   agentIds: string[];
-  activeAgent: string;
-  setActiveAgent: (name: string) => void;
   names: string[];
   metricsData?: DashboardMetrics;
   progress?: DashboardProgress;
@@ -41,8 +41,6 @@ export default function DashboardRightPanel(props: DashboardRightPanelProps) {
 
 export function DashboardRightPanelContent({
   agentIds,
-  activeAgent,
-  setActiveAgent,
   names,
   metricsData,
   progress,
@@ -51,6 +49,7 @@ export function DashboardRightPanelContent({
   automationStatus,
   onToggleAutomation,
 }: DashboardRightPanelProps) {
+  const { logActiveAgent: activeAgent, setLogActiveAgent: setActiveAgent } = useDashboardStore();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const view = (searchParams.get("view") || "").toLowerCase();
@@ -59,7 +58,6 @@ export function DashboardRightPanelContent({
   const isLogsView = pathname === "/" && (view === "" || view === "logs");
 
   const visibleAgentIds = agentIds.length > 0 ? agentIds : ["momentum_hunter"];
-  const normalizeRatio = (value: number): number => (Math.abs(value) > 1 ? value / 100 : value);
   const formatMetricDisplay = (metric: string, value: number | undefined): string => {
     if (typeof value !== "number" || Number.isNaN(value)) return "-";
     if (metric === "total_trades") return String(Math.round(value));
@@ -90,11 +88,6 @@ export function DashboardRightPanelContent({
   };
 
   const dbLogsData = (decisionLogs || [])
-    .filter(event => {
-      const result = (event.meta?.decision?.result || "").toLowerCase();
-      // Only show accepted or those with strategy_id (meaning it was successful)
-      return result === 'accepted' || !!event.meta?.decision?.strategy_id;
-    })
     .map((event) => {
       const decision = event.meta?.decision || {};
       const improvements = Array.isArray(decision.improvement_summary) ? decision.improvement_summary : [];
@@ -103,6 +96,9 @@ export function DashboardRightPanelContent({
       const agentId = event.agent_id || "system";
       const agentName = event.agent_label || getAgentName(agentId);
       const colorIdx = Math.max(0, visibleAgentIds.indexOf(agentId));
+
+      const isRejected = (decision.result || "").toLowerCase().includes("reject");
+      const isAccepted = (decision.result || "").toLowerCase() === "accepted";
 
       const detailLines: string[] = [];
       if (decision.reason) detailLines.push(`사유: ${decision.reason}`);
@@ -120,10 +116,10 @@ export function DashboardRightPanelContent({
         agentId,
         agentName,
         avatar: (agentName || "A").charAt(0),
-        avatarBg: "rgba(255,255,255,0.05)",
-        color: `var(--agent-${(colorIdx % 4) + 1})`,
+        avatarBg: isRejected ? "rgba(239, 68, 68, 0.1)" : "rgba(255,255,255,0.05)",
+        color: isRejected ? "#ef4444" : (isAccepted ? "#10b981" : `var(--agent-${(colorIdx % 4) + 1})`),
         time: new Date(event.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
-        analysis: `[${phaseLabel}] ${resultLabel}`,
+        analysis: isRejected ? `[거절] ${decision.reason || resultLabel}` : `[${phaseLabel}] ${resultLabel}`,
         reason: detailLines.length > 0 ? detailLines.join("\n") : event.message,
         params: improvements.slice(0, 6).map((item) => {
           const delta = Number(item.delta || 0);
@@ -141,14 +137,24 @@ export function DashboardRightPanelContent({
   const logsData = dbLogsData;
   const activeAgentName = getAgentName(activeAgent);
 
-  const filteredLogs = (activeAgent === "전체" || activeAgent === "ALL")
+  const isAllFilter = !activeAgent || 
+                      activeAgent === "전체" || 
+                      activeAgent === "ALL" || 
+                      activeAgent === "all";
+
+  const filteredLogs = isAllFilter
     ? logsData
     : logsData.filter(
         (log) =>
           log.agentId === activeAgent ||
           log.agentName === activeAgent ||
-          log.agentName === activeAgentName
+          log.agentName === activeAgentName ||
+          (log.meta?.decision?.agent_alias === activeAgent)
       );
+
+  const displayLogs = (filteredLogs.length === 0 && logsData.length > 0 && isAllFilter) 
+    ? logsData 
+    : filteredLogs;
 
   return (
     <>
@@ -175,7 +181,7 @@ export function DashboardRightPanelContent({
       {isLogsView && (
         <div className="flex-1 overflow-y-auto min-h-0 bg-[#060912]/30 no-scrollbar flex flex-col">
           <div className="flex flex-col gap-4 p-4">
-            {filteredLogs.map((log, idx) => (
+            {displayLogs.map((log, idx) => (
               <LogCard
                 key={idx}
                 {...log}
@@ -183,7 +189,7 @@ export function DashboardRightPanelContent({
                 isActive={activeAgent === log.agentId}
               />
             ))}
-            {filteredLogs.length === 0 && (
+            {displayLogs.length === 0 && (
               <div className="py-20 text-center opacity-30">
                 <p className="text-xs italic">해당 에이전트의 최근 로그가 없습니다.</p>
               </div>

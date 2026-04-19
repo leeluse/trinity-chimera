@@ -131,7 +131,7 @@ export default function LogCard({
             </div>
             <div className="grid grid-cols-2 gap-2">
               {params.map((p, idx) => (
-                <div key={idx} className="bg-white/[0.04] rounded-lg py-1.5 px-2.5 hover:bg-white/[0.07] transition-colors flex flex-col gap-1">
+                <div key={idx} className="bg-white/[0.04] rounded-lg py-1.5 px-2.5 transition-colors flex flex-col gap-1">
                   <div className="text-[10px] font-bold text-[#4a5a7a] font-mono tracking-tight">{p.name}</div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 font-mono text-[11px]">

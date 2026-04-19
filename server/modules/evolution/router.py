@@ -167,13 +167,13 @@ def _normalize_decision_event(
 ) -> Dict[str, Any]:
     def _guess_agent_alias(name: str) -> str:
         value = (name or "").lower()
-        if any(token in value for token in ("minara", "momentum", "hunter")):
+        if any(token in value for token in ("momentum", "hunter")):
             return "momentum_hunter"
-        if any(token in value for token in ("arbiter", "mean", "revert")):
+        if any(token in value for token in ("reverter", "mean")):
             return "mean_reverter"
-        if any(token in value for token in ("nim-alpha", "macro", "trend")):
+        if any(token in value for token in ("macro", "trader")):
             return "macro_trader"
-        if any(token in value for token in ("chimera", "chaos", "scalp")):
+        if any(token in value for token in ("chaos", "agent", "scalp")):
             return "chaos_agent"
         return ""
 
@@ -456,14 +456,23 @@ async def get_dashboard_metrics():
     for agent_id in ACTIVE_AGENT_IDS:
         agent_row = manager._resolve_agent_row(agent_id) or {}
         name = str(agent_row.get("name") or agent_id)
-        strategy_id = agent_row.get("current_strategy_id") or _fallback_current_strategy_id(manager, agent_row)
+        
+        # 1. 최신 전략 및 메트릭 정보 조회
+        strategy_res = manager.client.table("strategies").select("id, params").eq("agent_id", agent_row.get("id")).order("version", desc=True).limit(1).execute()
+        strategy_row = strategy_res.data[0] if strategy_res.data else {}
+        strategy_id = agent_row.get("current_strategy_id") or strategy_row.get("id")
+        
+        # 2. 백테스트 결과 테이블 조회
         backtest_row = _fetch_latest_backtest_row(manager, strategy_id) if strategy_id else None
 
-        current_score = _safe_float((backtest_row or {}).get("trinity_score"), 0.0)
-        current_return = _safe_float((backtest_row or {}).get("return_val"), 0.0)
-        current_sharpe = _safe_float((backtest_row or {}).get("sharpe"), 0.0)
-        current_mdd = _safe_float((backtest_row or {}).get("mdd"), 0.0)
-        current_win_rate = _safe_float((backtest_row or {}).get("win_rate"), 0.0)
+        # 3. 데이터 우선순위: 백테스트 결과 > 전략 내 저장된 메트릭 > 기본값 0.0
+        s_metrics = strategy_row.get("metrics") or strategy_row.get("params", {}).get("metrics") or {}
+        
+        current_score = _safe_float((backtest_row or {}).get("trinity_score"), _safe_float(s_metrics.get("trinity_score"), 0.0))
+        current_return = _safe_float((backtest_row or {}).get("return_val"), _safe_float(s_metrics.get("total_return"), 0.0))
+        current_sharpe = _safe_float((backtest_row or {}).get("sharpe"), _safe_float(s_metrics.get("sharpe_ratio"), 0.0))
+        current_mdd = _safe_float((backtest_row or {}).get("mdd"), _safe_float(s_metrics.get("max_drawdown"), 0.0))
+        current_win_rate = _safe_float((backtest_row or {}).get("win_rate"), _safe_float(s_metrics.get("win_rate"), 0.0))
 
         scores.append(current_score)
         if current_score > best_score:

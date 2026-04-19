@@ -1,8 +1,8 @@
 import logging
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Query, Depends
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
-from fastapi.responses import StreamingResponse
 
 from server.shared.db.supabase import SupabaseManager
 from server.modules.chat.handler import ChatHandler
@@ -16,16 +16,40 @@ class ChatRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
     history: Optional[List[Dict[str, Any]]] = None
 
+_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+
 @router.get("/history")
-async def get_chat_history(session_id: str = Query("default_session"), limit: int = 50):
-    """과거 대화 기록 조회"""
+async def get_chat_history(session_id: Optional[str] = Query(None), limit: int = 200):
+    """채팅 내역 조회 (session_id 없으면 전체 세션 통합 조회)"""
     try:
         db = SupabaseManager()
         history = await db.get_chat_history(session_id, limit)
-        return {"success": True, "messages": history}
+        return JSONResponse(content={"success": True, "messages": history}, headers=_NO_CACHE)
     except Exception as e:
-        logger.error(f"History fetch error: {e}")
-        return {"success": False, "error": str(e)}
+        logger.exception(f"History fetch error: {e}")
+        return JSONResponse(content={"success": False, "error": str(e)}, headers=_NO_CACHE)
+
+@router.delete("/history")
+async def delete_chat_history(session_id: str = Query(...)):
+    """세션 채팅 기록 전체 삭제"""
+    try:
+        db = SupabaseManager()
+        ok = await db.delete_chat_messages(session_id)
+        return JSONResponse(content={"success": ok}, headers=_NO_CACHE)
+    except Exception as e:
+        logger.exception(f"History delete error: {e}")
+        return JSONResponse(content={"success": False, "error": str(e)}, headers=_NO_CACHE)
+
+@router.get("/sessions")
+async def list_chat_sessions(limit: int = 30):
+    """채팅 세션 목록 조회"""
+    try:
+        db = SupabaseManager()
+        sessions = await db.list_chat_sessions(limit)
+        return JSONResponse(content={"success": True, "sessions": sessions}, headers=_NO_CACHE)
+    except Exception as e:
+        logger.exception(f"Sessions fetch error: {e}")
+        return JSONResponse(content={"success": False, "error": str(e)}, headers=_NO_CACHE)
 
 @router.post("/run")
 async def chat_run(req: ChatRequest, handler: ChatHandler = Depends()):

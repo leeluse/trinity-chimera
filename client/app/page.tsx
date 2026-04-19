@@ -28,6 +28,8 @@ import {
 // Externalized Constants/Types/Styles
 import { COLORS, NAMES } from "@/constants";
 import { MetricKey } from "@/types";
+import { useDashboardStore } from "@/store/useDashboardStore";
+import { useDashboardQueries, useAgentTimeseries } from "@/hooks/useDashboardQueries";
 
 const DAYS = 96; // 96 intervals of 15 minutes = 24 hours
 const labels: string[] = [];
@@ -45,134 +47,70 @@ for (let i = 0; i < 5; i++) {
 export default function Dashboard() {
   const chartRef = useRef<HTMLCanvasElement | null>(null);
   const chartInstance = useRef<Chart | null>(null);
-  const [currentMetric, setCurrentMetric] = useState<MetricKey>("score");
-  const [chartActiveAgent, setChartActiveAgent] = useState("ALL");
-  const [logActiveAgent, setLogActiveAgent] = useState("ALL");
-
-  // React Query 대체 상태 및 로딩
-  const [dashboardProgress, setDashboardProgress] = useState<DashboardProgress | null>(null);
-  const [metricsData, setMetricsData] = useState<DashboardMetrics | null>(null);
-  const [evolutionEvents, setEvolutionEvents] = useState<EvolutionLogEvent[]>([]);
-  const [decisionLogs, setDecisionLogs] = useState<DecisionLogEvent[]>([]);
-  const [automationStatus, setAutomationStatus] = useState<{enabled: boolean, status: string, next_run_time?: string | null} | null>(null);
-  const [timeseriesData, setTimeseriesData] = useState<Record<string, number[]>>({});
-  const [runtimeAgentIds, setRuntimeAgentIds] = useState<string[]>(Array.from(DEFAULT_AGENT_IDS.slice(0, 1)));
   
-  const [isLoadingProgress, setIsLoadingProgress] = useState(true);
-  const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
-  const [isLoadingEvents, setIsLoadingEvents] = useState(true);
+  const { 
+    currentMetric,
+    chartActiveAgent,
+    logActiveAgent,
+    setLogActiveAgent,
+    setActiveAgent
+  } = useDashboardStore();
 
-  // 데이터 fetch 로직
-  const fetchAllData = async () => {
-    try {
-      const [prog, met, evoLogs, dbLogs, auto] = await Promise.all([
-        APIClient.getDashboardProgress(),
-        APIClient.getDashboardMetrics(),
-        APIClient.getEvolutionLog(220),
-        APIClient.getDecisionLogs(260),
-        APIClient.getAutomationStatus()
-      ]);
-      setDashboardProgress(prog);
-      setMetricsData(met);
-      setEvolutionEvents(evoLogs);
-      setDecisionLogs(dbLogs);
-      setAutomationStatus(auto);
-      const idsFromProgress = (prog.active_agents && prog.active_agents.length > 0)
-        ? prog.active_agents
-        : (prog.agents || []);
-      const idsFromMetrics = Object.keys(met?.agents || {});
-      const nextIds = idsFromProgress.length > 0
-        ? idsFromProgress
-        : (idsFromMetrics.length > 0 ? idsFromMetrics : Array.from(DEFAULT_AGENT_IDS));
-      setRuntimeAgentIds(nextIds);
-      setChartActiveAgent((prev) => (prev !== "ALL" && !nextIds.includes(prev) ? "ALL" : prev));
-      setLogActiveAgent((prev) => (prev !== "ALL" && !nextIds.includes(prev) ? "ALL" : prev));
-      setIsLoadingProgress(false);
-      setIsLoadingMetrics(false);
-      setIsLoadingEvents(false);
-    } catch (e) {
-      console.error("Data fetch error:", e);
-    }
-  };
+  // TanStack Query Hooks
+  const {
+    stats,
+    isLoading: isLoadingInitial,
+    evolutionEvents,
+    decisionLogs,
+    automationStatus,
+    metricsData,
+    dashboardProgress,
+    toggleAutomation
+  } = useDashboardQueries();
 
-  const fetchTimeseries = async (metric: MetricKey, ids: string[]) => {
-    const targetIds = ids.length > 0 ? ids : runtimeAgentIds;
-    const results: Record<string, number[]> = {};
-    await Promise.all(targetIds.map(async (id) => {
-      try {
-        results[id] = await APIClient.getAgentTimeseries(id, metric);
-      } catch {
-        results[id] = [];
-      }
-    }));
-    setTimeseriesData(results);
-  };
+  // Runtime Agent IDs derivation
+  const runtimeAgentIds = useMemo(() => {
+    if (!dashboardProgress && !metricsData) return Array.from(DEFAULT_AGENT_IDS.slice(0, 1));
+    const idsFromProgress = (dashboardProgress?.active_agents && dashboardProgress.active_agents.length > 0)
+      ? dashboardProgress.active_agents
+      : (dashboardProgress?.agents || []);
+    const idsFromMetrics = Object.keys(metricsData?.agents || {});
+    return idsFromProgress.length > 0
+      ? idsFromProgress
+      : (idsFromMetrics.length > 0 ? idsFromMetrics : Array.from(DEFAULT_AGENT_IDS));
+  }, [dashboardProgress, metricsData]);
 
-  // 폴링 설정
-  useEffect(() => {
-    fetchAllData();
-    const mainInterval = setInterval(fetchAllData, 4000);
+  const { data: timeseriesData = {} } = useAgentTimeseries(currentMetric, runtimeAgentIds);
 
-    return () => {
-      clearInterval(mainInterval);
-    };
-  }, []);
-
-  const runtimeAgentSignature = runtimeAgentIds.join("|");
-  useEffect(() => {
-    fetchTimeseries(currentMetric, runtimeAgentIds);
-    const tsInterval = setInterval(() => fetchTimeseries(currentMetric, runtimeAgentIds), 4000);
-    return () => {
-      clearInterval(tsInterval);
-    };
-  }, [currentMetric, runtimeAgentSignature]);
-
-  const isLoading = isLoadingProgress || isLoadingMetrics || isLoadingEvents;
-  const [isLoopRunning, setIsLoopRunning] = useState(false);
-  const [loopNotice, setLoopNotice] = useState("");
   const [labelPositions, setLabelPositions] = useState<any[]>([]);
   const labelPositionsRef = useRef<any[]>([]);
 
   const metricsDataSignature = JSON.stringify(metricsData?.agents);
   const timeseriesSignature = JSON.stringify(timeseriesData);
+  const runtimeAgentSignature = runtimeAgentIds.join("|");
 
   const agentNames = useMemo(() => {
-    return runtimeAgentIds.map((id, idx) => metricsData?.agents[id]?.name || NAMES[idx] || id);
+    return runtimeAgentIds.map((id, idx) => {
+      // 1. DB에서 가져온 실제 이름이 있는지 확인
+      const realName = metricsData?.agents[id]?.name;
+      if (realName && realName !== id) return realName;
+      
+      // 2. ID 자체가 사람이 읽기 좋은 형태인 경우 (예: Momentum Hunter)
+      if (id.includes("_") || id.includes(" ")) {
+        return id.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+      }
+      
+      // 3. 마지막 폴백: NAMES 배열의 값 (NaN)
+      return NAMES[idx] || "NaN";
+    });
   }, [metricsDataSignature, runtimeAgentSignature]);
 
   const chartNames = useMemo(() => {
     return [...agentNames, "BTC BnH"];
   }, [agentNames]);
 
-  useEffect(() => {
-    if (!loopNotice) return;
-    const clearTimer = window.setTimeout(() => setLoopNotice(""), 7000);
-    return () => window.clearTimeout(clearTimer);
-  }, [loopNotice]);
-
-  const handleRunLoop = async () => {
-    try {
-      setIsLoopRunning(true);
-      const result = await APIClient.runEvolutionLoop();
-      setLoopNotice(`ITER #${result.iteration} · ${result.queued_agents.length} agents`);
-      // 즉시 새로고침
-      await fetchAllData();
-    } catch (error) {
-      console.error("Run loop 실행 실패:", error);
-      setLoopNotice("Run loop 실패");
-    } finally {
-      setIsLoopRunning(false);
-    }
-  };
-
-  const handleToggleAutomation = async (enabled: boolean) => {
-    try {
-      await APIClient.setAutomationStatus(enabled);
-      const newStatus = await APIClient.getAutomationStatus();
-      setAutomationStatus(newStatus);
-    } catch (error) {
-      console.error("자동화 상태 변경 실패:", error);
-    }
+  const handleToggleAutomation = (enabled: boolean) => {
+    toggleAutomation(enabled);
   };
 
   const buildDynamicDatasets = (metric: MetricKey, names: string[]) => {
@@ -204,18 +142,18 @@ export default function Dashboard() {
         const metricField = metricFieldMap[metric];
         const agentMetrics = metricsData.agents[id as keyof typeof metricsData.agents];
         const currentVal = agentMetrics?.[metricField] ?? 0;
-        
+
         if (timeseriesData && timeseriesData[id] && timeseriesData[id].length > 0) {
-           const history = timeseriesData[id];
-           if (history.length >= DAYS) {
-             data = history.slice(-DAYS);
-           } else {
-             // Pad beginning with first value or 0 if shorter than DAYS
-             const padding = Array(DAYS - history.length).fill(history[0] || 0);
-             data = [...padding, ...history];
-           }
+          const history = timeseriesData[id];
+          if (history.length >= DAYS) {
+            data = history.slice(-DAYS);
+          } else {
+            // Pad beginning with first value or 0 if shorter than DAYS
+            const padding = Array(DAYS - history.length).fill(history[0] || 0);
+            data = [...padding, ...history];
+          }
         } else {
-           data = Array(DAYS).fill(currentVal || 0);
+          data = Array(DAYS).fill(currentVal || 0);
         }
       } else {
         data = Array(DAYS).fill(0);
@@ -312,8 +250,6 @@ export default function Dashboard() {
         <PageLayout.Side>
           <DashboardRightPanel
             agentIds={runtimeAgentIds}
-            activeAgent={logActiveAgent}
-            setActiveAgent={setLogActiveAgent}
             names={agentNames}
             metricsData={metricsData ?? undefined}
             progress={dashboardProgress ?? undefined}
@@ -326,39 +262,17 @@ export default function Dashboard() {
 
         <PageLayout.Main>
           <PageHeader
-            isLoading={isLoading}
+            isLoading={isLoadingInitial}
             statusText={dashboardProgress ? `${dashboardProgress.active_improvements}개 개선 진행` : 'System Live'}
-            statusColor={(dashboardProgress?.active_improvements || 0) > 0 || isLoopRunning ? "blue" : "green"}
-            extra={
-              <div className="flex items-center gap-2">
-                {loopNotice && (
-                  <span className="hidden sm:inline-flex rounded-full border border-[#244c8c]/50 bg-[#102340]/50 px-3 py-1 text-[10px] font-bold tracking-[0.12em] text-[#8fb6ff]">
-                    {loopNotice}
-                  </span>
-                )}
-                <button
-                  onClick={handleRunLoop}
-                  disabled={isLoopRunning}
-                  className={`rounded-xl border px-3 py-1.5 text-[10px] font-black tracking-[0.16em] transition-all ${
-                    isLoopRunning
-                      ? "cursor-not-allowed border-[#2b4e87]/40 bg-[#13284a]/45 text-[#5c84c2]"
-                      : "border-[#6f4fff]/35 bg-[#2a1f56]/60 text-[#c7b6ff] hover:border-[#7f65ff]/70 hover:bg-[#34256d]/70"
-                  }`}
-                >
-                  {isLoopRunning ? "LOOPING..." : "RUN LOOP"}
-                </button>
-              </div>
-            }
+            statusColor={(dashboardProgress?.active_improvements || 0) > 0 ? "blue" : "green"}
           />
 
           <div className="relative px-6 py-2">
             <div className="flex flex-col gap-4 relative z-10">
-              <MetricSelector currentMetric={currentMetric} setCurrentMetric={setCurrentMetric} />
+              <MetricSelector />
 
               <AgentsList
                 agentIds={runtimeAgentIds}
-                activeAgent={chartActiveAgent}
-                setActiveAgent={setChartActiveAgent}
                 names={agentNames}
                 metrics={metricsData?.agents}
               />

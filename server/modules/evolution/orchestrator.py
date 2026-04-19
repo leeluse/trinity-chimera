@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -48,6 +50,17 @@ class EvolutionOrchestrator:
         self.memory = EvolutionWikiMemory()
         self._manual_iteration = 0
 
+        # per-agent 동시 실행 방지 Lock
+        self._agent_locks: Dict[str, asyncio.Lock] = {}
+
+        # LLM Circuit Breaker: 연속 실패 N회 시 일시 중단
+        self._llm_consecutive_failures: int = 0
+        self._llm_backoff_until: float = 0.0
+        _LLM_FAILURE_THRESHOLD = 5
+        _LLM_BACKOFF_SECONDS = 300
+        self._LLM_FAILURE_THRESHOLD = _LLM_FAILURE_THRESHOLD
+        self._LLM_BACKOFF_SECONDS = _LLM_BACKOFF_SECONDS
+
         # 성과 요약 통계
         self.stats = {
             "total": 0,
@@ -91,6 +104,26 @@ class EvolutionOrchestrator:
 
         label = self.agent_manager.resolve_label(agent_id)
 
+        # 0-a) per-agent 중복 실행 방지
+        if agent_id not in self._agent_locks:
+            self._agent_locks[agent_id] = asyncio.Lock()
+        lock = self._agent_locks[agent_id]
+        if lock.locked():
+            logger.info(f"[{label}] 이미 진화 사이클 실행 중, 스킵합니다.")
+            return
+
+        # 0-b) LLM Circuit Breaker: 연속 실패 임계 초과 시 대기
+        if time.time() < self._llm_backoff_until:
+            remaining = int(self._llm_backoff_until - time.time())
+            logger.warning(f"[{label}] LLM Circuit Breaker 활성 — {remaining}초 후 재시도.")
+            self.agent_manager.add_event(
+                "warning",
+                "skipped",
+                f"[{label}] LLM 연속 실패로 Circuit Breaker 작동 중 ({remaining}초 남음). 자동 해제 대기.",
+                agent_id,
+            )
+            return
+
         # 1) 트리거 체크
         if not force and not await self.trigger_engine.check_trigger(agent_id):
             logger.info(f"[{label}] 트리거 미충족, 스킵합니다.")
@@ -102,6 +135,10 @@ class EvolutionOrchestrator:
             )
             return
 
+        async with lock:
+            await self._run_evolution_cycle_inner(agent_id, label, force)
+
+    async def _run_evolution_cycle_inner(self, agent_id: str, label: str, force: bool):
         self.stats["total"] += 1
         self.agent_manager.set_state(agent_id, EvolutionState.TRIGGERED, "진화 트리거 통과")
 
@@ -117,6 +154,17 @@ class EvolutionOrchestrator:
             constitution = self.memory.load_constitution()
             memory_cfg = constitution.get("memory", {})
             budgets_cfg = constitution.get("budgets", {})
+
+            # L2 트리거: 현재 trinity_score가 목표의 80% 미달 시 HIGH 강도 변이
+            baseline_trinity = float(baseline_metrics.get("trinity_score", 0) or 0)
+            target_score = float((constitution.get("hard_gates") or {}).get("min_trinity_score", 30.0))
+            if self.trigger_engine.check_performance_decay(baseline_trinity, target_score, threshold=0.8):
+                trigger_level = "L2"
+            elif baseline_trinity == 0 or int(baseline_metrics.get("total_trades", 0)) == 0:
+                trigger_level = "L2"   # 전략 없음 = 최고 강도
+            else:
+                trigger_level = "L4"   # 일반 주기적 업데이트
+            evolution_intensity = self.trigger_engine.get_intensity(trigger_level)
 
             max_candidates = max(1, min(int(budgets_cfg.get("max_candidates_per_cycle", 5)), 12))
             max_llm_calls = max(1, min(int(budgets_cfg.get("max_llm_calls_per_cycle", 5)), 12))
@@ -185,6 +233,7 @@ class EvolutionOrchestrator:
                 )
 
                 memory_context = self.memory.build_prompt_context(agent_id, constitution)
+                attempt_mutation = str(memory_context.get("next_mutation") or "").strip()
                 evolution_package = self._build_evolution_package(
                     agent_id=agent_id,
                     strategy_data=strategy_data,
@@ -194,6 +243,8 @@ class EvolutionOrchestrator:
                     attempt=attempt,
                     last_reason=last_reason,
                     blocked_fingerprints=blocked_fingerprints[-8:],
+                    trigger_level=trigger_level,
+                    intensity=evolution_intensity,
                 )
 
                 try:
@@ -201,7 +252,21 @@ class EvolutionOrchestrator:
                         evolution_package,
                         max_retries=2,
                     )
+                    self._llm_consecutive_failures = 0
                 except Exception as exc:
+                    self._llm_consecutive_failures += 1
+                    if self._llm_consecutive_failures >= self._LLM_FAILURE_THRESHOLD:
+                        self._llm_backoff_until = time.time() + self._LLM_BACKOFF_SECONDS
+                        logger.error(
+                            f"[{label}] LLM 연속 {self._llm_consecutive_failures}회 실패 — "
+                            f"Circuit Breaker 작동, {self._LLM_BACKOFF_SECONDS}초 대기."
+                        )
+                        self.agent_manager.add_event(
+                            "error",
+                            "circuit_breaker",
+                            f"[{label}] LLM 연속 실패 {self._llm_consecutive_failures}회 — Circuit Breaker 작동 ({self._LLM_BACKOFF_SECONDS}초).",
+                            agent_id,
+                        )
                     last_reason = f"llm_generation_error: {exc}"
                     await self._record_rejection(
                         agent_id=agent_id,
@@ -218,6 +283,7 @@ class EvolutionOrchestrator:
                             }
                         },
                         prev_strategy_id=prev_strategy_id,
+                        mutation_hint=attempt_mutation,
                     )
                     continue
 
@@ -282,6 +348,7 @@ class EvolutionOrchestrator:
                             }
                         },
                         prev_strategy_id=prev_strategy_id,
+                        mutation_hint=attempt_mutation,
                     )
                     if fingerprint not in blocked_fingerprints:
                         blocked_fingerprints.append(fingerprint)
@@ -309,6 +376,7 @@ class EvolutionOrchestrator:
                             }
                         },
                         prev_strategy_id=prev_strategy_id,
+                        mutation_hint=attempt_mutation,
                     )
                     if fingerprint not in blocked_fingerprints:
                         blocked_fingerprints.append(fingerprint)
@@ -340,6 +408,7 @@ class EvolutionOrchestrator:
                             }
                         },
                         prev_strategy_id=prev_strategy_id,
+                        mutation_hint=attempt_mutation,
                     )
                     if fingerprint not in blocked_fingerprints:
                         blocked_fingerprints.append(fingerprint)
@@ -412,6 +481,7 @@ class EvolutionOrchestrator:
                             }
                         },
                         prev_strategy_id=prev_strategy_id,
+                        mutation_hint=attempt_mutation,
                     )
                     if fingerprint not in blocked_fingerprints:
                         blocked_fingerprints.append(fingerprint)
@@ -443,6 +513,7 @@ class EvolutionOrchestrator:
                             }
                         },
                         prev_strategy_id=prev_strategy_id,
+                        mutation_hint=attempt_mutation,
                     )
                     if fingerprint not in blocked_fingerprints:
                         blocked_fingerprints.append(fingerprint)
@@ -529,6 +600,7 @@ class EvolutionOrchestrator:
                             "verdict": str(full_res.get("verdict") or ""),
                         },
                         prev_strategy_id=prev_strategy_id,
+                        mutation_hint=attempt_mutation,
                     )
                     if fingerprint not in blocked_fingerprints:
                         blocked_fingerprints.append(fingerprint)
@@ -560,6 +632,7 @@ class EvolutionOrchestrator:
                             "verdict": str(full_res.get("verdict") or ""),
                         },
                         prev_strategy_id=prev_strategy_id,
+                        mutation_hint=attempt_mutation,
                     )
                     if fingerprint not in blocked_fingerprints:
                         blocked_fingerprints.append(fingerprint)
@@ -598,6 +671,7 @@ class EvolutionOrchestrator:
                     reason=f"accepted attempt={attempt}",
                     fingerprint=fingerprint,
                     metrics=candidate_metrics,
+                    mutation_hint=attempt_mutation,
                 )
                 self.memory.log_accepted(
                     agent_id=agent_id,
@@ -662,6 +736,7 @@ class EvolutionOrchestrator:
         metrics: Optional[Dict[str, Any]],
         details: Optional[Dict[str, Any]] = None,
         prev_strategy_id: Optional[str] = None,
+        mutation_hint: Optional[str] = None,
     ) -> None:
         fingerprint = self.memory.compute_fingerprint(code)
         self.memory.log_experiment(
@@ -671,6 +746,7 @@ class EvolutionOrchestrator:
             reason=reason,
             fingerprint=fingerprint,
             metrics=metrics or {},
+            mutation_hint=mutation_hint,
         )
         self.memory.log_failure_pattern(
             agent_id=agent_id,
@@ -928,6 +1004,8 @@ class EvolutionOrchestrator:
         attempt: int,
         last_reason: Optional[str] = None,
         blocked_fingerprints: Optional[List[str]] = None,
+        trigger_level: str = "L4",
+        intensity: str = "LOW (Tuning)",
     ) -> Dict[str, Any]:
         return {
             "current_strategy_code": strategy_data.get("code", ""),
@@ -946,6 +1024,10 @@ class EvolutionOrchestrator:
             "constitution": constitution,
             "last_reason": (last_reason or "").strip(),
             "blocked_fingerprints": list(blocked_fingerprints or []),
+            # 트리거 강도: LLM이 변이 폭을 결정할 때 사용
+            "trigger_level": trigger_level,
+            "intensity": intensity,
+            "_selected_mode": intensity,
         }
 
     # -------------------------------------------------------------------------
@@ -969,12 +1051,15 @@ class EvolutionOrchestrator:
         return []
 
 
-# 싱글톤 인스턴스 관리
-_orchestrator = None
+# 싱글톤 인스턴스 관리 (thread-safe)
+_orchestrator: Optional[EvolutionOrchestrator] = None
+_orchestrator_lock = __import__("threading").Lock()
 
 
-def get_evolution_orchestrator():
+def get_evolution_orchestrator() -> EvolutionOrchestrator:
     global _orchestrator
     if _orchestrator is None:
-        _orchestrator = EvolutionOrchestrator()
+        with _orchestrator_lock:
+            if _orchestrator is None:          # double-checked locking
+                _orchestrator = EvolutionOrchestrator()
     return _orchestrator
