@@ -1,7 +1,13 @@
 #!/bin/bash
 
 # Trinity Project Runner
+# - One command to run backend + tunnel reliably
+# - Auto bootstrap for Python runtime (venv + dependencies)
+# - Works across slightly different local environments
 
+# -------------------------------------------------------------------
+# Core paths and runtime knobs
+# -------------------------------------------------------------------
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Add common bin paths for background execution
 export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
@@ -10,27 +16,128 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 TUNNEL_SUBDOMAIN="${TUNNEL_SUBDOMAIN:-lsy-super-trend}"
 LT_LOCAL_HOST="${LT_LOCAL_HOST:-127.0.0.1}"
 LT_HOST="${LT_HOST:-https://loca.lt}"
+AUTO_BOOTSTRAP="${AUTO_BOOTSTRAP:-1}"
+AUTO_TUNNEL_ON_SERVER="${AUTO_TUNNEL_ON_SERVER:-1}"
+INSTALL_ROOT_REQUIREMENTS="${INSTALL_ROOT_REQUIREMENTS:-0}"
 LOG_DIR="$PROJECT_ROOT/logs"
 RUN_DIR="$PROJECT_ROOT/tmp/always_on"
 API_PID_FILE="$RUN_DIR/api.pid"
 PROXY_PID_FILE="$RUN_DIR/proxy.pid"
 PROXY_LOG="$LOG_DIR/proxy-8082.log"
 TUNNEL_PID_FILE="$RUN_DIR/localtunnel.pid"
+PY_BOOTSTRAP_STATE="$RUN_DIR/python_bootstrap.state"
+AUTO_TUNNEL_LOG="$LOG_DIR/auto_tunnel.log"
 API_LOG="$LOG_DIR/api-${BACKEND_PORT}.log"
 TUNNEL_LOG="$LOG_DIR/localtunnel-${BACKEND_PORT}.log"
 URL_FILE="$LOG_DIR/backend_tunnel_url.txt"
 
 mkdir -p "$LOG_DIR" "$RUN_DIR"
 
-# Detect virtual environment path (Windows vs Linux/macOS)
-if [ -f "$PROJECT_ROOT/venv/Scripts/activate" ]; then
-  VENV_ACTIVATE="$PROJECT_ROOT/venv/Scripts/activate"
-  VENV_PYTHON="$PROJECT_ROOT/venv/Scripts/python"
-else
-  VENV_ACTIVATE="$PROJECT_ROOT/venv/bin/activate"
-  VENV_PYTHON="$PROJECT_ROOT/venv/bin/python"
-fi
+# -------------------------------------------------------------------
+# Python environment bootstrap helpers
+# -------------------------------------------------------------------
+resolve_venv_paths() {
+  # Detect virtual environment path (Windows vs Linux/macOS)
+  if [ -f "$PROJECT_ROOT/venv/Scripts/activate" ]; then
+    VENV_ACTIVATE="$PROJECT_ROOT/venv/Scripts/activate"
+    VENV_PYTHON="$PROJECT_ROOT/venv/Scripts/python"
+  else
+    VENV_ACTIVATE="$PROJECT_ROOT/venv/bin/activate"
+    VENV_PYTHON="$PROJECT_ROOT/venv/bin/python"
+  fi
+}
+resolve_venv_paths
 
+detect_host_python() {
+  # Prefer explicit PYTHON_BIN when provided.
+  if [ -n "${PYTHON_BIN:-}" ] && command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+    HOST_PYTHON="$(command -v "$PYTHON_BIN")"
+    return 0
+  fi
+  # Fallback to common interpreter names.
+  if command -v python3 >/dev/null 2>&1; then
+    HOST_PYTHON="$(command -v python3)"
+    return 0
+  fi
+  if command -v python >/dev/null 2>&1; then
+    HOST_PYTHON="$(command -v python)"
+    return 0
+  fi
+  echo "❌ Python executable not found. Install python3 first."
+  return 1
+}
+
+hash_stream() {
+  # Build deterministic hash regardless of host tooling.
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+    return 0
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+    return 0
+  fi
+  "$HOST_PYTHON" -c 'import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+}
+
+build_python_bootstrap_fingerprint() {
+  # Reinstall deps only when python/version/requirements actually changed.
+  {
+    echo "python=$("$HOST_PYTHON" -V 2>&1)"
+    echo "install_root=${INSTALL_ROOT_REQUIREMENTS}"
+    if [ -f "$PROJECT_ROOT/server/api/requirements_api.txt" ]; then
+      cat "$PROJECT_ROOT/server/api/requirements_api.txt"
+    fi
+    if [ "$INSTALL_ROOT_REQUIREMENTS" = "1" ] && [ -f "$PROJECT_ROOT/requirements.txt" ]; then
+      cat "$PROJECT_ROOT/requirements.txt"
+    fi
+  } | hash_stream
+}
+
+bootstrap_python_runtime() {
+  # Opt-out supported for fast local loops.
+  [ "$AUTO_BOOTSTRAP" = "1" ] || return 0
+  detect_host_python || exit 1
+
+  # Create venv lazily if missing.
+  if [ ! -f "$VENV_PYTHON" ]; then
+    echo "🔧 Creating virtual environment at $PROJECT_ROOT/venv ..."
+    "$HOST_PYTHON" -m venv "$PROJECT_ROOT/venv" || {
+      echo "❌ Failed to create venv."
+      exit 1
+    }
+    resolve_venv_paths
+  fi
+
+  if [ ! -f "$VENV_PYTHON" ]; then
+    echo "❌ venv python not found: $VENV_PYTHON"
+    exit 1
+  fi
+
+  local current_fingerprint previous_fingerprint
+  current_fingerprint="$(build_python_bootstrap_fingerprint)"
+  previous_fingerprint="$(cat "$PY_BOOTSTRAP_STATE" 2>/dev/null || true)"
+
+  if [ "${FORCE_BOOTSTRAP:-0}" = "1" ] || [ "$current_fingerprint" != "$previous_fingerprint" ]; then
+    echo "📦 Bootstrapping Python dependencies..."
+    # Keep toolchain fresh, but avoid forcing setuptools to prevent torch conflicts.
+    "$VENV_PYTHON" -m pip install --upgrade pip wheel || exit 1
+    if [ -f "$PROJECT_ROOT/server/api/requirements_api.txt" ]; then
+      "$VENV_PYTHON" -m pip install -r "$PROJECT_ROOT/server/api/requirements_api.txt" || exit 1
+    fi
+    if [ "$INSTALL_ROOT_REQUIREMENTS" = "1" ] && [ -f "$PROJECT_ROOT/requirements.txt" ]; then
+      "$VENV_PYTHON" -m pip install -r "$PROJECT_ROOT/requirements.txt" || exit 1
+    fi
+    echo "$current_fingerprint" > "$PY_BOOTSTRAP_STATE"
+    echo "✅ Python bootstrap complete."
+  else
+    echo "✅ Python environment is up to date."
+  fi
+}
+
+# -------------------------------------------------------------------
+# Process / port helpers
+# -------------------------------------------------------------------
 is_port_listening() {
   local port="$1"
   if command -v lsof >/dev/null 2>&1; then
@@ -52,6 +159,7 @@ show_port_owner() {
 }
 
 kill_tunnel_processes() {
+  # Kill only localtunnel processes targeting this backend port.
   local pids
   pids="$(
     ps ax -o pid= -o command= \
@@ -87,9 +195,14 @@ start_nim_proxy() {
 }
 
 run_localtunnel_once() {
+  # Try already-installed CLI first, then package runner fallbacks.
   local cmd=()
   if command -v lt >/dev/null 2>&1; then
     cmd=(lt --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
+  elif command -v bunx >/dev/null 2>&1; then
+    cmd=(bunx localtunnel --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
+  elif command -v pnpm >/dev/null 2>&1; then
+    cmd=(pnpm dlx localtunnel --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
   else
     cmd=(npx --yes localtunnel --local-host "$LT_LOCAL_HOST" --port "$BACKEND_PORT" --subdomain "$TUNNEL_SUBDOMAIN")
   fi
@@ -99,6 +212,77 @@ run_localtunnel_once() {
   "${cmd[@]}"
 }
 
+has_tunnel_runtime() {
+  # Any one of these is enough to bootstrap localtunnel.
+  command -v lt >/dev/null 2>&1 \
+    || command -v npx >/dev/null 2>&1 \
+    || command -v bunx >/dev/null 2>&1 \
+    || command -v pnpm >/dev/null 2>&1
+}
+
+is_tunnel_running() {
+  # Fast check via pid file, then process scan fallback.
+  if [ -f "$TUNNEL_PID_FILE" ]; then
+    local pid
+    pid="$(cat "$TUNNEL_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$pid" ] && ps -p "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  ps ax -o command= \
+    | grep -E "localtunnel|(^|[[:space:]])lt([[:space:]]|$)" \
+    | grep -- "--port ${BACKEND_PORT}" >/dev/null 2>&1
+}
+
+start_tunnel_autorun() {
+  # Used by ./run server so backend users get a stable public endpoint automatically.
+  [ "$AUTO_TUNNEL_ON_SERVER" = "1" ] || return 0
+  local tunnel_url
+
+  if ! has_tunnel_runtime; then
+    echo "⚠️ Tunnel runtime not found (lt/npx/bunx/pnpm). Skipping auto tunnel."
+    return 0
+  fi
+
+  if is_tunnel_running; then
+    echo "ℹ️ tunnel is already running for port ${BACKEND_PORT}."
+    return 0
+  fi
+
+  (
+    echo "⏳ Waiting for backend to bind to port ${BACKEND_PORT}..." > "$AUTO_TUNNEL_LOG"
+    for i in {1..60}; do
+      if is_port_listening "$BACKEND_PORT"; then
+        echo "✅ Backend is up on port ${BACKEND_PORT}. Starting localtunnel..." >> "$AUTO_TUNNEL_LOG"
+        kill_tunnel_processes
+        : > "$TUNNEL_LOG"
+
+        # Subdomain URL is deterministic; runtime reconnect loop keeps it alive.
+        tunnel_url="https://${TUNNEL_SUBDOMAIN}.loca.lt"
+        echo "$tunnel_url" > "$URL_FILE"
+
+        (
+          while true; do
+            run_localtunnel_once >> "$TUNNEL_LOG" 2>&1
+            EXIT_CODE=$?
+            echo "[$(date '+%F %T')] localtunnel exited (code=$EXIT_CODE). reconnect in 3s..." >> "$TUNNEL_LOG"
+            sleep 3
+          done
+        ) &
+        echo $! > "$TUNNEL_PID_FILE"
+        echo "🌐 Tunnel started: $tunnel_url" >> "$AUTO_TUNNEL_LOG"
+        exit 0
+      fi
+      sleep 1
+    done
+    echo "❌ Timeout waiting for backend on port ${BACKEND_PORT}" >> "$AUTO_TUNNEL_LOG"
+  ) &
+}
+
+# -------------------------------------------------------------------
+# Command entrypoints
+# -------------------------------------------------------------------
 case $COMMAND in
   "client"|"front")
     if is_port_listening 3000; then
@@ -110,9 +294,13 @@ case $COMMAND in
     cd "$PROJECT_ROOT/client" && npm run dev
     ;;
   "server"|"api")
+    # Always bootstrap first so this command works on fresh machines too.
+    bootstrap_python_runtime
+
     if is_port_listening "$BACKEND_PORT"; then
       echo "ℹ️ server is already running on port ${BACKEND_PORT}."
       show_port_owner "$BACKEND_PORT"
+      start_tunnel_autorun
       exit 0
     fi
 
@@ -121,37 +309,8 @@ case $COMMAND in
     # start_nim_proxy
 
     echo "⚙️ Starting FastAPI server..."
-    
-    # Background tunnel starter: waits for port 8000 then runs localtunnel
-    (
-      echo "⏳ Waiting for backend to bind to port ${BACKEND_PORT}..." > "$LOG_DIR/auto_tunnel.log"
-      for i in {1..20}; do
-        if is_port_listening "$BACKEND_PORT"; then
-          echo "✅ Backend is up on port ${BACKEND_PORT}. Starting localtunnel..." >> "$LOG_DIR/auto_tunnel.log"
-          
-          # Kill existing tunnels for this port
-          kill_tunnel_processes
-          
-          TUNNEL_URL="https://${TUNNEL_SUBDOMAIN}.loca.lt"
-          echo "$TUNNEL_URL" > "$URL_FILE"
-          
-          # Start tunnel in background with auto-reconnect
-          (
-            while true; do
-              run_localtunnel_once >> "$TUNNEL_LOG" 2>&1
-              EXIT_CODE=$?
-              echo "[$(date '+%F %T')] localtunnel exited (code=$EXIT_CODE). reconnect in 3s..." >> "$TUNNEL_LOG"
-              sleep 3
-            done
-          ) &
-          echo $! > "$TUNNEL_PID_FILE"
-          echo "🌐 Tunnel started: $TUNNEL_URL" >> "$LOG_DIR/auto_tunnel.log"
-          exit 0
-        fi
-        sleep 1
-      done
-      echo "❌ Timeout waiting for backend on port ${BACKEND_PORT}" >> "$LOG_DIR/auto_tunnel.log"
-    ) &
+    # Start tunnel watcher before app boot; it will wait until port is open.
+    start_tunnel_autorun
     
     cd "$PROJECT_ROOT/server/api" && \
     source "$VENV_ACTIVATE" && \
@@ -159,8 +318,11 @@ case $COMMAND in
     PYTHONPATH="$PROJECT_ROOT" "$VENV_PYTHON" -m server.api.main
     ;;
   "public"|"tunnel")
-    if ! command -v lt >/dev/null 2>&1 && ! command -v npx >/dev/null 2>&1; then
-      echo "❌ localtunnel 실행 도구를 찾지 못했습니다. (lt 또는 npx 필요)"
+    # Explicit public mode: run backend (if needed) + foreground tunnel session.
+    bootstrap_python_runtime
+
+    if ! has_tunnel_runtime; then
+      echo "❌ localtunnel 실행 도구를 찾지 못했습니다. (lt / npx / bunx / pnpm 필요)"
       exit 1
     fi
 
@@ -173,7 +335,7 @@ case $COMMAND in
         --host 0.0.0.0 --port "$BACKEND_PORT" >> "$API_LOG" 2>&1 &
       echo $! > "$API_PID_FILE"
       
-      # Wait for start
+      # Wait briefly until backend starts listening.
       for i in {1..10}; do
         is_port_listening "$BACKEND_PORT" && break
         sleep 1
@@ -204,6 +366,7 @@ case $COMMAND in
     KEEP_RUNNING=1
     trap 'KEEP_RUNNING=0' INT TERM
     while [ "$KEEP_RUNNING" -eq 1 ]; do
+      # Foreground loop with auto-reconnect for tunnel stability.
       run_localtunnel_once 2>&1 | tee -a "$TUNNEL_LOG"
       EXIT_CODE=${PIPESTATUS[0]}
       if [ "$KEEP_RUNNING" -eq 0 ] || [ "$EXIT_CODE" -eq 130 ]; then
@@ -245,6 +408,7 @@ case $COMMAND in
     fi
     ;;
   "test")
+    bootstrap_python_runtime
     echo "🧪 Running AI Trading Tests..."
     cd "$PROJECT_ROOT" && "$VENV_PYTHON" -m pytest \
       server/ai_trading/tests/test_metrics_buffer.py \
@@ -262,6 +426,12 @@ case $COMMAND in
     echo "  public-status: Show backend/tunnel status"
     echo "  public-stop: Stop localtunnel"
     echo "  test: Run AI trading pytest suite"
+    echo
+    echo "Optional env vars:"
+    echo "  AUTO_BOOTSTRAP=0           # disable auto venv/pip setup"
+    echo "  AUTO_TUNNEL_ON_SERVER=0    # disable tunnel auto-start on ./run server"
+    echo "  INSTALL_ROOT_REQUIREMENTS=1 # also install ./requirements.txt"
+    echo "  FORCE_BOOTSTRAP=1          # force reinstall dependencies once"
     exit 1
     ;;
 esac
