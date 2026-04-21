@@ -1,7 +1,6 @@
 "use client";
 
 import LogCard from "@/components/cards/LogCard";
-import { PerformanceRow } from "@/types";
 import { DashboardMetrics, DashboardProgress, EvolutionLogEvent, DecisionLogEvent } from "@/lib/api";
 
 // Extracted Sections
@@ -9,10 +8,9 @@ import PanelTabs from "./sections/PanelTabs";
 import AgentFilter from "./sections/AgentFilter";
 import EvolutionLogPanel from "./sections/EvolutionLogPanel";
 
-import { COLORS } from "@/constants";
-
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { useMemo } from "react";
 
 import { useDashboardStore } from "@/store/useDashboardStore";
 
@@ -31,6 +29,21 @@ interface DashboardRightPanelProps {
   onToggleAutomation?: (enabled: boolean) => void;
 }
 
+const PHASE_LABEL_MAP: Record<string, string> = {
+  loop: "루프",
+  triggered: "트리거",
+  generating: "생성",
+  generated: "생성완료",
+  baseline: "기준로딩",
+  validation: "검증",
+  decision: "결정",
+  committing: "반영",
+  completed: "완료",
+  failed: "실패",
+  retry: "재시도",
+  skipped: "스킵",
+};
+
 export default function DashboardRightPanel(props: DashboardRightPanelProps) {
   return (
     <Suspense fallback={<div className="flex-1 bg-[#060912]/30 animate-pulse" />}>
@@ -43,7 +56,6 @@ export function DashboardRightPanelContent({
   agentIds,
   names,
   metricsData,
-  progress,
   evolutionEvents = [],
   decisionLogs = [],
   automationStatus,
@@ -57,7 +69,10 @@ export function DashboardRightPanelContent({
   const isEvolutionView = pathname === "/" && view === "evolution";
   const isLogsView = pathname === "/" && (view === "" || view === "logs");
 
-  const visibleAgentIds = agentIds.length > 0 ? agentIds : ["momentum_hunter"];
+  const visibleAgentIds = useMemo(
+    () => (agentIds.length > 0 ? agentIds : ["momentum_hunter"]),
+    [agentIds]
+  );
   const formatMetricDisplay = (metric: string, value: number | undefined): string => {
     if (typeof value !== "number" || Number.isNaN(value)) return "-";
     if (metric === "total_trades") return String(Math.round(value));
@@ -66,35 +81,22 @@ export function DashboardRightPanelContent({
     }
     return value.toFixed(3);
   };
-  const getAgentName = (agentId: string): string => {
-    const idx = visibleAgentIds.indexOf(agentId);
-    if (idx >= 0 && names[idx]) return names[idx];
-    return metricsData?.agents?.[agentId]?.name || agentId;
-  };
+  const agentNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    visibleAgentIds.forEach((id, idx) => {
+      map[id] = names[idx] || metricsData?.agents?.[id]?.name || id;
+    });
+    return map;
+  }, [visibleAgentIds, names, metricsData]);
 
-  const phaseLabelMap: Record<string, string> = {
-    loop: "루프",
-    triggered: "트리거",
-    generating: "생성",
-    generated: "생성완료",
-    baseline: "기준로딩",
-    validation: "검증",
-    decision: "결정",
-    committing: "반영",
-    completed: "완료",
-    failed: "실패",
-    retry: "재시도",
-    skipped: "스킵",
-  };
-
-  const dbLogsData = (decisionLogs || [])
+  const dbLogsData = useMemo(() => (decisionLogs || [])
     .map((event) => {
       const decision = event.meta?.decision || {};
       const improvements = Array.isArray(decision.improvement_summary) ? decision.improvement_summary : [];
       const resultLabel = decision.result ? String(decision.result) : event.phase;
-      const phaseLabel = phaseLabelMap[String(event.phase || "").toLowerCase()] || event.phase || "log";
+      const phaseLabel = PHASE_LABEL_MAP[String(event.phase || "").toLowerCase()] || event.phase || "log";
       const agentId = event.agent_id || "system";
-      const agentName = event.agent_label || getAgentName(agentId);
+      const agentName = event.agent_label || agentNameMap[agentId] || metricsData?.agents?.[agentId]?.name || agentId;
       const colorIdx = Math.max(0, visibleAgentIds.indexOf(agentId));
 
       const isRejected = (decision.result || "").toLowerCase().includes("reject");
@@ -113,6 +115,7 @@ export function DashboardRightPanelContent({
       }
 
       return {
+        id: event.id,
         agentId,
         agentName,
         avatar: (agentName || "A").charAt(0),
@@ -132,17 +135,20 @@ export function DashboardRightPanelContent({
         }),
         meta: event.meta,
       };
-    });
+    }), [decisionLogs, visibleAgentIds, metricsData, agentNameMap]);
 
   const logsData = dbLogsData;
-  const activeAgentName = getAgentName(activeAgent);
+  const activeAgentName = useMemo(
+    () => agentNameMap[activeAgent] || metricsData?.agents?.[activeAgent]?.name || activeAgent,
+    [activeAgent, agentNameMap, metricsData]
+  );
 
   const isAllFilter = !activeAgent || 
                       activeAgent === "전체" || 
                       activeAgent === "ALL" || 
                       activeAgent === "all";
 
-  const filteredLogs = isAllFilter
+  const filteredLogs = useMemo(() => (isAllFilter
     ? logsData
     : logsData.filter(
         (log) =>
@@ -150,7 +156,7 @@ export function DashboardRightPanelContent({
           log.agentName === activeAgent ||
           log.agentName === activeAgentName ||
           (log.meta?.decision?.agent_alias === activeAgent)
-      );
+      )), [isAllFilter, logsData, activeAgent, activeAgentName]);
 
   const displayLogs = (filteredLogs.length === 0 && logsData.length > 0 && isAllFilter) 
     ? logsData 
@@ -181,9 +187,9 @@ export function DashboardRightPanelContent({
       {isLogsView && (
         <div className="flex-1 overflow-y-auto min-h-0 bg-[#060912]/30 no-scrollbar flex flex-col">
           <div className="flex flex-col gap-4 p-4">
-            {displayLogs.map((log, idx) => (
+            {displayLogs.map((log) => (
               <LogCard
-                key={idx}
+                key={log.id}
                 {...log}
                 onClick={() => setActiveAgent(log.agentId)}
                 isActive={activeAgent === log.agentId}

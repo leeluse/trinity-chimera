@@ -1,16 +1,10 @@
 "use client";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import Chart from "chart.js/auto";
 import Head from "next/head";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
-  APIClient,
-  DashboardMetrics,
-  DashboardProgress,
-  EvolutionLogEvent,
-  DecisionLogEvent,
   AGENT_IDS as DEFAULT_AGENT_IDS
 } from "../lib/api";
 
@@ -44,21 +38,47 @@ for (let i = 0; i < 5; i++) {
   labels.push("");
 }
 
+type LabelPosition = {
+  x: number;
+  y: number;
+  label: string;
+  color: string;
+  value: number;
+  avatar: string;
+};
+
+const areLabelPositionsEqual = (prev: LabelPosition[], next: LabelPosition[]) => {
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i += 1) {
+    const a = prev[i];
+    const b = next[i];
+    if (
+      a.x !== b.x ||
+      a.y !== b.y ||
+      a.label !== b.label ||
+      a.color !== b.color ||
+      a.value !== b.value ||
+      a.avatar !== b.avatar
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
 export default function Dashboard() {
   const chartRef = useRef<HTMLCanvasElement | null>(null);
   const chartInstance = useRef<Chart | null>(null);
-  
-  const { 
-    currentMetric,
-    chartActiveAgent,
-    logActiveAgent,
-    setLogActiveAgent,
-    setActiveAgent
-  } = useDashboardStore();
+  const currentMetric = useDashboardStore((state) => state.currentMetric);
+  const chartActiveAgent = useDashboardStore((state) => state.chartActiveAgent);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const view = (searchParams.get("view") || "").toLowerCase();
+  const isEvolutionView = pathname === "/" && view === "evolution";
+  const isLogsView = pathname === "/" && (view === "" || view === "logs");
 
   // TanStack Query Hooks
   const {
-    stats,
     isLoading: isLoadingInitial,
     evolutionEvents,
     decisionLogs,
@@ -66,7 +86,14 @@ export default function Dashboard() {
     metricsData,
     dashboardProgress,
     toggleAutomation
-  } = useDashboardQueries();
+  } = useDashboardQueries({
+    enableEvolutionLogs: isEvolutionView,
+    enableDecisionLogs: isLogsView,
+    statsIntervalMs: 6000,
+    logsIntervalMs: 8000,
+    evolutionLogLimit: 120,
+    decisionLogLimit: 140,
+  });
 
   // Runtime Agent IDs derivation
   const runtimeAgentIds = useMemo(() => {
@@ -79,15 +106,14 @@ export default function Dashboard() {
       ? idsFromProgress
       : (idsFromMetrics.length > 0 ? idsFromMetrics : Array.from(DEFAULT_AGENT_IDS));
   }, [dashboardProgress, metricsData]);
+  const runtimeAgentIdsKey = useMemo(() => runtimeAgentIds.join("|"), [runtimeAgentIds]);
 
-  const { data: timeseriesData = {} } = useAgentTimeseries(currentMetric, runtimeAgentIds);
+  const { data: timeseriesData = {} } = useAgentTimeseries(currentMetric, runtimeAgentIds, {
+    refetchIntervalMs: 7000,
+  });
 
-  const [labelPositions, setLabelPositions] = useState<any[]>([]);
-  const labelPositionsRef = useRef<any[]>([]);
-
-  const metricsDataSignature = JSON.stringify(metricsData?.agents);
-  const timeseriesSignature = JSON.stringify(timeseriesData);
-  const runtimeAgentSignature = runtimeAgentIds.join("|");
+  const [labelPositions, setLabelPositions] = useState<LabelPosition[]>([]);
+  const labelPositionsRef = useRef<LabelPosition[]>([]);
 
   const agentNames = useMemo(() => {
     return runtimeAgentIds.map((id, idx) => {
@@ -103,7 +129,7 @@ export default function Dashboard() {
       // 3. 마지막 폴백: NAMES 배열의 값 (NaN)
       return NAMES[idx] || "NaN";
     });
-  }, [metricsDataSignature, runtimeAgentSignature]);
+  }, [metricsData, runtimeAgentIds]);
 
   const chartNames = useMemo(() => {
     return [...agentNames, "BTC BnH"];
@@ -113,7 +139,7 @@ export default function Dashboard() {
     toggleAutomation(enabled);
   };
 
-  const buildDynamicDatasets = (metric: MetricKey, names: string[]) => {
+  const buildDynamicDatasets = useCallback((metric: MetricKey, names: string[]) => {
     const ids = [...runtimeAgentIds, 'BTC BnH'];
     const metricFieldMap: Record<
       MetricKey,
@@ -174,7 +200,16 @@ export default function Dashboard() {
         hidden: isHidden
       };
     });
-  };
+  }, [runtimeAgentIds, chartActiveAgent, metricsData, timeseriesData]);
+
+  const chartDatasets = useMemo(
+    () => buildDynamicDatasets(currentMetric, chartNames),
+    [buildDynamicDatasets, currentMetric, chartNames]
+  );
+  const chartDatasetsRef = useRef(chartDatasets);
+  useEffect(() => {
+    chartDatasetsRef.current = chartDatasets;
+  }, [chartDatasets]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -185,7 +220,7 @@ export default function Dashboard() {
       plugins: [{
         id: 'endLineLabels',
         afterDraw: (chart) => {
-          const positions: any[] = [];
+          const positions: LabelPosition[] = [];
           const metas = chart.data.datasets.map((_, i) => chart.getDatasetMeta(i));
           metas.forEach((meta) => {
             if (meta.hidden || !meta.visible) return;
@@ -194,20 +229,27 @@ export default function Dashboard() {
               const dataset = chart.data.datasets[meta.index];
               const lastValue = dataset.data[dataset.data.length - 1] as number;
               const avatar = dataset.label?.charAt(0) || "?";
+              const colorValue = Array.isArray(dataset.borderColor)
+                ? String(dataset.borderColor[0] ?? "")
+                : String(dataset.borderColor ?? "");
 
               positions.push({
-                x: lastPoint.x, y: lastPoint.y, label: dataset.label,
-                color: dataset.borderColor, value: lastValue, avatar
+                x: lastPoint.x,
+                y: lastPoint.y,
+                label: String(dataset.label ?? ""),
+                color: colorValue,
+                value: lastValue,
+                avatar,
               });
             }
           });
-          if (JSON.stringify(labelPositionsRef.current) !== JSON.stringify(positions)) {
+          if (!areLabelPositionsEqual(labelPositionsRef.current, positions)) {
             labelPositionsRef.current = positions;
             setLabelPositions(positions);
           }
         }
       }],
-      data: { labels, datasets: buildDynamicDatasets(currentMetric, chartNames) },
+      data: { labels, datasets: chartDatasetsRef.current },
       options: {
         responsive: true, maintainAspectRatio: false,
         layout: { padding: { right: 20, left: 10 } },
@@ -230,14 +272,14 @@ export default function Dashboard() {
       }
     });
     return () => chartInstance.current?.destroy();
-  }, [chartNames, runtimeAgentSignature]);
+  }, [chartNames, runtimeAgentIdsKey]);
 
   useEffect(() => {
     if (chartInstance.current) {
-      chartInstance.current.data.datasets = buildDynamicDatasets(currentMetric, chartNames);
+      chartInstance.current.data.datasets = chartDatasets;
       chartInstance.current.update('none'); // Update without animation to prevent bounce on tick
     }
-  }, [currentMetric, chartNames, chartActiveAgent, metricsDataSignature, timeseriesSignature, runtimeAgentSignature]);
+  }, [chartDatasets]);
 
   return (
     <>

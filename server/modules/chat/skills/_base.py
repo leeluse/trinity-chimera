@@ -25,8 +25,86 @@ def format_sse(payload: dict) -> str:
 
 
 def extract_python_code(text: str) -> str:
-    m = re.search(r"```python\s*([\s\S]*?)```", text)
-    return m.group(1).strip() if m else ""
+    if not text:
+        return ""
+
+    def _score(block: str) -> int:
+        s = 0
+        lower = block.lower()
+        if "def generate_signal(" in block:
+            s += 10
+        if "import pandas as pd" in lower or "pd." in block:
+            s += 3
+        if "class " in block:
+            s += 1
+        if "```" in block:
+            s -= 2
+        return s
+
+    candidates: List[str] = []
+
+    # 1) python/py fenced blocks
+    for m in re.finditer(r"```(?:python|py)\s*([\s\S]*?)```", text, re.IGNORECASE):
+        block = m.group(1).strip()
+        if block:
+            candidates.append(block)
+
+    # 2) generic fenced blocks (모델이 언어 태그를 생략하는 경우 대응)
+    for m in re.finditer(r"```\s*([\s\S]*?)```", text):
+        block = m.group(1).strip()
+        if block:
+            candidates.append(block)
+
+    # 2-1) fence가 닫히지 않은 채 잘린 응답 대응 (마지막 fence 이후 tail 사용)
+    open_fence_matches = list(re.finditer(r"```(?:python|py)?\s*", text, re.IGNORECASE))
+    if open_fence_matches:
+        tail = text[open_fence_matches[-1].end():].strip()
+        if tail:
+            candidates.append(tail)
+
+    # 3) fenced block이 없고 함수 시그니처가 본문에 직접 있는 경우
+    if not candidates and "def generate_signal(" in text:
+        candidates.append(text.strip())
+
+    if not candidates:
+        return ""
+
+    candidates.sort(key=_score, reverse=True)
+    best = candidates[0].strip()
+
+    # 텍스트 전체를 후보로 쓴 경우 남아있는 fence 잔재 제거
+    best = re.sub(r"^```(?:python|py)?\s*", "", best, flags=re.IGNORECASE)
+    best = re.sub(r"\s*```$", "", best)
+    return best.strip()
+
+
+def salvage_valid_python(code: str) -> str:
+    """후행 잡음/미완성 응답에서 컴파일 가능한 최대 prefix를 복구."""
+    text = (code or "").strip()
+    if not text:
+        return ""
+
+    try:
+        compile(text, "<strategy>", "exec")
+        return text
+    except Exception:
+        pass
+
+    lines = text.splitlines()
+    if len(lines) < 8:
+        return text
+
+    min_keep = max(8, int(len(lines) * 0.5))
+    for end in range(len(lines) - 1, min_keep - 1, -1):
+        candidate = "\n".join(lines[:end]).strip()
+        if "def generate_signal(" not in candidate:
+            continue
+        try:
+            compile(candidate, "<strategy>", "exec")
+            return candidate
+        except Exception:
+            continue
+    return text
 
 
 def extract_strategy_title(text: str) -> str:
@@ -155,19 +233,73 @@ async def get_last_strategy(
     db,
     session_memory: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    """세션 메모리 → DB 순으로 마지막 전략을 조회."""
+    """세션 메모리 → 세션 메시지 → 글로벌 메시지 → strategies 순으로 마지막 전략을 조회."""
     if session_id in session_memory:
         return session_memory[session_id]
-    history = await db.get_chat_history(session_id, limit=30)
-    for msg in reversed(history):
-        if msg.get("type") in ["strategy", "backtest"]:
-            data = msg.get("data") or {}
-            if data.get("code"):
-                strat = {
-                    "title": data.get("title", "복구된 전략"),
-                    "code": data.get("code"),
-                    "metrics": data.get("metrics") or {},
-                }
-                session_memory[session_id] = strat
-                return strat
+
+    def _decode_strategy(msg: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not msg:
+            return None
+        data = msg.get("data") or {}
+        # Supabase가 JSONB를 문자열로 반환하는 경우 파싱
+        if isinstance(data, str):
+            try:
+                import json
+                data = json.loads(data)
+            except Exception:
+                data = {}
+        code = data.get("code")
+        if code:
+            return {
+                "title": data.get("title", "복구된 전략"),
+                "code": code,
+                "metrics": data.get("metrics") or {},
+            }
+        return None
+
+    def _decode_strategy_row(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        code = row.get("code")
+        if not code:
+            return None
+        params = row.get("params") or {}
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except Exception:
+                params = {}
+        title = (
+            row.get("name")
+            or (params.get("display_name") if isinstance(params, dict) else None)
+            or (params.get("agent_title") if isinstance(params, dict) else None)
+            or "복구된 전략"
+        )
+        return {
+            "title": title,
+            "code": code,
+            "metrics": {},
+        }
+
+    # 1) 현재 세션 최신 전략
+    msg = await db.get_last_strategy_message(session_id)
+    strat = _decode_strategy(msg)
+    if strat:
+        session_memory[session_id] = strat
+        return strat
+
+    # 2) 세션에 없으면 전체 세션 기준 최신 전략으로 fallback
+    msg_any = await db.get_last_strategy_message_any()
+    strat_any = _decode_strategy(msg_any)
+    if strat_any:
+        session_memory[session_id] = strat_any
+        return strat_any
+
+    # 3) 메시지 기록이 없다면 strategies 최신 배포본을 fallback
+    row_any = await db.get_last_strategy_row_any()
+    strat_row = _decode_strategy_row(row_any)
+    if strat_row:
+        session_memory[session_id] = strat_row
+        return strat_row
+
     return None

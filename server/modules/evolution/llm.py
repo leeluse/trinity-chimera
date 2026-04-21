@@ -41,16 +41,26 @@ class EvolutionLLM:
 
         while attempt < max_retries:
             try:
-                # 에러가 있었다면 프롬프트에 추가
                 final_prompt = prompt
                 if last_error:
                     final_prompt += f"\n\n### 이전 시도 실패 사유:\n{last_error}\n위 에러를 해결해서 다시 코드를 짜줘."
 
-                raw_response = await self.llm_service.generate(final_prompt)
+                raw_response = await self.llm_service.generate(final_prompt, temperature=0.3)
                 code = self._clean_code(raw_response)
-                
-                # 정적 보안/문법 검증
+
                 StrategyLoader.validate_code(code)
+
+                # 자가 비평: 논리 결함 감지
+                critique_issues = await self._self_critique(code)
+                if critique_issues:
+                    last_error = "자가 비평 지적: " + "; ".join(critique_issues)
+                    logger.warning(f"[{label}] 자가 비평 실패 (시도 {attempt+1}): {last_error}")
+                    attempt += 1
+                    if attempt >= max_retries:
+                        logger.warning(f"[{label}] 자가 비평 재시도 소진 — 마지막 코드 반환")
+                        return code
+                    continue
+
                 return code
 
             except (SecurityError, SyntaxError) as e:
@@ -164,6 +174,12 @@ class EvolutionLLM:
         unexplored_block = "\n".join(unexplored_lines) if unexplored_lines else "- (미탐색 방향 정보 없음)"
         next_mutation_block = next_mutation or "structural_novelty"
 
+        best_code_snippet = str(memory_context.get("best_code_snippet") or "").strip()
+        few_shot_block = (
+            f"\n#### 참고: 최고 성능 전략 핵심 코드 (이 구조를 참고하되 복사 금지)\n```python\n{best_code_snippet}\n```"
+            if best_code_snippet else ""
+        )
+
         return f"""
 ### [Trinity Strategy Evolution: High-Performance Quant Mode]
 지시사항: 당신은 세계 최고의 퀀트 트레이더이자 알고리즘 개발자입니다.
@@ -212,12 +228,14 @@ class EvolutionLLM:
 #### 9. 이번 시도에서 반드시 우선할 방향
 - next_mutation: {next_mutation_block}
 
-#### 10. 현재 코드 (참고/개선 대상)
+#### 10. 최고 성능 전략 참고 코드{few_shot_block}
+
+#### 11. 현재 코드 (개선 대상)
 ```python
 {current_code}
 ```
 
-#### 11. 출력 규격 (반드시 이 형식으로만 출력)
+#### 12. 출력 규격 (반드시 이 형식으로만 출력)
 
 **함수 시그니처 (변경 불가):**
 ```python
@@ -276,6 +294,42 @@ def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
     return sig.fillna(0).astype(int)
 ```
 """
+
+    # -------------------------------------------------------------------------
+    # 자가 비평: 생성된 코드의 논리 결함을 deterministic하게 검출
+    # -------------------------------------------------------------------------
+    async def _self_critique(self, code: str) -> list[str]:
+        snippet = code[-900:]
+        prompt = f"""아래 Python 전략 코드를 검토하고 YES/NO로만 답해라.
+
+```python
+{snippet}
+```
+
+Q1. 이 코드에 숏(-1) 신호를 명시적으로 할당하는 라인이 있는가? (YES/NO)
+Q2. 단일 sig[] 할당 라인에 AND(&) 조건이 4개 이상 연결된 라인이 있는가? (YES/NO)
+Q3. 정의되지 않은 변수명을 참조하는 라인이 있는가? (YES/NO)
+
+답변 형식 (다른 텍스트 없이):
+Q1: YES or NO
+Q2: YES or NO
+Q3: YES or NO"""
+
+        try:
+            resp = await self.llm_service.generate(prompt, temperature=0.1)
+        except Exception:
+            return []
+
+        issues = []
+        for line in resp.splitlines():
+            line = line.strip()
+            if line.startswith("Q1:") and "NO" in line.upper():
+                issues.append("숏(-1) 신호 로직 없음 — 양방향 신호를 반드시 구현하라")
+            if line.startswith("Q2:") and "YES" in line.upper():
+                issues.append("AND 조건 4개 이상 과적층 — 조건 3개 이하로 줄여라")
+            if line.startswith("Q3:") and "YES" in line.upper():
+                issues.append("미정의 변수 참조 — 모든 변수를 코드 내에서 먼저 선언하라")
+        return issues
 
     # -------------------------------------------------------------------------
     # 코드 정제: LLM 응답에서 마크다운 블록을 제거하고 순수 파이썬 코드만 보존

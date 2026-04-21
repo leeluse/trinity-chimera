@@ -56,6 +56,11 @@ def _litellm_provider() -> str:
     return provider or "openai"
 
 
+def _ollama_fallback_enabled() -> bool:
+    raw = (os.getenv("LLM_ENABLE_OLLAMA_FALLBACK") or "0").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _normalize_litellm_model(model: str) -> str:
     model = (model or "").strip()
     if not model:
@@ -117,9 +122,9 @@ def _retry_backoff_seconds() -> float:
 
 def _max_tokens() -> int:
     try:
-        value = int(os.getenv("EVOLUTION_LLM_MAX_TOKENS", "1400"))
+        value = int(os.getenv("EVOLUTION_LLM_MAX_TOKENS", "3200"))
     except ValueError:
-        value = 1400
+        value = 3200
     return max(128, min(value, 8192))
 
 
@@ -215,11 +220,11 @@ class OpenAICompatLLMService:
         self.retry_backoff_seconds = _retry_backoff_seconds()
         self.max_tokens = _max_tokens()
 
-    async def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str, temperature: float = 0.2) -> str:
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
+            "temperature": temperature,
             "max_tokens": self.max_tokens,
             "stream": False,
         }
@@ -270,7 +275,7 @@ class LiteLLMProxyService:
         self.request_retries = _request_retries()
         self.max_tokens = _max_tokens()
 
-    async def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str, temperature: float = 0.2) -> str:
         kwargs: Dict[str, Any] = {}
         if self.fallback_models:
             kwargs["fallbacks"] = self.fallback_models
@@ -279,7 +284,7 @@ class LiteLLMProxyService:
             response = await acompletion(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
+                temperature=temperature,
                 max_tokens=self.max_tokens,
                 stream=False,
                 api_base=self.base_url,
@@ -293,6 +298,9 @@ class LiteLLMProxyService:
                 raise RuntimeError("LiteLLM provider returned empty content.")
             return content
         except Exception as exc:
+            if not _ollama_fallback_enabled():
+                logger.error("LiteLLM generate failed (Ollama fallback disabled): %s", exc)
+                raise
             # Local resilience path: fallback to direct Ollama when LiteLLM is unreachable.
             logger.warning("LiteLLM generate failed, fallback to Ollama: %s", exc)
             ollama_base = (os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/")
@@ -301,7 +309,7 @@ class LiteLLMProxyService:
                 "model": ollama_model,
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
-                "options": {"temperature": 0.2},
+                "options": {"temperature": temperature},
             }
             async with httpx.AsyncClient(timeout=self.timeout or 120.0) as client:
                 res = await client.post(f"{ollama_base}/api/chat", json=payload)

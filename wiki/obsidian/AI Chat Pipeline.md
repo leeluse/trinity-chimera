@@ -79,7 +79,31 @@ graph TD
 
 ---
 
-## 5. 전략 코드 생성 규격 (2026-04-17 통일)
+## 5. 프롬프트 품질 개선 (2026-04-20)
+
+### YAML 설계 청사진
+Stage 2 설계 단계가 마크다운 표에서 YAML 블록으로 교체됨. 토큰 절감 ~220 tokens.
+
+```yaml
+strategy: {name, type, hypothesis, best_market}
+signal: {tier1_trend, tier2_entry, tier3_filter}
+regime_filter: {condition, no_trade_when}
+entry_exit: {long: {entry, exit}, short: {entry, exit}}
+adaptive_thresholds: [{var, formula}]
+risk_profile: {trade_freq, sharpe_estimate, fail_condition}
+```
+
+### `<think>` 의사코드 강제 (Stage 3)
+코드 작성 전 `<think>` 블록에서 지표 의사코드→조건식→AND 개수 체크→빈도 예상을 LLM 스스로 검토.
+AND 조건 3개 초과 시 자체 수정 규칙 포함.
+
+### Self-Critique (Evolution 전용)
+Evolution `_self_critique()` — Q1 숏신호/Q2 AND 과적층/Q3 미정의 변수를 temperature=0.1로 검사.
+실패 시 재생성, `max_retries` 소진 시 마지막 코드 반환.
+
+---
+
+## 6. 전략 코드 생성 규격 (2026-04-17 통일)
 
 채팅 파이프라인의 코드 생성은 **진화 파이프라인과 동일한 함수 시그니처**를 사용한다.
 

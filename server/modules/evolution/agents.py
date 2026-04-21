@@ -1,10 +1,18 @@
 import logging
+import os
 from enum import Enum
 from datetime import datetime
 from collections import deque
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 class EvolutionState(Enum):
     IDLE = "IDLE"
@@ -21,9 +29,25 @@ class AgentStateManager:
         self.db = supabase_manager
         self._states: Dict[str, EvolutionState] = {aid: EvolutionState.IDLE for aid in agent_ids}
         self._name_cache: Dict[str, str] = {}
-        self._event_logs: deque = deque(maxlen=600)
+        try:
+            event_limit = int(os.getenv("EVOLUTION_EVENT_BUFFER_LIMIT", "200"))
+        except ValueError:
+            event_limit = 200
+        event_limit = max(50, min(event_limit, 2000))
+
+        self._event_logs: deque = deque(maxlen=event_limit)
         self._event_seq = 0
         self._latest_improvements: Dict[str, Dict[str, Any]] = {}
+        self._verbose_events = _env_flag("EVOLUTION_VERBOSE_EVENTS", False)
+        self._quiet_keep_phases = {
+            "decision",
+            "completed",
+            "failed",
+            "error",
+            "circuit_breaker",
+            "skipped",
+            "rejected",
+        }
         
         # 초기 이름 캐시 로드
         self.refresh_names()
@@ -81,7 +105,7 @@ class AgentStateManager:
             "detail": detail
         }
         
-        if state != EvolutionState.IDLE:
+        if state != EvolutionState.IDLE and self._verbose_events:
             msg = f"[{self.resolve_label(agent_id)}] {detail or state.value}"
             self.add_event("info", status, msg, agent_id)
 
@@ -99,6 +123,17 @@ class AgentStateManager:
         agent_id: str = None,
         meta: Optional[Dict[str, Any]] = None,
     ):
+        norm_level = str(level or "").lower()
+        norm_phase = str(phase or "").lower()
+        if not self._verbose_events:
+            # 기본값: 핵심 이벤트만 보존하여 터미널/프론트 로그 폭주를 방지
+            if norm_level in {"error", "critical", "success"}:
+                pass
+            elif norm_phase in self._quiet_keep_phases:
+                pass
+            else:
+                return
+
         self._event_seq += 1
         self._event_logs.append({
             "id": self._event_seq,

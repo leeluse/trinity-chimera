@@ -34,3 +34,16 @@ stream_quick_reply(prompt)     → QUICK_MODEL (빠른 응답)
 
 현재 설정: `ANTHROPIC_BASE_URL=http://192.168.0.3:4000/v1` + `ANTHROPIC_MODEL=kimi-k2.5`
 → Evolution은 kimi-k2.5 (장문 분석 역할) 사용
+
+## Temperature 분리 전략
+
+| 단계 | temperature | 이유 |
+|---|---|---|
+| Stage 2 설계 (YAML 청사진) | 0.8 | 창의적 다양성 필요 |
+| Stage 3 코드 생성 | 0.3 | 구조 정확도 우선 |
+| Evolution 코드 생성 | 0.3 | 재현 가능성 확보 |
+| Self-critique 검증 | 0.1 | 결정론적 판단 |
+
+`generate()` 메서드 시그니처: `async def generate(self, prompt: str, temperature: float = 0.2) -> str`
+- `LiteLLMProxyService` + `OpenAICompatLLMService` 모두 temperature 파라미터 지원
+- `llm_client.py`에서 기본값 0.2, 각 호출부에서 목적에 맞게 오버라이드

@@ -25,33 +25,74 @@ from server.modules.evolution.constants import AGENT_IDS, ACTIVE_AGENT_IDS
 from server.shared.market.metrics_buffer import get_metrics_buffer
 
 # Logging setup
-from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler
 
-LOGS_DIR = PROJECT_ROOT / "server" / "logs" / "evolution"
-os.makedirs(LOGS_DIR, exist_ok=True)
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_log_level(name: str, default: str = "WARNING") -> str:
+    value = (os.getenv(name) or default).strip().upper()
+    if value not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}:
+        return default
+    return value
+
+
+TRINITY_LOG_LEVEL = _env_log_level("TRINITY_LOG_LEVEL", "WARNING")
+CHAT_REQUEST_LOG_ENABLED = _env_flag("CHAT_REQUEST_LOG_ENABLED", True)
 
 # 1. 기본 콘솔 로그
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, TRINITY_LOG_LEVEL, logging.WARNING),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# 2. 진화 루프 및 LLM 관련 파일 로그 설정
-log_subjects = ["server.modules.evolution", "server.shared.llm"]
-evo_file_handler = TimedRotatingFileHandler(
-    filename=LOGS_DIR / "loop.log",
-    when="midnight",
-    interval=1,
-    backupCount=7,
-    encoding="utf-8"
-)
-evo_file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+# 채팅 요청 처리 추적 로그는 기본 ON (필요 시 CHAT_REQUEST_LOG_ENABLED=0)
+if CHAT_REQUEST_LOG_ENABLED:
+    logging.getLogger("server.modules.chat").setLevel(logging.INFO)
+    logging.getLogger("server.shared.llm.client").setLevel(logging.INFO)
+else:
+    logging.getLogger("server.modules.chat").setLevel(getattr(logging, TRINITY_LOG_LEVEL, logging.WARNING))
+    logging.getLogger("server.shared.llm.client").setLevel(getattr(logging, TRINITY_LOG_LEVEL, logging.WARNING))
 
-for subject in log_subjects:
-    sub_logger = logging.getLogger(subject)
-    sub_logger.addHandler(evo_file_handler)
-    sub_logger.propagate = True # 콘솔에도 계속 나오게 함
+# 터미널 잡음을 줄이기 위해 기본적으로 uvicorn access 로그 비활성화
+if not _env_flag("UVICORN_ACCESS_LOG", False):
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.handlers = []
+    uvicorn_access_logger.propagate = False
+    uvicorn_access_logger.disabled = True
+
+logging.getLogger("uvicorn.error").setLevel(getattr(logging, TRINITY_LOG_LEVEL, logging.WARNING))
+
+# 2. 진화 루프 및 LLM 관련 파일 로그 설정 (기본 OFF)
+if _env_flag("EVOLUTION_FILE_LOG_ENABLED", False):
+    logs_dir = PROJECT_ROOT / "server" / "logs" / "evolution"
+    os.makedirs(logs_dir, exist_ok=True)
+    try:
+        backup_count = int(os.getenv("EVOLUTION_FILE_LOG_BACKUP_DAYS", "3"))
+    except ValueError:
+        backup_count = 3
+    backup_count = max(1, min(backup_count, 30))
+
+    log_subjects = ["server.modules.evolution", "server.shared.llm"]
+    evo_file_handler = TimedRotatingFileHandler(
+        filename=logs_dir / "loop.log",
+        when="midnight",
+        interval=1,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    evo_file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+
+    for subject in log_subjects:
+        sub_logger = logging.getLogger(subject)
+        sub_logger.addHandler(evo_file_handler)
+        sub_logger.propagate = True
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -82,7 +123,7 @@ evolution_orchestrator = get_evolution_orchestrator()
 
 async def scheduled_evolution_poll():
     """Periodic job to check all agents for evolution triggers."""
-    logger.info("Running scheduled evolution poll...")
+    logger.debug("Running scheduled evolution poll...")
     if hasattr(evolution_orchestrator, "start_scheduled_loop"):
         evolution_orchestrator.start_scheduled_loop(list(ACTIVE_AGENT_IDS))
     for agent_id in ACTIVE_AGENT_IDS:
@@ -193,10 +234,15 @@ async def set_automation_status(data: dict):
     return {"success": True, "enabled": enabled}
 
 if __name__ == "__main__":
+    uvicorn_log_level = (os.getenv("UVICORN_LOG_LEVEL") or TRINITY_LOG_LEVEL).strip().lower()
+    if uvicorn_log_level not in {"critical", "error", "warning", "info", "debug", "trace"}:
+        uvicorn_log_level = "warning"
+
     uvicorn.run(
         "server.api.main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
-        log_level="info"
+        reload=_env_flag("UVICORN_RELOAD", False),
+        log_level=uvicorn_log_level,
+        access_log=_env_flag("UVICORN_ACCESS_LOG", False),
     )

@@ -38,6 +38,27 @@ from server.shared.market.provider import fetch_ohlcv_dataframe
 
 class LLMStrategyGenerator:
 
+    DESIGN_CONTRACT = textwrap.dedent("""
+    ## 전략 설계 규격 (코드 생성 전)
+
+    JSON 형식으로 다음을 작성해라:
+    {
+        "name": "전략 이름 (자연현상/동물 이름)",
+        "hypothesis": "이 전략이 작동하는 시장 비효율성 (한 문장)",
+        "hidden_assumption": "이 전략의 숨겨진 가정 (한 문장)",
+        "entry_logic": "진입 조건 설명 (한 문장, 구체적 지표명과 수치 포함)",
+        "exit_logic": "청산 조건 설명 (한 문장, stop loss, take profit 같은 메커니즘)",
+        "expected_trades": "기대 거래 수 (예: 100-200, 매 시간 5-10건 등)",
+        "risk_management": "리스크 관리 방식 (포지션 크기, 손실 한계 등)",
+        "expected_regime": "bull/bear/sideways/all 중 하나"
+    }
+
+    검증 포인트:
+    - 진입 조건과 청산 조건이 명확히 구분되는가?
+    - 거래 수가 현실적인가? (너무 적으면 10건 이상, 너무 많으면 과거 데이터 비향)
+    - 사용할 지표가 pandas/numpy로 구현 가능한가?
+    """)
+
     SIGNAL_CONTRACT = textwrap.dedent("""
     ## 반드시 지켜야 할 코드 계약
 
@@ -66,7 +87,7 @@ class LLMStrategyGenerator:
         self.llm_service = build_default_llm_service()
         self.model = model
 
-    async def generate(
+    async def generate_design(
         self,
         persona: Optional[dict] = None,
         seed: Optional[str] = None,
@@ -74,48 +95,41 @@ class LLMStrategyGenerator:
         generation: int = 1,
         feedback: Optional[str] = None,
     ) -> dict:
-        """전략 하나 생성. parent가 있으면 변이, feedback이 있으면 수정."""
+        """전략 설계만 생성 (코드 생성 전 단계)."""
         persona = persona or random.choice(PERSONAS)
         seed = seed or random.choice(CROSS_DOMAIN_SEEDS)
 
         feedback_instruction = ""
         if feedback:
             feedback_instruction = f"""
-            ## 이전 시도 피드백 (반드시 반영할 것)
+            ## 이전 설계 피드백 (반드시 반영할 것)
             {feedback}
-            위 문제를 해결하여 코드를 다시 작성해라.
+            위 문제를 해결하여 설계를 다시 작성해라.
             """
 
         if parent:
             task = f"""
             ## 변이 지시
-            부모 전략 코드:
-            ```python
-            {parent['code']}
-            ```
+            부모 설계:
+            - 가설: {parent.get('hypothesis', '?')}
+            - 진입: {parent.get('entry_logic', '?')}
+            - 청산: {parent.get('exit_logic', '?')}
+            - 기대 거래: {parent.get('expected_trades', '?')}
             부모 성과: Sharpe={parent.get('sharpe', '?'):.2f}
-            부모 약점: {parent.get('weakness', '알 수 없음')}
 
-            이 전략을 **딱 한 가지만** 변이시켜라:
-            - 진입 조건의 핵심 수식 변경
-            - 또는 청산 방식 변경
-            - 또는 포지션 크기 결정 방식 변경
-            전략의 페르소나와 핵심 아이디어는 유지해라.
+            이 설계를 **한 가지만** 변이시켜라 (진입 조건 OR 청산 방식 OR 리스크 관리).
             """
         else:
             task = f"""
-            ## 전략 생성 지시
+            ## 전략 설계 지시
             페르소나: {persona['name']}
             세계관: {persona['worldview']}
             스타일: {persona['style']}
             크로스 도메인 씨드: {seed}
-
-            씨드를 트레이딩 전략에 억지로라도 접목해라.
-            비유가 이상하더라도 끝까지 밀어붙여라.
             """
 
         prompt = f"""
-        너는 독창적인 퀀트 전략 연구자다. (세대: {generation})
+        너는 독창적인 퀀트 전략 설계자다. (세대: {generation})
 
         {feedback_instruction}
 
@@ -124,16 +138,7 @@ class LLMStrategyGenerator:
         ## 금지 지표
         다음은 절대 사용하지 마라: {', '.join(BANNED_INDICATORS)}
 
-        {self.SIGNAL_CONTRACT}
-
-        ## 출력 형식 (반드시 유효한 JSON)
-        {{
-            "name": "전략 이름 (자연현상/동물/물리현상 이름)",
-            "hypothesis": "이 전략이 작동하는 시장 비효율성 (한 문장)",
-            "hidden_assumption": "이 전략의 숨겨진 가정 (한 문장)",
-            "code": "완전한 Python 코드 (```없이 코드만)",
-            "expected_regime": "bull/bear/sideways/all 중 하나"
-        }}
+        {self.DESIGN_CONTRACT}
 
         JSON만 출력해라. 다른 텍스트 없이.
         """
@@ -143,21 +148,22 @@ class LLMStrategyGenerator:
 
         raw_response = await self.llm_service.generate(prompt)
         raw = raw_response.strip()
-        # JSON 파싱 시도
+
         try:
-            # 코드 블록 제거 후 파싱
             if "```json" in raw:
                 raw = raw.split("```json")[1].split("```")[0]
             elif "```" in raw:
                 raw = raw.split("```")[1].split("```")[0]
             data = json.loads(raw)
         except json.JSONDecodeError:
-            # 파싱 실패 시 코드만 추출 시도
             data = {
-                "name": f"Strategy-{generation}-{random.randint(100,999)}",
+                "name": f"Design-{generation}-{random.randint(100,999)}",
                 "hypothesis": "파싱 실패",
                 "hidden_assumption": "",
-                "code": raw,
+                "entry_logic": raw[:100],
+                "exit_logic": "unknown",
+                "expected_trades": "unknown",
+                "risk_management": "unknown",
                 "expected_regime": "all",
             }
 
@@ -165,6 +171,118 @@ class LLMStrategyGenerator:
         data["seed"] = seed
         data["generation"] = generation
         return data
+
+    def validate_design(self, design: dict) -> tuple[bool, list[str]]:
+        """설계의 논리성을 검증. 반환: (is_valid, warnings)"""
+        warnings = []
+
+        if not design.get("entry_logic") or len(design["entry_logic"]) < 10:
+            warnings.append("❌ 진입 조건이 명확하지 않음")
+
+        if not design.get("exit_logic") or len(design["exit_logic"]) < 10:
+            warnings.append("❌ 청산 조건이 명확하지 않음")
+
+        # 거래 빈도 체크 (너무 적거나 너무 많으면 경고)
+        trades_str = str(design.get("expected_trades", "")).lower()
+        if "0" in trades_str or "none" in trades_str or "no trade" in trades_str:
+            warnings.append("⚠️  거래가 0건으로 예상됨 (진입 조건 너무 엄격?)")
+
+        if not design.get("hypothesis"):
+            warnings.append("⚠️  작동 가설이 없음")
+
+        if not design.get("risk_management"):
+            warnings.append("⚠️  리스크 관리 방식 미명시")
+
+        is_valid = len([w for w in warnings if "❌" in w]) == 0
+        return is_valid, warnings
+
+    async def generate_code_from_design(
+        self,
+        design: dict,
+        generation: int = 1,
+        feedback: Optional[str] = None,
+    ) -> dict:
+        """설계에 기반해 코드 생성."""
+        feedback_instruction = ""
+        if feedback:
+            feedback_instruction = f"""
+            ## 이전 코드 피드백 (반드시 반영할 것)
+            {feedback}
+            위 문제를 해결하여 코드를 다시 작성해라.
+            """
+
+        prompt = f"""
+        너는 정확한 파이썬 코더다.
+
+        {feedback_instruction}
+
+        다음 설계를 **정확히** 따라 코드를 구현해라:
+
+        전략명: {design['name']}
+        가설: {design['hypothesis']}
+        진입 조건: {design['entry_logic']}
+        청산 조건: {design['exit_logic']}
+        기대 거래: {design['expected_trades']}
+        리스크 관리: {design['risk_management']}
+
+        {self.SIGNAL_CONTRACT}
+
+        출력 템플릿 (지표 예시):
+        ```python
+        import numpy as np
+        import pandas as pd
+
+        def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
+            close = test_df['close']
+            high  = test_df['high']
+            low   = test_df['low']
+            vol   = test_df['volume']
+
+            # 설계를 따라 지표 계산
+            # ...
+
+            sig = pd.Series(0, index=test_df.index, dtype=int)
+            # 설계의 진입/청산 로직을 구현
+            # ...
+
+            return sig.fillna(0).astype(int)
+        ```
+
+        Python 코드만 출력해라.
+        """
+
+        if not self.llm_service:
+            raise RuntimeError("LLM 서비스가 설정되지 않았습니다. .env 파일을 확인하세요.")
+
+        raw_response = await self.llm_service.generate(prompt)
+        code = self._extract_code(raw_response)
+
+        design["code"] = code
+        design["generation"] = generation
+        return design
+
+    def _extract_code(self, text: str) -> str:
+        """LLM 응답에서 Python 코드만 추출."""
+        if "```python" in text:
+            blocks = text.split("```python")
+            return blocks[-1].split("```")[0].strip()
+        elif "```" in text:
+            blocks = text.split("```")
+            if len(blocks) >= 3:
+                return blocks[1].strip()
+        return text.strip()
+
+    async def generate(
+        self,
+        persona: Optional[dict] = None,
+        seed: Optional[str] = None,
+        parent: Optional[dict] = None,
+        generation: int = 1,
+        feedback: Optional[str] = None,
+    ) -> dict:
+        """레거시 호환성: 설계→코드 2단계 통합."""
+        design = await self.generate_design(persona, seed, parent, generation, feedback)
+        return await self.generate_code_from_design(design, generation)
 
 
 # ─────────────────────────────────────────────
@@ -269,45 +387,76 @@ class StrategyPipeline:
         max_retries: int = 3,
     ) -> Optional[dict]:
         prefix = f"  [{generation}세대-{idx+1:02d}]"
-        last_feedback = None
+        last_design_feedback = None
+        last_code_feedback = None
 
         for attempt in range(max_retries):
             try:
-                # 1. 전략 생성 (피드백 포함 가능)
-                strategy = await self.generator.generate(
+                # ─── 1단계: 전략 설계 생성 ───
+                design = await self.generator.generate_design(
                     parent=parent,
                     generation=generation,
-                    feedback=last_feedback
+                    feedback=last_design_feedback
                 )
+
                 if attempt > 0:
-                    print(f"{prefix} 재시도({attempt}/{max_retries}): {strategy['name']}")
+                    print(f"{prefix} 설계 재생성({attempt}/{max_retries}): {design['name']}")
                 else:
-                    print(f"{prefix} 생성: {strategy['name']}")
+                    print(f"{prefix} 설계: {design['name']}")
 
-                # 2. 코드 실행 가능 여부 확인
-                fn = strategy_from_code(strategy["code"])
+                # ─── 2단계: 설계 검증 ───
+                is_valid, warnings = self.generator.validate_design(design)
+                if warnings:
+                    for w in warnings:
+                        print(f"{prefix}  {w}")
 
-                # 3. 백테스트 실행
+                if not is_valid:
+                    # 심각한 오류가 있으면 설계 단계에서 재생성
+                    critical_warnings = [w for w in warnings if "❌" in w]
+                    last_design_feedback = f"설계에 문제가 있습니다: {' / '.join(critical_warnings)}\n다시 설계를 작성해주세요."
+                    print(f"{prefix}  설계 재조정 중...")
+                    continue
+
+                print(f"{prefix}  ✓ 진입: {design['entry_logic'][:50]}...")
+                print(f"{prefix}  ✓ 청산: {design['exit_logic'][:50]}...")
+                print(f"{prefix}  ✓ 거래 예상: {design['expected_trades']}")
+
+                # ─── 3단계: 설계 기반 코드 생성 ───
+                strategy = await self.generator.generate_code_from_design(
+                    design,
+                    generation=generation,
+                    feedback=last_code_feedback
+                )
+                print(f"{prefix}  코드 생성 완료")
+
+                # ─── 4단계: 코드 실행 가능 여부 확인 ───
+                try:
+                    fn = strategy_from_code(strategy["code"])
+                except Exception as code_err:
+                    last_code_feedback = f"코드 실행 중 에러: {str(code_err)[:100]}\n설계를 유지하면서 코드만 수정하세요."
+                    print(f"{prefix}  ❌ 코드 에러 - 재생성 중...")
+                    continue
+
+                # ─── 5단계: 백테스트 실행 ───
                 result = self.engine.run_full_validation(
                     fn,
                     strategy_name=strategy["name"],
                     run_test_set=False,
                 )
 
-                # 4. 검증 결과 분석 (에러나 거래 없음 확인)
+                # ─── 6단계: 검증 결과 분석 ───
                 if not result.wfo_results:
-                    # WFO 결과가 없으면 (주로 거래가 너무 적거나 에러)
-                    last_feedback = "백테스트 구간 성과를 산출할 수 없습니다. 거래가 너무 적거나(최소 20건 이상 필요), 진입 조건이 너무 엄격할 수 있습니다."
-                    print(f"{prefix} ⚠️  거래 부족 또는 구간 에러 - 다시 짜는 중...")
+                    last_code_feedback = "거래가 발생하지 않았습니다(구간 에러). 진입 조건을 완화하세요."
+                    print(f"{prefix}  ⚠️  거래 없음 - 코드 수정 중...")
                     continue
 
                 total_trades = sum(r.n_trades for r in result.wfo_results)
                 if total_trades < 10:
-                    last_feedback = f"전체 WFO 구간 동안 거래가 {total_trades}건으로 너무 적습니다. 진입 조건을 더 완화하여 유의미한 거래 횟수를 확보하세요."
-                    print(f"{prefix} ⚠️  거래 횟수 부족 ({total_trades}건) - 다시 짜는 중...")
+                    last_code_feedback = f"거래가 {total_trades}건으로 너무 적습니다(최소 10건). 진입 조건을 더 완화하세요."
+                    print(f"{prefix}  ⚠️  거래 부족({total_trades}건) - 코드 수정 중...")
                     continue
 
-                # 성공적으로 검증된 경우 지표 추출
+                # 성공
                 sharpes = [r.sharpe for r in result.wfo_results]
                 strategy["sharpe"] = float(np.mean(sharpes))
                 strategy["sharpe_std"] = float(np.std(sharpes))
@@ -323,10 +472,9 @@ class StrategyPipeline:
                 return strategy
 
             except Exception as e:
-                # 런타임 에러 발생 시 피드백으로 전달
                 err_msg = str(e)
-                last_feedback = f"코드 실행 중 다음 에러가 발생했습니다: {err_msg}\n변수 정의나 pandas 문법을 확인하고 에러를 수정하세요."
-                print(f"{prefix} ❌ 에러 발생: {err_msg[:50]}... - 다시 짜는 중...")
+                last_code_feedback = f"예상 밖의 에러: {err_msg[:100]}"
+                print(f"{prefix} ❌ 에러: {err_msg[:50]}...")
                 if attempt == max_retries - 1:
                     traceback.print_exc()
 

@@ -26,6 +26,17 @@ const EXAMPLE_PROMPTS = [
   "돈치안/N봉 돌파 전략을 구축하고 ATR 포지션 관리와 가짜 돌파 필터를 결합해 주세요",
 ];
 
+const SKILL_STAGE_META: Record<string, { total: number; showProgress: boolean }> = {
+  CREATE_STRATEGY: { total: 5, showProgress: true },
+  MODIFY_STRATEGY: { total: 5, showProgress: true },
+  RUN_EVOLUTION: { total: 5, showProgress: true },
+  RUN_BACKTEST: { total: 5, showProgress: true },
+  EXPLAIN_STRATEGY: { total: 1, showProgress: false },
+  RISK_ANALYSIS: { total: 1, showProgress: false },
+  CODE_REVIEW: { total: 1, showProgress: false },
+  SUGGEST_NEXT: { total: 1, showProgress: false },
+};
+
 const formatChatRunError = (error: unknown): string => {
   if (error instanceof DOMException && error.name === "AbortError") {
     return "요청 시간이 초과되었습니다. 백테스트가 길어질 수 있어 잠시 후 다시 시도해 주세요.";
@@ -41,20 +52,53 @@ const formatChatRunError = (error: unknown): string => {
 
 // [PERF] Memoized individual message item to prevent re-rendering of entire list during streaming
 const MessageItem = memo(({ msg, onShowCode }: { msg: ChatMessage, onShowCode: (code: string, title?: string, payload?: any) => void }) => {
+  let mainContent = msg.content || "";
+  let thinkingContent = "";
+  let isThinkingStreaming = false;
+
+  // Extract <think> chunks from regular text messages dynamically
+  if (msg.role === 'assistant' && msg.type === 'text') {
+    const closedMatch = mainContent.match(/<(thought|think|think_process|reasoning)>([\s\S]*?)<\/\1>/i);
+    const streamingMatch = mainContent.match(/<(thought|think|think_process|reasoning)>([\s\S]*)$/i);
+
+    if (closedMatch) {
+      thinkingContent = closedMatch[2].trim();
+      mainContent = mainContent.replace(closedMatch[0], "").trim();
+    } else if (streamingMatch) {
+      thinkingContent = streamingMatch[2].replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '').trim();
+      mainContent = mainContent.replace(streamingMatch[0], "").trim();
+      isThinkingStreaming = true; // Still streaming
+    }
+    
+    // Clean up any remaining orphan tags
+    mainContent = mainContent.replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '').trim();
+  } else if (msg.type === 'thought') {
+    thinkingContent = (msg.content || "").replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '').trim();
+    mainContent = "";
+  }
+
   return (
     <div className={`flex flex-col py-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
       {msg.role === 'user' ? (
-        <div className="bg-purple-600/20 border border-purple-500/20 rounded-2xl px-4 py-2 max-w-[85%] text-sm text-purple-100 shadow-sm">
+        <div className="bg-purple-600/20 border border-purple-500/20 rounded-2xl px-4 py-2 max-w-[85%] text-sm text-purple-100 shadow-sm animate-in slide-in-from-right-2 duration-300">
           {msg.content}
         </div>
       ) : (
-        <div className="w-full space-y-4">
+        <div className="w-full space-y-4 animate-in fade-in duration-500">
             {msg.type === 'invocation' && (
-              <div className="flex flex-col gap-1.5 mb-2 animate-in slide-in-from-left duration-300">
+              <div className="flex flex-col gap-1.5 mb-2">
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl">
                   <Zap size={14} className="text-blue-400 fill-blue-400/20" />
                   <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">분류됨: {msg.content}</span>
                 </div>
+                {msg.data?.skill && (
+                  <div className="flex items-center gap-1.5 ml-3">
+                    <div className="w-1 h-1 rounded-full bg-blue-500/40" />
+                    <span className="text-[9px] font-bold text-blue-300/80 tracking-tight">
+                      [SKILL: {msg.data.skill}]
+                    </span>
+                  </div>
+                )}
                 {(msg.data?.router_model || msg.data?.model) && (
                   <div className="flex items-center gap-1.5 ml-3">
                     <div className="w-1 h-1 rounded-full bg-blue-500/40" />
@@ -74,37 +118,40 @@ const MessageItem = memo(({ msg, onShowCode }: { msg: ChatMessage, onShowCode: (
               </div>
             )}
 
-            {msg.role === 'assistant' && msg.type === 'text' && (
-            <div className="text-[11px] text-slate-400/90 leading-normal px-1 font-medium markdown-content pt-1 transition-all">
-              <ReactMarkdown 
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeRaw]}
-                >
-                  {msg.content
-                    ?.replace(/<(thought|think|think_process|reasoning)>[\s\S]*?<\/\1>/gi, '')
-                    ?.replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '')
-                  }
-                </ReactMarkdown>
-            </div>
-          )}
+            {thinkingContent && (
+              <details className="group mb-2 max-w-[95%]" open={isThinkingStreaming}>
+                <summary className="flex items-center gap-2 px-3 py-2 bg-amber-500/5 border border-amber-500/10 rounded-xl cursor-pointer hover:bg-amber-500/10 transition-all list-none">
+                  {isThinkingStreaming ? (
+                    <Loader2 size={12} className="text-amber-500 animate-spin" />
+                  ) : (
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500/40" />
+                  )}
+                  <span className="text-[10px] font-bold tracking-widest uppercase text-amber-400/60">
+                    {isThinkingStreaming ? "AI Reasoning (Typing...)" : "AI Reasoning"}
+                  </span>
+                  <Plus size={10} className="ml-auto text-amber-400/40 group-open:rotate-45 transition-transform" />
+                </summary>
+                <div className="mt-2 px-4 py-3 bg-amber-500/[0.02] border border-amber-500/5 rounded-xl text-[11px] text-slate-400/90 leading-relaxed font-medium italic thought-markdown markdown-content overflow-hidden">
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeRaw]}
+                  >
+                    {thinkingContent + (isThinkingStreaming ? " ▋" : "")}
+                  </ReactMarkdown>
+                </div>
+              </details>
+            )}
 
-          {msg.type === 'thought' && (
-            <details className="group mb-2 max-w-[95%]">
-              <summary className="flex items-center gap-2 px-3 py-2 bg-amber-500/5 border border-amber-500/10 rounded-xl cursor-pointer hover:bg-amber-500/10 transition-all list-none">
-                <div className="w-1.5 h-1.5 rounded-full bg-amber-500/40 animate-pulse" />
-                <span className="text-[10px] font-bold tracking-widest uppercase text-amber-400/60">AI Reasoning</span>
-                <Plus size={10} className="ml-auto text-amber-400/40 group-open:rotate-45 transition-transform" />
-              </summary>
-              <div className="mt-2 px-4 py-3 bg-amber-500/[0.02] border border-amber-500/5 rounded-xl text-[11px] text-slate-400/90 leading-relaxed font-medium italic thought-markdown markdown-content overflow-hidden">
+            {mainContent && (
+              <div className="text-[11px] text-slate-300 leading-normal px-1 font-medium markdown-content pt-1 transition-all">
                 <ReactMarkdown 
                   remarkPlugins={[remarkGfm]}
                   rehypePlugins={[rehypeRaw]}
                 >
-                  {msg.content?.replace(/<\/?(thought|think)[^>]*>/gi, '')}
+                  {mainContent}
                 </ReactMarkdown>
               </div>
-            </details>
-          )}
+            )}
 
           {msg.type === 'strategy' && (
             <div className="flex flex-col bg-white/[0.03] border border-white/[0.08] rounded-xl p-4 shadow-xl gap-3 backdrop-blur-md mb-6">
@@ -176,6 +223,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   const [isLoading, setIsLoading] = useState(false);
   const [statusText, setStatusText] = useState("AI 분석 중...");
   const [currentStage, setCurrentStage] = useState(0);
+  const [totalStages, setTotalStages] = useState(0);
+  const [showStageProgress, setShowStageProgress] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   // stage 이벤트마다 새 블록을 강제 시작하기 위한 key
@@ -340,6 +389,19 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     setMessages((prev) => [...prev, message]);
   };
 
+  // [UX] 메시지 개수가 변경되었을 때 즉, 내가 메시지를 치거나 새 블록이 생겼을 때 무조건 가장 아래로 강제 스크롤
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => {
+        virtuosoRef.current?.scrollToIndex({ 
+          index: messages.length - 1, 
+          align: 'end', 
+          behavior: 'smooth' 
+        });
+      }, 50); // DOM 업데이트 대기 후 스크롤
+    }
+  }, [messages.length]);
+
   const handleShowCode = useCallback((code: string, title?: string, payload?: any) => {
     if (!code) return;
     if (onApplyCode) {
@@ -367,6 +429,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     setInput("");
     setIsLoading(true);
     setCurrentStage(0);
+    setTotalStages(0);
+    setShowStageProgress(false);
     currentStageIdRef.current = "";
     setStatusText("AI 분석 중...");
 
@@ -440,7 +504,15 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
               case "stage": {
                 const newStageId = `stage-${event.stage}-${Date.now()}`;
                 currentStageIdRef.current = newStageId;
-                setCurrentStage(event.stage);
+                const stageNum = Number(event.stage) || 0;
+                setCurrentStage(stageNum);
+                // invocation 정보가 없는 승인 재요청(예/네) 케이스를 위한 fallback
+                if (stageNum > 1 && !showStageProgress) {
+                  setShowStageProgress(true);
+                }
+                if (stageNum > 0 && totalStages === 0) {
+                  setTotalStages(stageNum >= 4 ? 5 : stageNum);
+                }
                 setStatusText(event.label ?? `단계 ${event.stage} 진행 중...`);
                 break;
               }
@@ -502,12 +574,15 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 break;
 
               case "invocation":
+                const stageMeta = SKILL_STAGE_META[event.skill] ?? { total: 0, showProgress: false };
+                setTotalStages(stageMeta.total);
+                setShowStageProgress(stageMeta.showProgress);
                 appendMessage({
                   id: `${Date.now()}-invoke-${event.skill}`,
                   role: "assistant",
                   content: event.label || event.skill,
                   type: "invocation",
-                  data: { model: event.model, router_model: event.router_model, models: event.models }
+                  data: { skill: event.skill, model: event.model, router_model: event.router_model, models: event.models }
                 });
                 setStatusText(`⚡ ${event.label || event.skill} 발동 중... ${event.model ? `(${event.model})` : ''}`);
                 break;
@@ -537,7 +612,14 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 break;
 
               case "error":
-                throw new Error(event.content);
+                appendMessage({
+                  id: `${Date.now()}-pipeline-error`,
+                  role: "assistant",
+                  content: event.content || "파이프라인 실행 중 오류가 발생했습니다.",
+                  type: "text",
+                });
+                setStatusText("❌ 파이프라인 오류");
+                break;
             }
           } catch (err) {
             console.error("Event Parse Error:", err, line);
@@ -626,7 +708,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
         <Virtuoso
           ref={virtuosoRef}
           data={messages}
-          followOutput={(isAtBottom) => isAtBottom ? 'smooth' : false}
+          followOutput="smooth"
           className="custom-scrollbar"
           alignToBottom
           itemContent={(index, msg) => (
@@ -681,18 +763,20 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
               <span className="text-[10px] font-black tracking-[0.2em] text-slate-400 uppercase">
                 {statusText}
               </span>
-              <div className="flex gap-1.5 ml-auto items-center">
-                {[1, 2, 3, 4, 5].map(s => (
-                  <div 
-                    key={s} 
-                    className={`h-1.5 w-1.5 rounded-full transition-all duration-700 ease-out ${
-                      s <= currentStage 
-                        ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.8)] scale-110' 
-                        : 'bg-white/10'
-                    }`} 
-                  />
-                ))}
-              </div>
+              {showStageProgress && totalStages > 1 && (
+                <div className="flex gap-1.5 ml-auto items-center">
+                  {Array.from({ length: totalStages }, (_, idx) => idx + 1).map((s) => (
+                    <div
+                      key={s}
+                      className={`h-1.5 w-1.5 rounded-full transition-all duration-700 ease-out ${
+                        s <= currentStage
+                          ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.8)] scale-110'
+                          : 'bg-white/10'
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

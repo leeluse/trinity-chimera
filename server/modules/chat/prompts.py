@@ -79,64 +79,68 @@ REASONING_PROMPT_TEMPLATE = """요청: "{message}"
 DESIGN_PROMPT_TEMPLATE = """이전 분석:
 {reasoning}
 
-위 분석을 바탕으로 아래 형식으로 **전략 설계 청사진**을 완성하세요.
+위 분석을 바탕으로 아래 YAML 형식의 전략 설계 청사진을 완성하세요. 다른 텍스트 없이 YAML 블록만 출력하세요.
 
-## 전략 설계 청사진
+```yaml
+strategy:
+  name: ""
+  type: ""        # trend_following / mean_reversion / volatility_breakout / hybrid
+  hypothesis: ""  # "X 상황에서 Y 조건이면 Z 방향"
+  best_market: "" # 작동하는 시장 조건
 
-### 기본 정보
-| 항목 | 내용 |
-|---|---|
-| 전략명 | |
-| 전략 유형 | |
-| 핵심 가설 | |
-| 최적 시장 조건 | |
+signal:
+  tier1_trend:
+    indicator: ""
+    params: ""
+    role: ""      # 매매 방향 결정
+  tier2_entry:
+    indicator: ""
+    params: ""
+    role: ""      # 구체적 진입 타이밍
+  tier3_filter:
+    indicator: ""
+    params: ""
+    role: ""      # 오신호 억제
 
-### 신호 구조 (3-Tier 필수)
-| Tier | 역할 | 지표/조건 | 파라미터 및 근거 |
-|---|---|---|---|
-| 1. 추세 방향 | 매매 방향 결정 (롱/숏 bias) | | |
-| 2. 진입 타이밍 | 구체적 진입 시점 | | |
-| 3. 확인 필터 | 오신호 억제 | | |
+regime_filter:
+  condition: ""   # 예: "atr > atr_ma * 0.7"
+  no_trade_when: ""
 
-### 레짐 필터 (비거래 조건)
-- 이 조건이면 신호 = 0 (포지션 없음):
-  ```
-  예: ADX < 20 → 횡보 구간 → 거래 억제
-  예: ATR < ATR_MA × 0.6 → 변동성 부족 → 거래 억제
-  ```
+entry_exit:
+  long:
+    entry: ""
+    exit: ""
+  short:
+    entry: ""
+    exit: ""
 
-### 진입 / 청산 규칙
-| | 롱 (매수) | 숏 (매도) |
-|---|---|---|
-| 진입 조건 | | |
-| 익절 신호 | | |
-| 손절 신호 | | |
+adaptive_thresholds:
+  - var: ""
+    formula: ""   # 예: "rsi_tr.quantile(0.75)"
 
-### 논리 정합성 체크 (필수)
-- 롱/숏 조건이 서로 모순되지 않게 대칭 구조로 작성할 것
-- 추세추종 전략이면 롱에서 약세 확인 조건(RSI<중립선 등)을 넣지 말 것
-- 역추세 조건을 쓸 경우 근거를 한 줄로 명시할 것
-
-### train_df 활용 계획
-- 동적으로 계산할 임계값:
-  ```python
-  # 예시: 과매수/과매도 기준을 train_df에서 추출
-  rsi_upper = rsi_on_train.quantile(0.75)
-  rsi_lower = rsi_on_train.quantile(0.25)
-  vol_baseline = train_df['volume'].mean() * 1.5
-  ```
-- 고정 파라미터와 그 근거 (고정해야 하는 이유 명시):
-
-### 예상 성과 프로파일
-- 거래 빈도: 약 ___ 건 / 연간
-- 예상 Sharpe 범위:
-- 전략이 망가지는 시장 구간:
+risk_profile:
+  trade_freq: "~N / year"
+  sharpe_estimate: ""
+  fail_condition: ""
+```
 """
 
 CODE_PROMPT_TEMPLATE = """설계도:
 {design}
 
 위 설계도를 바탕으로 아래 규격에 맞는 **고품질 Python 전략 코드**를 구현해라.
+
+코드를 작성하기 전에 반드시 `<think>` 태그 안에서 다음을 검토하라:
+```
+<think>
+1. tier1/tier2/tier3 각 지표의 판다스 구현 의사코드
+2. regime_filter 조건식
+3. 롱 진입: regime_ok & tier1_long & tier2_long & tier3_ok
+   숏 진입: regime_ok & tier1_short & tier2_short & tier3_ok
+4. AND 조건 개수 확인 (3개 초과 시 하나 제거)
+5. 신호 빈도 예상: 엄격도 체크 → ≥50건 가능한가
+</think>
+```
 
 ---
 ### 함수 시그니처 (변경 불가)

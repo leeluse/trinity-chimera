@@ -38,12 +38,19 @@ _classify_intent()      ← 인텐트 분류기 (5가지)
 
 ### A. 전략 생성 (`_execute_create_pipeline`)
 
-| Stage | 모델 | 역할 |
-|---|---|---|
-| 1 추론 | `qwen3.5-122b-a10b` (메인 브레인) | 사용자 의도 분석, 전략 방향 도출 |
-| 2 설계 | `kimi-k2.5` (장문 분석) | 진입/청산/필터 설계도 마크다운 표 |
-| 3 코드 | `deepseek-v3.1-terminus` (코더) | `generate_signal()` Python 코드 생성 |
-| 4 백테스트 | ChatBacktester | 경량 백테스트 → 게이트 평가 → Tips |
+| Stage | 모델 | 역할 | temperature |
+|---|---|---|---|
+| 1 추론 | `qwen3.5-122b-a10b` (메인 브레인) | 사용자 의도 분석, 전략 방향 도출 | 0.7 |
+| 2 설계 | `kimi-k2.5` (장문 분석) | YAML 설계 청사진 생성 | 0.8 |
+| 3 코드 | `deepseek-v3.1-terminus` (코더) | `generate_signal()` Python 코드 생성 + `<think>` 의사코드 | 0.3 |
+| 4 백테스트 | ChatBacktester | 경량 백테스트 → 게이트 평가 → Tips | — |
+
+**Stage 2 설계 포맷 (YAML 청사진)**: 마크다운 표 대신 YAML 블록으로 압축 (~80 tokens).
+`strategy.type`, `signal.tier1~3`, `regime_filter`, `entry_exit`, `adaptive_thresholds`, `risk_profile` 필드 포함.
+
+**Stage 3 `<think>` 의사코드 강제**: 코드 작성 전 `<think>` 블록에서
+- 지표 의사코드, 레짐 필터식, 롱/숏 조건, AND 조건 개수 체크, 신호 빈도 예상을 자체 검증.
+- AND 조건 3개 초과 시 하나 제거 규칙 포함.
 
 ### B. 전략 수정 (`_execute_modify_pipeline`)
 
@@ -54,7 +61,8 @@ _classify_intent()      ← 인텐트 분류기 (5가지)
 | 3 코드 | 수정된 코드 (`MODIFY_CODE_TEMPLATE`) — 파라미터만 바꾸면 거부 |
 | 4 비교 | 수정 전후 성과 비교표 (수익률/MDD/Sharpe/거래 수) |
 
-수정 파이프라인 선행 조건: `_session_last_strategy[session_id]`에 이전 전략 존재.
+수정 파이프라인 선행 조건: 이전 전략이 세션 메모리 또는 DB(`type=strategy/backtest`)에 존재.
+이전 전략이 없으면 자동으로 CREATE 파이프라인으로 fallback되고 "(이전 전략이 없어 신규 생성 파이프라인으로 진행합니다)" 노트를 사용자에게 전달한다.
 
 ### C. 에볼루션 채굴 (`_execute_create_pipeline(is_mining=True)`)
 
@@ -71,9 +79,9 @@ _session_last_strategy: Dict[str, Dict] = {}
 # {session_id: {code, title, metrics, gate_metrics, timestamp}}
 ```
 
-- 백테스트 성공 시마다 자동 업데이트
-- MODIFY 파이프라인이 이 데이터를 읽어 이전 전략 이해
-- 세션 종료 시 소멸 (영속성 없음 — 향후 DB 연동 예정)
+- 백테스트 성공 시마다 자동 업데이트 (title, code, metrics 모두 저장)
+- MODIFY/EXPLAIN/RISK 스킬이 이 데이터를 읽어 이전 전략 참조
+- 세션 재시작 시: `get_last_strategy_message()` → DB에서 `type IN ['strategy','backtest']` + `desc=True limit=1` 쿼리로 복구
 
 ## 코드 검증 흐름
 

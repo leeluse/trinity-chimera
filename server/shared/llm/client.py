@@ -13,7 +13,33 @@ logger = logging.getLogger(__name__)
 async def stream_code_gen_reply(prompt: str) -> AsyncGenerator[str, None]:
     """Stage 3 코드 생성 전용. CODE_GEN_MODEL(코더/툴콜 역할) 사용."""
     model = (os.getenv("CODE_GEN_MODEL") or "").strip()
-    async for chunk in stream_chat_reply(prompt, model=model or None):
+    max_tokens = int(os.getenv("CHAT_CODE_GEN_MAX_TOKENS", "3200"))
+    cfg = _get_llm_config()
+    target_model = _normalize_model(model or cfg["model"], provider=cfg["provider"])
+    messages = _build_messages(prompt)
+    if cfg["provider"] == "litellm":
+        try:
+            response = await acompletion(
+                model=target_model,
+                messages=messages,
+                api_base=cfg["base_url"],
+                api_key=cfg.get("api_key"),
+                temperature=0.3,
+                max_tokens=max_tokens,
+                timeout=_litellm_failover_timeout_seconds(),
+                num_retries=0,
+                stream=True,
+            )
+            async for chunk in response:
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield content
+            return
+        except Exception as e:
+            logger.error(f"stream_code_gen_reply error: {e}")
+            yield f"\n[코드 생성 오류: {e}]"
+            return
+    async for chunk in stream_chat_reply(prompt, model=model or None, temperature=0.3):
         yield chunk
 
 
@@ -49,6 +75,12 @@ def _litellm_failover_timeout_seconds() -> float:
     except Exception:
         raw = 12.0
     return max(3.0, min(raw, _timeout_seconds()))
+
+
+def _ollama_fallback_enabled() -> bool:
+    raw = (os.getenv("LLM_ENABLE_OLLAMA_FALLBACK") or "0").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
 
 def _get_llm_config() -> Dict[str, str]:
     provider = os.getenv("LLM_PROVIDER", "ollama").lower()
@@ -182,6 +214,14 @@ async def generate_chat_reply(
                 "fallback": False
             }
         except Exception as e:
+            if not _ollama_fallback_enabled():
+                logger.error(f"LiteLLM error (Ollama fallback disabled): {e}")
+                return {
+                    "content": _local_fallback(user_message, context),
+                    "provider": "litellm_error",
+                    "model": target_model,
+                    "fallback": True,
+                }
             logger.error(f"LiteLLM error: {e}")
             # Automatic local fallback (Ollama) when LiteLLM proxy is unavailable.
             try:
@@ -238,8 +278,17 @@ async def stream_chat_reply(
     cfg = _get_llm_config()
     target_model = _normalize_model(model or cfg["model"], provider=cfg["provider"])
     messages = _build_messages(user_message, context, history, system_appendix, custom_system_prompt)
+    logger.info(
+        "[llm.stream] start provider=%s model=%s temp=%.2f history=%d msg_len=%d",
+        cfg["provider"],
+        target_model,
+        float(temperature),
+        len(history or []),
+        len(user_message or ""),
+    )
     
     if cfg["provider"] == "litellm":
+        emitted_chars = 0
         try:
             response = await acompletion(
                 model=target_model,
@@ -254,20 +303,36 @@ async def stream_chat_reply(
             async for chunk in response:
                 content = chunk.choices[0].delta.content
                 if content:
+                    emitted_chars += len(content)
                     yield content
+            logger.info(
+                "[llm.stream] done provider=litellm model=%s chars=%d",
+                target_model,
+                emitted_chars,
+            )
             return
         except Exception as e:
+            if not _ollama_fallback_enabled():
+                logger.error(f"LiteLLM stream error (Ollama fallback disabled): {e}")
+                yield f"\n[LLM 연결 오류: {str(e)}]"
+                return
             logger.error(f"LiteLLM stream error: {e}")
             # Automatic streaming fallback to local Ollama
             try:
                 ollama_model = _ollama_model_fallback(target_model)
                 ollama_url = f"{_ollama_base_url()}/api/chat"
+                logger.info(
+                    "[llm.stream] fallback start provider=ollama model=%s (from=%s)",
+                    ollama_model,
+                    target_model,
+                )
                 payload = {
                     "model": ollama_model,
                     "messages": messages,
                     "stream": True,
                     "options": {"temperature": float(temperature)},
                 }
+                fb_chars = 0
                 async with httpx.AsyncClient(timeout=_timeout_seconds()) as client:
                     async with client.stream("POST", ollama_url, json=payload) as response:
                         async for line in response.aiter_lines():
@@ -276,9 +341,16 @@ async def stream_chat_reply(
                             try:
                                 chunk = json.loads(line)
                                 if "message" in chunk and "content" in chunk["message"]:
-                                    yield chunk["message"]["content"]
+                                    content = chunk["message"]["content"]
+                                    fb_chars += len(content)
+                                    yield content
                             except Exception:
                                 continue
+                logger.info(
+                    "[llm.stream] fallback done provider=ollama model=%s chars=%d",
+                    ollama_model,
+                    fb_chars,
+                )
                 return
             except Exception as fb_err:
                 logger.error(f"Ollama stream fallback error: {fb_err}")
@@ -289,6 +361,7 @@ async def stream_chat_reply(
     url = f"{cfg['base_url']}/api/chat"
     payload = {"model": target_model, "messages": messages, "stream": True, "options": {"temperature": float(temperature)}}
     try:
+        emitted_chars = 0
         async with httpx.AsyncClient(timeout=_timeout_seconds()) as client:
             async with client.stream("POST", url, json=payload) as response:
                 async for line in response.aiter_lines():
@@ -296,8 +369,15 @@ async def stream_chat_reply(
                     try:
                         chunk = json.loads(line)
                         if "message" in chunk and "content" in chunk["message"]:
-                            yield chunk["message"]["content"]
+                            content = chunk["message"]["content"]
+                            emitted_chars += len(content)
+                            yield content
                     except: continue
+        logger.info(
+            "[llm.stream] done provider=ollama model=%s chars=%d",
+            target_model,
+            emitted_chars,
+        )
     except Exception as e:
         logger.error(f"Ollama stream error: {e}")
         yield f"\n[로컬 Ollama 연결 오류: {str(e)}]"

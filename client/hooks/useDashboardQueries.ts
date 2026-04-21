@@ -1,9 +1,31 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { APIClient, DashboardMetrics, DashboardProgress, EvolutionLogEvent, DecisionLogEvent } from "@/lib/api";
+import { APIClient } from "@/lib/api";
 import { MetricKey } from "@/types";
 
-export const useDashboardQueries = () => {
+interface DashboardQueryOptions {
+  enableEvolutionLogs?: boolean;
+  enableDecisionLogs?: boolean;
+  statsIntervalMs?: number;
+  logsIntervalMs?: number;
+  evolutionLogLimit?: number;
+  decisionLogLimit?: number;
+}
+
+interface TimeseriesQueryOptions {
+  refetchIntervalMs?: number;
+  enabled?: boolean;
+}
+
+export const useDashboardQueries = (options: DashboardQueryOptions = {}) => {
   const queryClient = useQueryClient();
+  const {
+    enableEvolutionLogs = true,
+    enableDecisionLogs = true,
+    statsIntervalMs = 6000,
+    logsIntervalMs = 8000,
+    evolutionLogLimit = 120,
+    decisionLogLimit = 140,
+  } = options;
 
   // 1. Dashboard Core Stats (Metrics, Progress, Automation)
   const statsQuery = useQuery({
@@ -16,21 +38,26 @@ export const useDashboardQueries = () => {
       ]);
       return { prog, met, auto };
     },
-    refetchInterval: 4000,
+    refetchInterval: statsIntervalMs,
+    refetchIntervalInBackground: false,
   });
 
   // 2. Evolution Logs
   const evolutionLogsQuery = useQuery({
     queryKey: ["dashboard", "evolutionLogs"],
-    queryFn: () => APIClient.getEvolutionLog(220),
-    refetchInterval: 4000,
+    queryFn: () => APIClient.getEvolutionLog(evolutionLogLimit),
+    enabled: enableEvolutionLogs,
+    refetchInterval: logsIntervalMs,
+    refetchIntervalInBackground: false,
   });
 
   // 3. Decision/Backtest Logs
   const decisionLogsQuery = useQuery({
     queryKey: ["dashboard", "decisionLogs"],
-    queryFn: () => APIClient.getDecisionLogs(260),
-    refetchInterval: 4000,
+    queryFn: () => APIClient.getDecisionLogs(decisionLogLimit),
+    enabled: enableDecisionLogs,
+    refetchInterval: logsIntervalMs,
+    refetchIntervalInBackground: false,
   });
 
   // 4. Mutations
@@ -53,7 +80,12 @@ export const useDashboardQueries = () => {
   };
 };
 
-export const useAgentTimeseries = (metric: MetricKey, agentIds: string[]) => {
+export const useAgentTimeseries = (
+  metric: MetricKey,
+  agentIds: string[],
+  options: TimeseriesQueryOptions = {}
+) => {
+  const { refetchIntervalMs = 7000, enabled = true } = options;
   return useQuery({
     queryKey: ["dashboard", "timeseries", metric, agentIds.join("|")],
     queryFn: async () => {
@@ -67,7 +99,8 @@ export const useAgentTimeseries = (metric: MetricKey, agentIds: string[]) => {
       }));
       return results;
     },
-    enabled: agentIds.length > 0,
-    refetchInterval: 4000,
+    enabled: enabled && agentIds.length > 0,
+    refetchInterval: refetchIntervalMs,
+    refetchIntervalInBackground: false,
   });
 };

@@ -371,7 +371,7 @@ async def get_dashboard_improvement(response: Response):
 @dashboard_router.get("/evolution-log")
 async def get_evolution_log(
     response: Response,
-    limit: int = Query(120, ge=1, le=500),
+    limit: int = Query(80, ge=1, le=200),
     agent_id: Optional[str] = Query(None),
 ):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -388,7 +388,7 @@ async def get_evolution_log(
 @dashboard_router.get("/logs")
 async def get_dashboard_logs(
     response: Response,
-    limit: int = Query(220, ge=1, le=1000),
+    limit: int = Query(120, ge=1, le=300),
     agent_id: Optional[str] = Query(None),
 ):
     """

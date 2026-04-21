@@ -103,7 +103,14 @@ async def run_backtest(
         yield format_sse({"type": "stage", "stage": 5, "label": "🏆 전략 생성 및 백테스트 완료!"})
         
         bt_summary = f"{strategy_title} | 수익률 {backtest_data['ret']} MDD {backtest_data['mdd']} Sharpe {backtest_data['sharpe']}"
-        await db.save_chat_message(session_id, "assistant", bt_summary, "backtest", {**backtest_data, "code": strategy_code, "trades": metrics.get("total_trades", 0), "pf": f"{metrics.get('profit_factor', 0):.2f}"})
+        await db.save_chat_message(session_id, "assistant", bt_summary, "backtest", {
+            **backtest_data,
+            "title": strategy_title,
+            "code": strategy_code,
+            "metrics": metrics,
+            "trades": metrics.get("total_trades", 0),
+            "pf": f"{metrics.get('profit_factor', 0):.2f}",
+        })
 
         session_memory[session_id] = {
             "code": strategy_code,

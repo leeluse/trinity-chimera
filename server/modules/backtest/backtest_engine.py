@@ -699,6 +699,14 @@ def strategy_from_code(code: str) -> Callable:
         "Series": pd.Series
     }
 
+    # .max / .min / .mean 등 집계 메서드를 () 없이 비교 연산자에 쓰는 LLM 패턴 자동 수정
+    import re as _re
+    code = _re.sub(
+        r'\.(max|min|mean|std|sum|count|var|median)\b(?!\s*\()',
+        r'.\1()',
+        code,
+    )
+
     try:
         exec(code, namespace)
     except Exception as e:

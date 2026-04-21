@@ -578,6 +578,63 @@ class SupabaseManager:
             logger.exception("Error fetching chat history (session=%s): %s", session_id, e)
             return []
 
+    async def get_last_strategy_message(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """strategy 또는 backtest 타입의 최신 메시지 1건을 반환."""
+        try:
+            def _query():
+                return (
+                    self.client.table("chat_messages")
+                    .select("*")
+                    .eq("session_id", session_id)
+                    .in_("type", ["strategy", "backtest"])
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+            res = await asyncio.to_thread(_query)
+            rows = res.data or []
+            return rows[0] if rows else None
+        except Exception as e:
+            logger.exception("Error fetching last strategy message (session=%s): %s", session_id, e)
+            return None
+
+    async def get_last_strategy_message_any(self) -> Optional[Dict[str, Any]]:
+        """세션 구분 없이 strategy/backtest 최신 메시지 1건을 반환."""
+        try:
+            def _query():
+                return (
+                    self.client.table("chat_messages")
+                    .select("*")
+                    .in_("type", ["strategy", "backtest"])
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+            res = await asyncio.to_thread(_query)
+            rows = res.data or []
+            return rows[0] if rows else None
+        except Exception as e:
+            logger.exception("Error fetching global last strategy message: %s", e)
+            return None
+
+    async def get_last_strategy_row_any(self) -> Optional[Dict[str, Any]]:
+        """chat_messages에 없을 때를 대비해 strategies 최신 1건을 반환."""
+        try:
+            def _query():
+                return (
+                    self.client.table("strategies")
+                    .select("id,name,code,params,created_at")
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+            res = await asyncio.to_thread(_query)
+            rows = res.data or []
+            return rows[0] if rows else None
+        except Exception as e:
+            logger.exception("Error fetching global last strategy row: %s", e)
+            return None
+
     async def delete_chat_messages(self, session_id: str) -> bool:
         """특정 세션의 채팅 메시지 전체 삭제"""
         try:

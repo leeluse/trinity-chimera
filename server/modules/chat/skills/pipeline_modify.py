@@ -1,13 +1,12 @@
 """MODIFY_STRATEGY 파이프라인 (분석 → 설계 → 수정 코드 → 백테스트 + 비교)"""
 import logging
 import os
-from typing import Any, AsyncGenerator, Dict, List
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from server.shared.llm.client import stream_chat_reply, stream_analysis_reply, stream_code_gen_reply
 from server.shared.market.strategy_loader import StrategyLoader, SecurityError
 from server.modules.evolution.wiki_memory import EvolutionWikiMemory
 from server.modules.chat.prompts import (
-    SYSTEM_PROMPT,
     DESIGN_PROMPT_TEMPLATE,
     MODIFY_ANALYZE_TEMPLATE,
     MODIFY_CODE_TEMPLATE,
@@ -16,6 +15,7 @@ from server.modules.chat.skills._base import (
     format_sse,
     extract_python_code,
     extract_strategy_title,
+    salvage_valid_python,
     resolve_target_agent,
     build_memory_guardrail,
     get_last_strategy,
@@ -23,6 +23,28 @@ from server.modules.chat.skills._base import (
 from server.modules.chat.skills.pipeline_backtest import run_backtest
 
 logger = logging.getLogger(__name__)
+
+
+async def _recover_code_once(raw_output: str, original_prompt: str, reason: str) -> str:
+    """중간 끊김/형식 깨짐 대응용 1회 복구."""
+    broken = (raw_output or "").strip()
+    if not broken:
+        return ""
+
+    recovery_prompt = (
+        "아래 출력은 중간에 끊겼거나 형식이 깨진 전략 코드다.\n"
+        "실행 가능한 완전한 Python 코드만 출력하라.\n"
+        "필수 함수 시그니처:\n"
+        "def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series\n"
+        "설명문/마크다운 문장 금지. 코드블록 1개 또는 순수 코드만 출력.\n\n"
+        f"[실패 원인]\n{reason}\n\n"
+        f"[원래 수정 지시 일부]\n{original_prompt[-2500:]}\n\n"
+        f"[끊긴 출력 일부]\n{broken[-3500:]}\n"
+    )
+    repaired_full = ""
+    async for chunk in stream_code_gen_reply(recovery_prompt):
+        repaired_full += chunk
+    return extract_python_code(repaired_full)
 
 
 async def run_modify_pipeline(
@@ -50,12 +72,12 @@ async def run_modify_pipeline(
     chat_mutation_hint = str(memory_context.get("next_mutation") or "").strip()
     guardrail_block = build_memory_guardrail(memory_context)
 
-    quick_model = ((os.getenv("QUICK_MODEL") or os.getenv("LITELLM_MODEL") or "Quick Model").split("/")[-1]).strip()
+    reasoning_model = ((os.getenv("LITELLM_MODEL") or os.getenv("QUICK_MODEL") or "Brain Model").split("/")[-1]).strip()
     analysis_model = ((os.getenv("ANALYSIS_MODEL") or os.getenv("LITELLM_MODEL") or "Analysis Model").split("/")[-1]).strip()
     code_model = ((os.getenv("CODE_GEN_MODEL") or os.getenv("LITELLM_MODEL") or "Code Model").split("/")[-1]).strip()
 
     yield format_sse({"type": "stage", "stage": 1,
-                      "label": f"🔍 '{prev_title}' 분석 및 약점 탐색 중... ({quick_model})"})
+                      "label": f"🔍 '{prev_title}' 분석 및 약점 탐색 중... ({reasoning_model})"})
     prompt_analyze = MODIFY_ANALYZE_TEMPLATE.format(
         prev_code=prev_code,
         prev_metrics=str(prev_metrics),
@@ -63,8 +85,8 @@ async def run_modify_pipeline(
     )
     analysis_full = ""
     async for chunk in stream_chat_reply(user_message=prompt_analyze, context=context,
-                                          history=history, custom_system_prompt=SYSTEM_PROMPT,
-                                          model=(os.getenv("QUICK_MODEL") or None)):
+                                          history=history,
+                                          model=(os.getenv("LITELLM_MODEL") or None)):
         if chunk is None or chunk == "":
             continue
         analysis_full += chunk
@@ -90,15 +112,35 @@ async def run_modify_pipeline(
         code_full += chunk
 
     strategy_code = extract_python_code(code_full)
+    strategy_code = salvage_valid_python(strategy_code)
+    validation_error: Optional[str] = None
     if not strategy_code:
-        yield format_sse({"type": "error", "content": "수정된 코드 추출 실패."})
+        validation_error = "수정된 코드 추출 실패"
+    else:
+        try:
+            StrategyLoader.validate_code(strategy_code)
+        except (SecurityError, SyntaxError) as e:
+            validation_error = str(e)
+
+    if validation_error:
+        yield format_sse({"type": "analysis", "content": "\n코드가 중간에 끊겨 자동 복구를 시도합니다...\n"})
+        recovered = await _recover_code_once(code_full, prompt_code, validation_error)
+        recovered = salvage_valid_python(recovered)
+        if recovered:
+            strategy_code = recovered
+            try:
+                StrategyLoader.validate_code(strategy_code)
+                validation_error = None
+            except (SecurityError, SyntaxError) as e:
+                validation_error = str(e)
+
+    if not strategy_code:
+        yield format_sse({"type": "error", "content": "수정된 코드 추출 실패: 출력이 중간에 끊겼습니다."})
         yield format_sse({"type": "done"})
         return
 
-    try:
-        StrategyLoader.validate_code(strategy_code)
-    except (SecurityError, SyntaxError) as e:
-        yield format_sse({"type": "error", "content": f"수정 코드 검증 실패: {e}"})
+    if validation_error:
+        yield format_sse({"type": "error", "content": f"수정 코드 검증 실패: {validation_error}"})
         yield format_sse({"type": "done"})
         return
 

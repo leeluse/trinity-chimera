@@ -2,14 +2,13 @@
 import logging
 import os
 import random
-from typing import Any, AsyncGenerator, Dict, List
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from server.shared.llm.client import stream_chat_reply, stream_analysis_reply, stream_code_gen_reply
 from server.shared.market.strategy_loader import StrategyLoader, SecurityError
 from server.modules.evolution.wiki_memory import EvolutionWikiMemory
 from server.modules.evolution.constants import BANNED_INDICATORS, PERSONAS, CROSS_DOMAIN_SEEDS
 from server.modules.chat.prompts import (
-    SYSTEM_PROMPT,
     REASONING_PROMPT_TEMPLATE,
     DESIGN_PROMPT_TEMPLATE,
     CODE_PROMPT_TEMPLATE,
@@ -19,12 +18,35 @@ from server.modules.chat.skills._base import (
     format_sse,
     extract_python_code,
     extract_strategy_title,
+    salvage_valid_python,
     resolve_target_agent,
     build_memory_guardrail,
 )
 from server.modules.chat.skills.pipeline_backtest import run_backtest
 
 logger = logging.getLogger(__name__)
+
+
+async def _recover_code_once(raw_output: str, original_prompt: str, reason: str) -> str:
+    """중간 끊김/형식 깨짐 대응용 1회 복구."""
+    broken = (raw_output or "").strip()
+    if not broken:
+        return ""
+
+    recovery_prompt = (
+        "아래 출력은 중간에 끊겼거나 형식이 깨진 전략 코드다.\n"
+        "실행 가능한 완전한 Python 코드만 출력하라.\n"
+        "필수 함수 시그니처:\n"
+        "def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series\n"
+        "설명문/마크다운 문장 금지. 코드블록 1개 또는 순수 코드만 출력.\n\n"
+        f"[실패 원인]\n{reason}\n\n"
+        f"[원래 생성 지시 일부]\n{original_prompt[-2500:]}\n\n"
+        f"[끊긴 출력 일부]\n{broken[-3500:]}\n"
+    )
+    repaired_full = ""
+    async for chunk in stream_code_gen_reply(recovery_prompt):
+        repaired_full += chunk
+    return extract_python_code(repaired_full)
 
 
 async def run_create_pipeline(
@@ -58,14 +80,14 @@ async def run_create_pipeline(
             banned_indicators=", ".join(BANNED_INDICATORS),
         ) + guardrail_block
     else:
-        quick_model = ((os.getenv("QUICK_MODEL") or os.getenv("LITELLM_MODEL") or "Quick Model").split("/")[-1]).strip()
-        yield format_sse({"type": "stage", "stage": 1, "label": f"🧠 의도 파악 및 전략 분석 중... ({quick_model})"})
+        reasoning_model = ((os.getenv("LITELLM_MODEL") or os.getenv("QUICK_MODEL") or "Brain Model").split("/")[-1]).strip()
+        yield format_sse({"type": "stage", "stage": 1, "label": f"🧠 의도 파악 및 전략 분석 중... ({reasoning_model})"})
         prompt1 = REASONING_PROMPT_TEMPLATE.format(message=message) + guardrail_block
 
     reasoning_full = ""
     async for chunk in stream_chat_reply(user_message=prompt1, context=context,
-                                         history=history, custom_system_prompt=SYSTEM_PROMPT,
-                                         model=(os.getenv("QUICK_MODEL") or None)):
+                                         history=history,
+                                         model=(os.getenv("LITELLM_MODEL") or None)):
         if chunk is None or chunk == "":
             continue
         reasoning_full += chunk
@@ -101,15 +123,35 @@ async def run_create_pipeline(
         return
 
     strategy_code = extract_python_code(code_full)
+    strategy_code = salvage_valid_python(strategy_code)
+    validation_error: Optional[str] = None
     if not strategy_code:
-        yield format_sse({"type": "error", "content": "코드 추출 실패: LLM이 코드 블록을 출력하지 않았습니다."})
+        validation_error = "코드 추출 실패"
+    else:
+        try:
+            StrategyLoader.validate_code(strategy_code)
+        except (SecurityError, SyntaxError) as e:
+            validation_error = str(e)
+
+    if validation_error:
+        yield format_sse({"type": "analysis", "content": "\n코드가 중간에 끊겨 자동 복구를 시도합니다...\n"})
+        recovered = await _recover_code_once(code_full, prompt3, validation_error)
+        recovered = salvage_valid_python(recovered)
+        if recovered:
+            strategy_code = recovered
+            try:
+                StrategyLoader.validate_code(strategy_code)
+                validation_error = None
+            except (SecurityError, SyntaxError) as e:
+                validation_error = str(e)
+
+    if not strategy_code:
+        yield format_sse({"type": "error", "content": "코드 추출 실패: 출력이 중간에 끊겼습니다."})
         yield format_sse({"type": "done"})
         return
 
-    try:
-        StrategyLoader.validate_code(strategy_code)
-    except (SecurityError, SyntaxError) as e:
-        yield format_sse({"type": "error", "content": f"코드 검증 오류: {e}"})
+    if validation_error:
+        yield format_sse({"type": "error", "content": f"코드 검증 오류: {validation_error}"})
         yield format_sse({"type": "done"})
         return
 

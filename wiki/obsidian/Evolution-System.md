@@ -65,6 +65,39 @@ async with lock:
 
 → 자세한 내용은 [[Strategy-Code-Spec]] 참고
 
+---
+
+## 코드 품질 개선 (2026-04-20)
+
+### 1. Self-Critique 루프
+
+코드 생성 후 `StrategyLoader.validate_code()` 통과 시 `_self_critique()` 추가 검증.
+temperature=0.1 (결정론적)으로 3가지 YES/NO 질문을 검사한다:
+
+| 질문 | 실패 조건 | 재생성 지시 |
+|---|---|---|
+| Q1: 숏(-1) 신호 존재? | NO | 양방향 신호 구현 강제 |
+| Q2: AND 조건 4개 이상? | YES | 조건 3개 이하로 축소 |
+| Q3: 미정의 변수 참조? | YES | 선언 전 참조 금지 |
+
+실패 시 `last_error`에 추가하고 재시도. `max_retries` 소진 시 마지막 코드를 반환(실행 보장).
+
+### 2. Few-Shot 코드 스니펫 주입
+
+`memory_context["best_code_snippet"]`에 저장된 최고 성능 전략의 핵심 코드 블록을
+프롬프트 Section 10에 참고용으로 주입 (`_assemble_prompt()`).
+
+- `wiki_memory.py::get_best_code_snippet(agent_id)` — 에이전트별 최고 채택 전략 코드 반환
+- `wiki_memory.py::_extract_signal_block(code, max_lines=25)` — sig 생성 블록 추출
+- `wiki_memory.py::log_accepted(..., code=)` — 채택 시 `code_snippet` 저장
+
+### 3. Temperature 분리
+
+- 코드 생성 호출: `temperature=0.3`
+- Self-critique: `temperature=0.1`
+
+→ 자세한 모델별 temperature는 [[LLM-Model-Roles]] 참고
+
 ## 주의 포인트
 - `router.py`에서 `force_trigger` 인자를 사용하는 호출이 있으며, 오케스트레이터 함수 시그니처(`force`)와 동기화 확인 필요.
 - 진화 루프 실행 본체가 `_run_evolution_cycle_inner()`로 분리되어 있음에 주의.

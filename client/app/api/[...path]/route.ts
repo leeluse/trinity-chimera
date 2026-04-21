@@ -17,13 +17,15 @@ const getBackendBase = (): string => {
     (process.env.NODE_ENV === "production"
       ? "https://lsy-super-trend.loca.lt"
       : "http://localhost:8000")
-  ).replace(/\/+$/, "");
+  )
+    .trim()
+    .replace(/\/+$/, "");
   // '/api' suffix가 붙어 있으면 제거 (base only)
   return raw.endsWith("/api") ? raw.slice(0, -4) : raw;
 };
 
 // hop-by-hop 헤더는 fetch로 전달하면 안 됨
-const HOP_BY_HOP = new Set([
+const REQUEST_BLOCKED_HEADERS = new Set([
   "connection",
   "keep-alive",
   "proxy-authenticate",
@@ -33,6 +35,15 @@ const HOP_BY_HOP = new Set([
   "transfer-encoding",
   "upgrade",
   "host",
+  // Upstream 압축을 강제 전달하면 Node fetch의 자동 디코딩과 충돌할 수 있음
+  "accept-encoding",
+]);
+
+// Response 재구성 시 길이/인코딩 헤더를 그대로 넘기면 바디와 불일치할 수 있음
+const RESPONSE_STRIP_HEADERS = new Set([
+  "content-encoding",
+  "content-length",
+  "transfer-encoding",
 ]);
 
 async function proxyHandler(
@@ -47,7 +58,7 @@ async function proxyHandler(
   // 클라이언트 헤더 복사 (hop-by-hop 제거)
   const headers = new Headers();
   req.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) {
+    if (!REQUEST_BLOCKED_HEADERS.has(key.toLowerCase())) {
       headers.set(key, value);
     }
   });
@@ -82,7 +93,8 @@ async function proxyHandler(
   // 응답 헤더 복사 (hop-by-hop 제거)
   const resHeaders = new Headers();
   response.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) {
+    const lower = key.toLowerCase();
+    if (!REQUEST_BLOCKED_HEADERS.has(lower) && !RESPONSE_STRIP_HEADERS.has(lower)) {
       resHeaders.set(key, value);
     }
   });

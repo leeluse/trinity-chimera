@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,6 +20,13 @@ from server.shared.db.supabase import SupabaseManager
 from server.shared.market.strategy_loader import SecurityError, StrategyLoader
 
 logger = logging.getLogger(__name__)
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -67,6 +75,7 @@ class EvolutionOrchestrator:
             "completed": 0,
             "failed": 0,
         }
+        self._verbose_db_logs = _env_flag("EVOLUTION_VERBOSE_DB_LOGS", False)
 
     # -------------------------------------------------------------------------
     # 수동 루프 시작: UI의 RUN LOOP 호출용 iteration 카운트/로그
@@ -803,6 +812,22 @@ class EvolutionOrchestrator:
         prev_strategy_id: Optional[str] = None,
         new_strategy_id: Optional[str] = None,
     ) -> None:
+        if not self._verbose_db_logs:
+            decision = expected.get("decision") if isinstance(expected, dict) else {}
+            if not isinstance(decision, dict):
+                decision = {}
+            result = str(decision.get("result") or "").strip().lower()
+            stage = str(decision.get("stage") or "").strip().lower()
+
+            # 기본값: 프론트/DB 로그 폭주를 막기 위해 핵심 결론 이벤트만 저장
+            keep = (
+                result == "accepted"
+                or (result == "rejected" and stage == "decision")
+                or result in {"error", "failed"}
+            )
+            if not keep:
+                return
+
         try:
             await self.db.save_improvement_log(
                 agent_id=agent_id,

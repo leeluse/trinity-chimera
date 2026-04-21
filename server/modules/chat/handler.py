@@ -56,6 +56,13 @@ class ChatHandler:
     _session_last_strategy: Dict[str, Any] = {}
 
     @staticmethod
+    def _preview_text(text: str, limit: int = 80) -> str:
+        if not text:
+            return ""
+        compact = " ".join(str(text).split())
+        return compact if len(compact) <= limit else (compact[: limit - 1] + "…")
+
+    @staticmethod
     def _short_model_name(model_name: str) -> str:
         text = str(model_name or "").strip()
         if not text:
@@ -100,6 +107,14 @@ class ChatHandler:
         context: Dict[str, Any],
         history: List[Dict[str, Any]],
     ) -> AsyncGenerator[str, None]:
+        logger.info(
+            "[chat] request start session=%s msg_len=%d history=%d ctx_keys=%s preview=%r",
+            session_id,
+            len(message or ""),
+            len(history or []),
+            sorted(list((context or {}).keys()))[:10],
+            self._preview_text(message),
+        )
         db = SupabaseManager()
         await db.save_chat_message(session_id, "user", message)
 
@@ -108,9 +123,11 @@ class ChatHandler:
         if pending:
             saved_intent = pending.get("intent", INTENT_CREATE)
             saved_message = pending.get("message", "")
+            logger.info("[chat] pending confirmation session=%s intent=%s", session_id, saved_intent)
 
             if self._is_rejection_reply(message):
                 self._pending_pipeline_confirmations.pop(session_id, None)
+                logger.info("[chat] pending rejected session=%s intent=%s", session_id, saved_intent)
                 text = "알겠습니다. 취소했어요."
                 yield format_sse({"type": "analysis", "content": text})
                 await db.save_chat_message(session_id, "assistant", text, "text")
@@ -119,6 +136,7 @@ class ChatHandler:
 
             if self._is_approval_reply(message):
                 self._pending_pipeline_confirmations.pop(session_id, None)
+                logger.info("[chat] pending approved session=%s intent=%s", session_id, saved_intent)
                 yield format_sse({"type": "stage", "stage": 0,
                                   "label": f"🚀 {_INTENT_LABEL.get(saved_intent, '파이프라인')} 시작"})
                 async for ev in self._route_pipeline(saved_intent, saved_message,
@@ -126,6 +144,7 @@ class ChatHandler:
                     yield ev
                 return
 
+            logger.info("[chat] pending replaced by new request session=%s", session_id)
             self._pending_pipeline_confirmations.pop(session_id, None)
 
         # ── LLM 대화 + INVOKE 감지 ────────────────────────────────
@@ -145,6 +164,11 @@ class ChatHandler:
             msg_id = await db.save_chat_message(session_id, "assistant", "...", "text")
             # SSE first-byte를 빠르게 보내 타임아웃/무응답 체감을 줄인다.
             yield format_sse({"type": "analysis", "content": "요청을 분류하고 있어요..."})
+            logger.info(
+                "[chat] classify start session=%s quick_model=%s",
+                session_id,
+                (os.getenv("QUICK_MODEL") or os.getenv("LITELLM_MODEL") or os.getenv("OLLAMA_MODEL") or "").split("/")[-1],
+            )
 
             async for chunk in stream_chat_reply(
                 user_message=message,
@@ -161,6 +185,13 @@ class ChatHandler:
         invoke_match = _INVOKE_RE.search(full_response)
         invoke_key = invoke_match.group(1) if invoke_match else ""
         intent = _INVOKE_MAP.get(invoke_key) if invoke_key else None
+        logger.info(
+            "[chat] classify result session=%s invoke=%s intent=%s resp_len=%d",
+            session_id,
+            invoke_key or "-",
+            intent or INTENT_GENERAL,
+            len(full_response),
+        )
 
         clean_response = self._sanitize_chat_text(full_response)
         if intent in {INTENT_CREATE, INTENT_MODIFY, INTENT_EVOLVE, INTENT_BACKTEST}:
@@ -191,6 +222,7 @@ class ChatHandler:
             })
 
             if invoke_key in NO_CONFIRM_SKILLS:
+                logger.info("[chat] analysis skill dispatch session=%s skill=%s", session_id, invoke_key)
                 async for ev in dispatch_analysis(
                     invoke_key, message, session_id, context, history, db,
                     self._session_last_strategy,
@@ -201,19 +233,25 @@ class ChatHandler:
             if intent:
                 last_strat = await get_last_strategy(session_id, db, self._session_last_strategy)
                 if intent == INTENT_MODIFY and not last_strat:
-                    yield format_sse({"type": "analysis",
-                                      "content": "\n\n⚠️ 수정할 이전 전략이 없어요. 먼저 전략을 생성해 주세요."})
+                    # 수정 요청이지만 이전 전략이 없으면 신규 생성으로 fallback
+                    logger.info("[chat] modify fallback to create session=%s reason=no_previous_strategy", session_id)
+                    intent = INTENT_CREATE
+                    fallback_note = "(이전 전략이 없어 신규 생성 파이프라인으로 진행합니다)\n\n"
+                    confirm_text = "\n\n" + fallback_note + self._build_confirm_text(intent, message, None)
                 else:
                     confirm_text = "\n\n" + self._build_confirm_text(intent, message, last_strat)
-                    self._pending_pipeline_confirmations[session_id] = {
-                        "message": message,
-                        "intent": intent,
-                        "created_at": datetime.utcnow().isoformat() + "Z",
-                    }
-                    yield format_sse({"type": "analysis", "content": confirm_text})
-                    await db.save_chat_message(session_id, "assistant", confirm_text, "text")
+                self._pending_pipeline_confirmations[session_id] = {
+                    "message": message,
+                    "intent": intent,
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                }
+                logger.info("[chat] confirmation queued session=%s intent=%s", session_id, intent)
+                yield format_sse({"type": "analysis", "content": confirm_text})
+                await db.save_chat_message(session_id, "assistant", confirm_text, "text")
             else:
                 logger.warning(f"[invoke] 알 수 없는 스킬: {invoke_key!r}")
+        else:
+            logger.info("[chat] general response only session=%s", session_id)
 
         yield format_sse({"type": "done"})
 
@@ -223,6 +261,7 @@ class ChatHandler:
     async def _route_pipeline(
         self, intent, message, session_id, context, history, db
     ) -> AsyncGenerator[str, None]:
+        logger.info("[chat] pipeline start session=%s intent=%s", session_id, intent)
         sm = self._session_last_strategy
         if intent == INTENT_CREATE:
             async for ev in run_create_pipeline(message, session_id, context, history, db, sm):
@@ -244,6 +283,7 @@ class ChatHandler:
             else:
                 yield format_sse({"type": "analysis", "content": "백테스트할 전략이 없습니다."})
             yield format_sse({"type": "done"})
+        logger.info("[chat] pipeline end session=%s intent=%s", session_id, intent)
 
     # ─────────────────────────────────────────────────────────────────
     # 확인 텍스트 빌더
@@ -273,9 +313,15 @@ class ChatHandler:
         text = (message or "").strip().lower()
         if not text:
             return False
-        if text in {"예", "네", "응", "ㅇㅇ", "ㄱ", "ㄱㄱ", "ok", "yes", "go"}:
+        if text in {"예", "네", "응", "ㅇㅇ", "ㄱ", "ㄱㄱ", "ok", "yes", "go", "고고"}:
             return True
-        return any(p in text for p in ["진행해", "시작해", "해줘", "ㄱㄱ해", "승인", "좋아요", "그래요", "okay", "start"])
+        # "ㄱ 고고", "go go", "네 진행"처럼 짧은 승인 표현도 허용
+        first_line = text.splitlines()[0].strip()
+        if re.search(r"(^|\s)ㄱ(ㄱ)?(\s|$)", first_line):
+            return True
+        if re.search(r"(^|\s)(go|yes|ok|고고)(\s|$)", first_line):
+            return True
+        return any(p in text for p in ["진행해", "시작해", "해줘", "ㄱㄱ해", "승인", "좋아요", "그래요", "okay", "start", "고고"])
 
     @staticmethod
     def _is_rejection_reply(message: str) -> bool:

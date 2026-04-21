@@ -360,6 +360,7 @@ class EvolutionWikiMemory:
             "recent_successes": successes,
             "failure_summary": failure_summary,
             "best_accepted": best_accepted,
+            "best_code_snippet": self.get_best_code_snippet(agent_id),
             "unexplored_mutations": unexplored,
             "next_mutation": next_mutation,
         }
@@ -430,18 +431,44 @@ class EvolutionWikiMemory:
             handle.write(line)
         return row
 
+    @staticmethod
+    def _extract_signal_block(code: str, max_lines: int = 25) -> str:
+        """신호 생성 블록(sig 관련)만 슬라이싱해서 반환."""
+        lines = [l for l in code.splitlines() if l.strip() and not l.strip().startswith("#")]
+        sig_idx = next((i for i, l in enumerate(lines) if "sig" in l and "Series" in l), None)
+        if sig_idx is not None:
+            return "\n".join(lines[max(0, sig_idx - 3): sig_idx + max_lines])
+        return "\n".join(lines[-max_lines:])
+
+    def get_best_code_snippet(self, agent_id: Optional[str]) -> Optional[str]:
+        """best_accepted 전략의 코드 스니펫 반환."""
+        state = self._load_state()
+        best_fp = None
+        best_score = -1.0
+        for row in state.get("accepted", []):
+            if agent_id and row.get("agent_id") != agent_id:
+                continue
+            m = row.get("metrics") or {}
+            score = float(m.get("profit_factor") or 0.0)
+            if score > best_score and row.get("code_snippet"):
+                best_score = score
+                best_fp = row.get("code_snippet")
+        return best_fp
+
     def log_accepted(
         self,
         agent_id: str,
         strategy_id: Optional[str],
         fingerprint: str,
         metrics: Dict[str, Any],
+        code: Optional[str] = None,
     ) -> Dict[str, Any]:
         row = {
             "time": _utc_now(),
             "agent_id": agent_id,
             "strategy_id": strategy_id,
             "fingerprint": fingerprint,
+            "code_snippet": self._extract_signal_block(code) if code else None,
             "metrics": {
                 "win_rate": float(metrics.get("win_rate") or 0.0),
                 "profit_factor": float(metrics.get("profit_factor") or 0.0),
