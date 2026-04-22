@@ -33,6 +33,7 @@ slack-sdk>=3.21.0
 slack-bolt>=1.18.0
 python-dotenv>=1.0.0
 anthropic>=0.25.0
+litellm>=1.43.0
 # Note: FreqAI dependencies are handled by Freqtrade
 
 # Slack AI 팀 에이전트 의존성
