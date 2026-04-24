@@ -6,10 +6,10 @@ import re
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from server.shared.llm.client import stream_chat_reply
+from server.shared.llm.client import generate_chat_reply
 from server.shared.db.supabase import SupabaseManager
 from server.modules.engine.runtime import invalidate_strategy_cache
-from server.modules.chat.prompts import SYSTEM_PROMPT
+from server.modules.chat.prompts import SYSTEM_PROMPT, CLASSIFICATION_SYSTEM, CLASSIFICATION_MESSAGE
 from server.modules.chat.skills import (
     dispatch_analysis,
     run_create_pipeline,
@@ -48,11 +48,40 @@ _INVOKE_RE = re.compile(r'\[INVOKE:(\w+)\]')
 _THINK_BLOCK_RE = re.compile(r"<(thought|think|think_process|reasoning)>[\s\S]*?</\1>", re.IGNORECASE)
 _THINK_TAG_RE = re.compile(r"</?(thought|think|think_process|reasoning)[^>]*>", re.IGNORECASE)
 
+# 빠른 규칙 기반 분류 (LLM 없이 ~95% 커버)
+_KEYWORD_INTENT_MAP = {
+    "CREATE_STRATEGY": [
+        r"(전략|트레이딩|시스템)\s*(짜|만들|생성|구축|설계|개발|작성|코딩|구현)",
+        r"(매매|거래)\s*(로직|지표|조건)\s*(만들|짜)",
+        r"(코딩|구현|개발|작성)\s*(해\s*줘|해줘|해봐|해보자|부탁|좀)",
+        r"(전략|트레이딩).{0,20}(짜|만들|코딩|구현|작성)",
+    ],
+    "MODIFY_STRATEGY": [r"(수정|개선|변경|고쳐|보완|강화)", r"(이전|기존|아까)\s*(거|전략)\s*(수정|개선|고쳐)"],
+    "RUN_BACKTEST": [r"(돌려봐|검증|테스트|백테스트|실행해|결과)", r"(성과|수익|손실|성능)\s*(보|봐|확인)"],
+    "RUN_EVOLUTION": [r"(채굴|에볼루션|자동|자율|진화|마이닝)", r"(최적|탐색|최상)\s*(후보|전략)"],
+    "EXPLAIN_STRATEGY": [r"(설명|어떻게|작동|로직|왜|이유|원리)", r"(이\s*(전략|코드)|코드)\s*(어떻게|설명)"],
+    "RISK_ANALYSIS": [r"(리스크|위험|손실|위험도|MDD|낙폭)", r"(언제|언제쯤)\s*(망|실패|손실)"],
+    "CODE_REVIEW": [r"(버그|버그\s*있|오버피팅|리뷰|검토|문제)", r"(코드|코딩)\s*(괜찮|문제|버그)"],
+    "SUGGEST_NEXT": [r"(다음|뭘|뭘\s*할|아이디어|방향|시도)", r"(어떻게|뭐)\s*(해볼|시도|할)"],
+    "CODE_FROM_DESIGN": [r"(코드만|코드\s*만|설계도)", r"(설계|디자인|블루프린트)\s*(기반|이용)", r"(다시|재)\s*(코드|생성)"],
+}
+
+def _classify_by_keywords(text: str) -> Optional[str]:
+    """규칙 기반 빠른 분류 (LLM 없이). 일치하면 INVOKE_KEY 반환."""
+    t = text.lower().strip()
+    for invoke_key, patterns in _KEYWORD_INTENT_MAP.items():
+        for pattern in patterns:
+            if re.search(pattern, t):
+                return invoke_key
+    return None
+
 
 class ChatHandler:
     """대화형 전략 파이프라인 라우터"""
 
     _pending_pipeline_confirmations: Dict[str, Dict[str, Any]] = {}
+    _pending_stage_confirmations: Dict[str, Dict[str, Any]] = {}
+    _live_pipeline_streams: Dict[str, Dict[str, Any]] = {}
     _session_last_strategy: Dict[str, Any] = {}
 
     @staticmethod
@@ -88,7 +117,7 @@ class ChatHandler:
     @staticmethod
     def _execution_preface(intent: str) -> str:
         if intent == INTENT_CREATE:
-            return "새 전략 생성 요청으로 분류했습니다. 승인하면 실제 파이프라인(분석→설계→코드→백테스트)을 실행합니다."
+            return "새 전략 생성 요청으로 분류했습니다. 승인하면 실제 파이프라인(설계→코드→백테스트)을 실행합니다."
         if intent == INTENT_MODIFY:
             return "전략 수정 요청으로 분류했습니다. 승인하면 기존 전략을 분석해 수정안과 백테스트 비교를 진행합니다."
         if intent == INTENT_EVOLVE:
@@ -96,6 +125,123 @@ class ChatHandler:
         if intent == INTENT_BACKTEST:
             return "백테스트 실행 요청으로 분류했습니다. 승인하면 마지막 전략으로 검증을 시작합니다."
         return ""
+
+    @staticmethod
+    def _decode_sse_payload(event: str) -> Optional[Dict[str, Any]]:
+        raw = (event or "").strip()
+        if not raw.startswith("data: "):
+            return None
+        body = raw[len("data: "):].strip()
+        if not body:
+            return None
+        try:
+            return json.loads(body)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _build_stage_confirm_text(intent: str, stage_num: int, stage_label: str) -> str:
+        label = stage_label or f"단계 {stage_num}"
+        return (
+            f"검토 요청: `{label}` 단계 실행을 승인할까요?\n\n"
+            "모든 스테이지는 사용자 검토 후 진행합니다.\n"
+            "`예 / 네 / ㄱ` → 이 단계 실행,  `아니 / 취소` → 파이프라인 중단"
+        )
+
+    async def _close_live_pipeline(self, session_id: str) -> None:
+        live = self._live_pipeline_streams.pop(session_id, None)
+        if not live:
+            return
+        gen = live.get("gen")
+        if gen:
+            try:
+                await gen.aclose()
+            except Exception:
+                logger.debug("[chat] live pipeline close failed session=%s", session_id, exc_info=True)
+
+    async def _advance_live_pipeline_until_gate(
+        self,
+        session_id: str,
+        db,
+    ) -> AsyncGenerator[str, None]:
+        live = self._live_pipeline_streams.get(session_id)
+        if not live:
+            text = "진행 중인 파이프라인 상태를 찾을 수 없습니다. 다시 요청해 주세요."
+            yield format_sse({"type": "analysis", "content": text})
+            await db.save_chat_message(session_id, "assistant", text, "text")
+            yield format_sse({"type": "done"})
+            return
+
+        intent = str(live.get("intent") or INTENT_CREATE)
+        gen = live.get("gen")
+        if gen is None:
+            text = "파이프라인 생성기가 유효하지 않습니다. 다시 요청해 주세요."
+            yield format_sse({"type": "analysis", "content": text})
+            await db.save_chat_message(session_id, "assistant", text, "text")
+            yield format_sse({"type": "done"})
+            await self._close_live_pipeline(session_id)
+            return
+
+        while True:
+            try:
+                event = await gen.__anext__()
+            except StopAsyncIteration:
+                logger.info("[chat] live pipeline completed session=%s intent=%s", session_id, intent)
+                self._live_pipeline_streams.pop(session_id, None)
+                self._pending_stage_confirmations.pop(session_id, None)
+                yield format_sse({"type": "done"})
+                return
+            except Exception as e:
+                logger.exception("[chat] live pipeline advance failed session=%s intent=%s", session_id, intent)
+                self._live_pipeline_streams.pop(session_id, None)
+                self._pending_stage_confirmations.pop(session_id, None)
+                yield format_sse({"type": "analysis", "content": f"파이프라인 진행 중 오류: {e}"})
+                yield format_sse({"type": "done"})
+                return
+
+            payload = self._decode_sse_payload(event)
+            if payload and payload.get("type") == "stage":
+                stage_num = int(payload.get("stage") or 0)
+                stage_label = str(payload.get("label") or f"단계 {stage_num}")
+                self._pending_stage_confirmations[session_id] = {
+                    "intent": intent,
+                    "stage": stage_num,
+                    "label": stage_label,
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                }
+                review_text = self._build_stage_confirm_text(intent, stage_num, stage_label)
+                logger.info(
+                    "[chat] stage review requested session=%s intent=%s stage=%s",
+                    session_id,
+                    intent,
+                    stage_num,
+                )
+                yield format_sse({"type": "analysis", "content": review_text})
+                await db.save_chat_message(session_id, "assistant", review_text, "text")
+                yield format_sse({"type": "done"})
+                return
+
+            yield event
+            if payload and payload.get("type") == "done":
+                logger.info("[chat] live pipeline emitted done session=%s intent=%s", session_id, intent)
+                self._live_pipeline_streams.pop(session_id, None)
+                self._pending_stage_confirmations.pop(session_id, None)
+                return
+
+    @staticmethod
+    def _smalltalk_fast_reply(message: str) -> Optional[str]:
+        text = (message or "").strip().lower()
+        if not text:
+            return None
+        if re.fullmatch(r"(안녕|안녕하세요|하이|ㅎㅇ|hello|hi|hey)[!?.~\s]*", text):
+            return "안녕하세요. 전략 생성/수정/백테스트 요청을 바로 처리할 수 있어요."
+        if re.fullmatch(r"(고마워|감사|감사해|thanks|thank you)[!?.~\s]*", text):
+            return "언제든지요. 다음 요청 주시면 바로 진행할게요."
+        if re.fullmatch(r"(테스트|test|ping|퐁)[!?.~\s]*", text):
+            return "응답 정상입니다."
+        if re.search(r"(넌\s*)?누구|who\s*(are\s*)?you|what\s*(are\s*)?you", text):
+            return "저는 트레이딩 전략 생성 및 백테스트 어시스턴트입니다. 전략 작성, 수정, 검증을 도와드려요."
+        return None
 
     # ─────────────────────────────────────────────────────────────────
     # 진입점
@@ -118,7 +264,47 @@ class ChatHandler:
         db = SupabaseManager()
         await db.save_chat_message(session_id, "user", message)
 
-        # ── 확인 대기 중 처리 ──────────────────────────────────────
+        # ── 스테이지 검토 대기 중 처리 ─────────────────────────────
+        pending_stage = self._pending_stage_confirmations.get(session_id)
+        if pending_stage:
+            stage_num = int(pending_stage.get("stage") or 0)
+            intent = str(pending_stage.get("intent") or INTENT_CREATE)
+            label = str(pending_stage.get("label") or f"단계 {stage_num}")
+            logger.info(
+                "[chat] pending stage review session=%s intent=%s stage=%s",
+                session_id,
+                intent,
+                stage_num,
+            )
+
+            if self._is_rejection_reply(message):
+                self._pending_stage_confirmations.pop(session_id, None)
+                await self._close_live_pipeline(session_id)
+                text = "알겠습니다. 현재 파이프라인을 중단했어요."
+                yield format_sse({"type": "analysis", "content": text})
+                await db.save_chat_message(session_id, "assistant", text, "text")
+                yield format_sse({"type": "done"})
+                return
+
+            if self._is_approval_reply(message):
+                self._pending_stage_confirmations.pop(session_id, None)
+                logger.info(
+                    "[chat] stage approved session=%s intent=%s stage=%s",
+                    session_id,
+                    intent,
+                    stage_num,
+                )
+                yield format_sse({"type": "stage", "stage": stage_num, "label": label})
+                async for ev in self._advance_live_pipeline_until_gate(session_id, db):
+                    yield ev
+                return
+
+            # 검토 대기 중 다른 메시지가 오면 기존 파이프라인을 종료하고 새 요청으로 간주
+            logger.info("[chat] pending stage replaced by new request session=%s", session_id)
+            self._pending_stage_confirmations.pop(session_id, None)
+            await self._close_live_pipeline(session_id)
+
+        # ── 파이프라인 시작 확인 대기 중 처리 ─────────────────────
         pending = self._pending_pipeline_confirmations.get(session_id)
         if pending:
             saved_intent = pending.get("intent", INTENT_CREATE)
@@ -137,19 +323,133 @@ class ChatHandler:
             if self._is_approval_reply(message):
                 self._pending_pipeline_confirmations.pop(session_id, None)
                 logger.info("[chat] pending approved session=%s intent=%s", session_id, saved_intent)
-                yield format_sse({"type": "stage", "stage": 0,
-                                  "label": f"🚀 {_INTENT_LABEL.get(saved_intent, '파이프라인')} 시작"})
-                async for ev in self._route_pipeline(saved_intent, saved_message,
-                                                     session_id, context, history, db):
+                self._live_pipeline_streams[session_id] = {
+                    "intent": saved_intent,
+                    "gen": self._route_pipeline(saved_intent, saved_message, session_id, context, history, db),
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                }
+                kickoff = (
+                    f"검토 모드 활성화: `{_INTENT_LABEL.get(saved_intent, '파이프라인')}`을 "
+                    "스테이지별 승인 방식으로 진행합니다."
+                )
+                yield format_sse({"type": "analysis", "content": kickoff})
+                await db.save_chat_message(session_id, "assistant", kickoff, "text")
+                async for ev in self._advance_live_pipeline_until_gate(session_id, db):
                     yield ev
                 return
 
             logger.info("[chat] pending replaced by new request session=%s", session_id)
             self._pending_pipeline_confirmations.pop(session_id, None)
 
-        # ── LLM 대화 + INVOKE 감지 ────────────────────────────────
-        async for ev in self._execute_general_chat(message, session_id, context, history, db):
-            yield ev
+        # ── 1. 규칙 기반 트리거 확인 (즉시, <1ms) ────────────────────
+        quick_invoke_key = _classify_by_keywords(message)
+        if quick_invoke_key:
+            logger.info("[chat] trigger matched session=%s invoke=%s", session_id, quick_invoke_key)
+            intent = _INVOKE_MAP.get(quick_invoke_key)
+            if intent and quick_invoke_key in NO_CONFIRM_SKILLS:
+                # 분석형 스킬 (즉시 실행)
+                yield format_sse({"type": "invocation", "skill": quick_invoke_key,
+                                 "label": _INTENT_LABEL.get(intent), "model": "keyword-trigger"})
+                async for ev in dispatch_analysis(
+                    quick_invoke_key, message, session_id, context, history, db,
+                    self._session_last_strategy,
+                ):
+                    yield ev
+                return
+            elif intent:
+                # 실행형 스킬 (확인 필요)
+                last_strat = await get_last_strategy(session_id, db, self._session_last_strategy)
+                if intent == INTENT_MODIFY and not last_strat:
+                    intent = INTENT_CREATE
+                    fallback_note = "(이전 전략이 없어 신규 생성 파이프라인으로 진행합니다)\n\n"
+                    confirm_text = "\n\n" + fallback_note + self._build_confirm_text(intent, message, None)
+                else:
+                    confirm_text = "\n\n" + self._build_confirm_text(intent, message, last_strat)
+                self._pending_pipeline_confirmations[session_id] = {
+                    "message": message,
+                    "intent": intent,
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                }
+                yield format_sse({"type": "invocation", "skill": quick_invoke_key,
+                                 "label": _INTENT_LABEL.get(intent), "model": "keyword-trigger"})
+                yield format_sse({"type": "analysis", "content": confirm_text})
+                await db.save_chat_message(session_id, "assistant", confirm_text, "text")
+                yield format_sse({"type": "done"})
+                return
+
+        # ── 2. 일반 대화 fast-path (인사/핑은 LLM 생략) ───────────
+        smalltalk = self._smalltalk_fast_reply(message)
+        if smalltalk:
+            logger.info("[chat] fast smalltalk session=%s", session_id)
+            yield format_sse({"type": "analysis", "content": smalltalk})
+            await db.save_chat_message(session_id, "assistant", smalltalk, "text")
+            yield format_sse({"type": "done"})
+            return
+
+        # ── 3. 일반 대화 (LLM 응답) ─────────────────────────────
+        logger.info("[chat] general response session=%s", session_id)
+        try:
+            try:
+                general_timeout = float(os.getenv("CHAT_GENERAL_TIMEOUT", "120"))
+            except Exception:
+                general_timeout = 120.0
+            try:
+                general_max_tokens = int(os.getenv("CHAT_GENERAL_MAX_TOKENS", "768"))
+            except Exception:
+                general_max_tokens = 768
+            general_max_tokens = max(128, general_max_tokens)
+
+            resp = await generate_chat_reply(
+                user_message=message,
+                context=context,
+                history=history,
+                model=(os.getenv("QUICK_MODEL") or None),
+                temperature=0.2,
+                timeout_sec=general_timeout,
+                max_tokens=general_max_tokens,
+            )
+            full_response = self._sanitize_chat_text(resp.get("content", "응답을 생성할 수 없습니다."))
+
+            # 응답이 잘렸거나 패턴으로 끊길 탐지 (더 정교하게)
+            finish_reason = str(resp.get("finish_reason") or "").strip().lower()
+            _tail = full_response.strip()
+            looks_cut = (
+                finish_reason == "length"
+                or bool(re.search(r"[~\-/(:`\[\{]$", _tail))
+                or bool(re.search(r"20\d{2}-\d{2}-$", _tail))
+                # 마지막 문자가 문장 종결부호가 아닌 상태로 length 종료
+            )
+            if looks_cut:
+                continuation = await generate_chat_reply(
+                    user_message=(
+                        "직전 답변이 중간에 끊겼습니다. 아래 문장을 중복 없이 자연스럽게 이어서 "
+                        "완결된 1~2문장으로만 마무리하세요.\n\n"
+                        f"[직전 답변]\n{full_response}"
+                    ),
+                    context=None,
+                    history=[],
+                    model=(os.getenv("QUICK_MODEL") or None),
+                    temperature=0.1,
+                    timeout_sec=min(general_timeout, 20.0),
+                    max_tokens=192,
+                )
+                cont_text = self._sanitize_chat_text(continuation.get("content", ""))
+                if cont_text:
+                    full_response = f"{full_response.rstrip()} {cont_text.lstrip()}".strip()
+
+            if not full_response:
+                full_response = "요청을 이해했어요. 계속 진행할 내용을 한 줄로 알려주세요."
+            thought_content = resp.get("thought")
+            if thought_content:
+                yield format_sse({"type": "thought", "content": thought_content})
+
+            yield format_sse({"type": "analysis", "content": full_response})
+            await db.save_chat_message(session_id, "assistant", full_response, "text")
+        except Exception as e:
+            logger.error(f"[chat] general response error: {e}")
+            yield format_sse({"type": "analysis", "content": f"응답 생성 중 오류: {e}"})
+
+        yield format_sse({"type": "done"})
 
     # ─────────────────────────────────────────────────────────────────
     # 일반 대화 + INVOKE 감지
@@ -162,24 +462,42 @@ class ChatHandler:
         try:
             # 즉시 빈 메시지 생성 (플레이스홀더)
             msg_id = await db.save_chat_message(session_id, "assistant", "...", "text")
-            # SSE first-byte를 빠르게 보내 타임아웃/무응답 체감을 줄인다.
-            yield format_sse({"type": "analysis", "content": "요청을 분류하고 있어요..."})
             logger.info(
-                "[chat] classify start session=%s quick_model=%s",
+                "[chat] classify start (lightweight) session=%s model=%s temp=0.05",
                 session_id,
                 (os.getenv("QUICK_MODEL") or os.getenv("LITELLM_MODEL") or os.getenv("OLLAMA_MODEL") or "").split("/")[-1],
             )
+            try:
+                classify_timeout = float(os.getenv("CHAT_CLASSIFY_TIMEOUT", "10"))
+            except Exception:
+                classify_timeout = 10.0
+            try:
+                classify_max_tokens = int(os.getenv("CHAT_CLASSIFY_MAX_TOKENS", "32"))
+            except Exception:
+                classify_max_tokens = 32
+            classify_max_tokens = max(16, classify_max_tokens)
 
-            async for chunk in stream_chat_reply(
-                user_message=message,
-                context=context,
-                history=history,
-                custom_system_prompt=SYSTEM_PROMPT,
+            classify_result = await generate_chat_reply(
+                user_message=CLASSIFICATION_MESSAGE.format(message=message),
+                context=None,
+                history=[],
+                custom_system_prompt=CLASSIFICATION_SYSTEM,
                 model=(os.getenv("QUICK_MODEL") or None),
-            ):
-                full_response += chunk
+                temperature=0.05,
+                timeout_sec=classify_timeout,
+                max_tokens=classify_max_tokens,
+            )
+            full_response = (classify_result.get("content") or "").strip()
+            logger.info(
+                "[chat] classify done session=%s provider=%s model=%s fallback=%s resp_len=%d",
+                session_id,
+                classify_result.get("provider", "-"),
+                classify_result.get("model", "-"),
+                classify_result.get("fallback", False),
+                len(full_response),
+            )
         except Exception:
-            logger.exception("General chat stream failed")
+            logger.exception("General chat classify failed")
             raise
 
         invoke_match = _INVOKE_RE.search(full_response)
@@ -291,7 +609,7 @@ class ChatHandler:
     @staticmethod
     def _build_confirm_text(intent: str, message: str, prev: Optional[Dict]) -> str:
         base_msgs = {
-            INTENT_CREATE:   "전략 생성 파이프라인(추론 → 설계 → 코드 → 백테스트)을 실행할까요?",
+            INTENT_CREATE:   "전략 생성 파이프라인(설계 → 코드 → 백테스트)을 실행할까요?",
             INTENT_MODIFY:   f"'{prev.get('title', '이전 전략')}' 수정 파이프라인을 실행할까요?" if prev else "",
             INTENT_EVOLVE:   "에볼루션 채굴 파이프라인(WFO + Monte Carlo)을 실행할까요?\n⚠️ 수 분 소요.",
             INTENT_BACKTEST: "이전에 생성된 전략으로 백테스트를 실행할까요?",
@@ -303,7 +621,7 @@ class ChatHandler:
             analysis = (os.getenv("ANALYSIS_MODEL") or base).split("/")[-1]
             code = (os.getenv("CODE_GEN_MODEL") or base).split("/")[-1]
             body += f"\n\n모델 라우팅: 분류 `{quick}` · 설계 `{analysis}` · 코드 `{code}`"
-        return body + "\n\n`예 / 네 / ㄱ` → 실행,  `아니 / 취소` → 취소"
+        return body + "\n\n`예 / 네 / ㄱ` → 시작,  `아니 / 취소` → 취소\n(시작 후에도 모든 스테이지는 검토 승인 후 진행됩니다.)"
 
     # ─────────────────────────────────────────────────────────────────
     # 승인 / 거절 판별
@@ -317,6 +635,8 @@ class ChatHandler:
             return True
         # "ㄱ 고고", "go go", "네 진행"처럼 짧은 승인 표현도 허용
         first_line = text.splitlines()[0].strip()
+        if re.fullmatch(r"(?:ㄱㄱ?|예|네|응|ㅇㅇ|ok|yes|go|고고)[\s'\"`’‘“”.,!?~:;/_-]*", first_line):
+            return True
         if re.search(r"(^|\s)ㄱ(ㄱ)?(\s|$)", first_line):
             return True
         if re.search(r"(^|\s)(go|yes|ok|고고)(\s|$)", first_line):

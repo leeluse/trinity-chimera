@@ -1,6 +1,7 @@
 """MODIFY_STRATEGY 파이프라인 (분석 → 설계 → 수정 코드 → 백테스트 + 비교)"""
 import logging
 import os
+import re
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from server.shared.llm.client import stream_chat_reply, stream_analysis_reply, stream_code_gen_reply
@@ -23,7 +24,10 @@ from server.modules.chat.skills._base import (
 from server.modules.chat.skills.pipeline_backtest import run_backtest
 
 logger = logging.getLogger(__name__)
-
+_REQUIRED_SIGNAL_FN_RE = re.compile(
+    r"def\s+generate_signal\s*\(\s*train_df\s*:\s*pd\.DataFrame\s*,\s*test_df\s*:\s*pd\.DataFrame\s*\)\s*->\s*pd\.Series",
+    re.IGNORECASE,
+)
 
 async def _recover_code_once(raw_output: str, original_prompt: str, reason: str) -> str:
     """중간 끊김/형식 깨짐 대응용 1회 복구."""
@@ -78,28 +82,44 @@ async def run_modify_pipeline(
 
     yield format_sse({"type": "stage", "stage": 1,
                       "label": f"🔍 '{prev_title}' 분석 및 약점 탐색 중... ({reasoning_model})"})
+    # ✅ 초기 thought 메시지 → AI Reasoning 카드 열림
+    yield format_sse({"type": "thought", "content": "기존 전략의 약점과 개선 지점을 분석 중입니다..."})
     prompt_analyze = MODIFY_ANALYZE_TEMPLATE.format(
         prev_code=prev_code,
         prev_metrics=str(prev_metrics),
         user_request=message,
     )
     analysis_full = ""
+    # ✅ 분석 청크 실시간 스트리밍
     async for chunk in stream_chat_reply(user_message=prompt_analyze, context=context,
-                                          history=history,
+                                          history=[],
                                           model=(os.getenv("LITELLM_MODEL") or None)):
-        if chunk is None or chunk == "":
-            continue
-        analysis_full += chunk
-        yield format_sse({"type": "thought", "content": chunk})
-    await db.save_chat_message(session_id, "assistant", analysis_full, "thought")
+        thought = chunk.get("thought")
+        content = chunk.get("content")
+        if thought:
+            yield format_sse({"type": "thought", "content": thought})
+        if content:
+            analysis_full += content
+            yield format_sse({"type": "thought", "content": content})
+    # thought 이벤트 스트리밍 완료 → 카드가 자동 접힘 (isStreaming=false)
+    await db.save_chat_message(session_id, "assistant", analysis_full[:12000], "thought")
 
     yield format_sse({"type": "stage", "stage": 2, "label": f"📋 수정 설계도 작성 중... ({analysis_model})"})
     prompt_design = DESIGN_PROMPT_TEMPLATE.format(reasoning=analysis_full) + guardrail_block
     design_full = ""
+    # ✅ analysis/thought 실시간 스트리밍
     async for chunk in stream_analysis_reply(prompt_design):
-        design_full += chunk
-        yield format_sse({"type": "analysis", "content": chunk})
-    await db.save_chat_message(session_id, "assistant", design_full, "text")
+        thought = chunk.get("thought")
+        content = chunk.get("content")
+        if thought:
+            yield format_sse({"type": "thought", "content": thought})
+        if content:
+            design_full += content
+            yield format_sse({"type": "analysis", "content": content})
+    session_memory.setdefault(session_id, {})["design"] = design_full
+    # design 이벤트 후 프론트는 직전 text 블록을 카드로 교체 (이중 표시 없음)
+    yield format_sse({"type": "design", "content": design_full})
+    await db.save_chat_message(session_id, "assistant", design_full, "design")
 
     yield format_sse({"type": "stage", "stage": 3, "label": f"⚙️ 수정된 코드 구현 중... ({code_model})"})
     prompt_code = MODIFY_CODE_TEMPLATE.format(
@@ -108,14 +128,25 @@ async def run_modify_pipeline(
         prev_code=prev_code,
     ) + guardrail_block
     code_full = ""
+    _code_chunk_count = 0
     async for chunk in stream_code_gen_reply(prompt_code):
-        code_full += chunk
+        thought = chunk.get("thought")
+        content = chunk.get("content")
+        if thought:
+            yield format_sse({"type": "thought", "content": thought})
+        if content:
+            code_full += content
+            _code_chunk_count += 1
+            if _code_chunk_count % 30 == 0:
+                yield format_sse({"type": "status", "content": f"⚙️ 코드 구현 중... ({len(code_full)}자)"})
 
     strategy_code = extract_python_code(code_full)
     strategy_code = salvage_valid_python(strategy_code)
     validation_error: Optional[str] = None
     if not strategy_code:
         validation_error = "수정된 코드 추출 실패"
+    elif not _REQUIRED_SIGNAL_FN_RE.search(strategy_code):
+        validation_error = "필수 함수 시그니처 누락: def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series"
     else:
         try:
             StrategyLoader.validate_code(strategy_code)

@@ -1,18 +1,17 @@
-"""CREATE_STRATEGY 파이프라인 (추론 → 설계 → 코드 → 백테스트)"""
+"""CREATE_STRATEGY 파이프라인 (설계 → 코드 → 백테스트)"""
 import logging
 import os
 import random
-from typing import Any, AsyncGenerator, Dict, List, Optional
+import re
+from typing import Any, AsyncGenerator, Dict, Optional
 
-from server.shared.llm.client import stream_chat_reply, stream_analysis_reply, stream_code_gen_reply
+from server.shared.llm.client import stream_analysis_reply, stream_code_gen_reply
 from server.shared.market.strategy_loader import StrategyLoader, SecurityError
 from server.modules.evolution.wiki_memory import EvolutionWikiMemory
 from server.modules.evolution.constants import BANNED_INDICATORS, PERSONAS, CROSS_DOMAIN_SEEDS
 from server.modules.chat.prompts import (
-    REASONING_PROMPT_TEMPLATE,
     DESIGN_PROMPT_TEMPLATE,
     CODE_PROMPT_TEMPLATE,
-    MINING_PROMPT_TEMPLATE,
 )
 from server.modules.chat.skills._base import (
     format_sse,
@@ -25,6 +24,39 @@ from server.modules.chat.skills._base import (
 from server.modules.chat.skills.pipeline_backtest import run_backtest
 
 logger = logging.getLogger(__name__)
+_REQUIRED_SIGNAL_FN_RE = re.compile(
+    r"def\s+generate_signal\s*\(\s*train_df\s*:\s*pd\.DataFrame\s*,\s*test_df\s*:\s*pd\.DataFrame\s*\)\s*->\s*pd\.Series",
+    re.IGNORECASE,
+)
+
+
+def _build_direct_design_brief(
+    message: str,
+    is_mining: bool,
+    persona: Optional[Dict[str, Any]],
+    seed: Optional[str],
+) -> str:
+    lines = [
+        f'사용자 요청: "{(message or "").strip()}"',
+        "",
+        "[공통 설계 제약]",
+        "- 사전 추론 단계 없이 바로 YAML 설계를 작성한다.",
+        "- train_df 기반 적응형 임계값을 최소 1개 이상 포함한다.",
+        "- 시장 레짐 필터를 포함하고, 과도한 AND 적층(3개 초과)을 피한다.",
+        "- 롱/숏 시그널은 구조적으로 일관되게 대칭 설계한다.",
+    ]
+    if is_mining and persona:
+        lines.extend([
+            "",
+            "[에볼루션 채굴 컨텍스트]",
+            f"- 페르소나: {persona.get('name', '')}",
+            f"- 세계관: {persona.get('worldview', '')}",
+            f"- 스타일: {persona.get('style', '')}",
+            f"- 크로스 도메인 씨드: {seed or ''}",
+            f"- 금지 지표: {', '.join(BANNED_INDICATORS)}",
+            "- 목표: 독창성이 있으면서도 전체 구간 신호 빈도(>=50건)가 가능한 구조",
+        ])
+    return "\n".join(lines).strip()
 
 
 async def _recover_code_once(raw_output: str, original_prompt: str, reason: str) -> str:
@@ -53,7 +85,7 @@ async def run_create_pipeline(
     message: str,
     session_id: str,
     context: Dict[str, Any],
-    history: List[Dict[str, Any]],
+    history,
     db,
     session_memory: Dict[str, Any],
     is_mining: bool = False,
@@ -65,59 +97,60 @@ async def run_create_pipeline(
     chat_mutation_hint = str(memory_context.get("next_mutation") or "").strip()
     guardrail_block = build_memory_guardrail(memory_context)
 
+    analysis_model = ((os.getenv("ANALYSIS_MODEL") or os.getenv("LITELLM_MODEL") or "Expert Reasoner").split("/")[-1]).strip()
+    code_model = ((os.getenv("CODE_GEN_MODEL") or os.getenv("LITELLM_MODEL") or "DeepSeek Coder").split("/")[-1]).strip()
+
     persona = seed = None
     if is_mining:
         persona = random.choice(PERSONAS)
         seed = random.choice(CROSS_DOMAIN_SEEDS)
-        yield format_sse({"type": "stage", "stage": 1,
-                          "label": f"💎 {persona['name']} 페르소나로 전략 채굴 중..."})
-        prompt1 = MINING_PROMPT_TEMPLATE.format(
-            message=message,
-            persona_name=persona["name"],
-            persona_worldview=persona["worldview"],
-            persona_style=persona["style"],
-            seed=seed,
-            banned_indicators=", ".join(BANNED_INDICATORS),
-        ) + guardrail_block
+        stage1_label = f"💎 {persona['name']} 기반 전략 설계도 작성 중... ({analysis_model})"
     else:
-        reasoning_model = ((os.getenv("LITELLM_MODEL") or os.getenv("QUICK_MODEL") or "Brain Model").split("/")[-1]).strip()
-        yield format_sse({"type": "stage", "stage": 1, "label": f"🧠 의도 파악 및 전략 분석 중... ({reasoning_model})"})
-        prompt1 = REASONING_PROMPT_TEMPLATE.format(message=message) + guardrail_block
+        stage1_label = f"📋 전략 설계도 작성 중... ({analysis_model})"
 
-    reasoning_full = ""
-    async for chunk in stream_chat_reply(user_message=prompt1, context=context,
-                                         history=history,
-                                         model=(os.getenv("LITELLM_MODEL") or None)):
-        if chunk is None or chunk == "":
-            continue
-        reasoning_full += chunk
-        yield format_sse({"type": "thought", "content": chunk})
-    await db.save_chat_message(session_id, "assistant", reasoning_full, "thought")
+    yield format_sse({"type": "stage", "stage": 1, "label": stage1_label})
+    yield format_sse({"type": "thought", "content": "사전 추론 단계는 생략하고, 요청을 바로 설계도로 변환 중입니다..."})
 
-    yield format_sse({"type": "stage", "stage": 2, 
-                      "label": f"📋 전략 설계도 작성 중... ({((os.getenv('ANALYSIS_MODEL') or 'Expert Reasoner').split('/')[-1])})"})
-    prompt2 = DESIGN_PROMPT_TEMPLATE.format(reasoning=reasoning_full) + guardrail_block
+    design_brief = _build_direct_design_brief(message, is_mining, persona, seed)
+    prompt2 = DESIGN_PROMPT_TEMPLATE.format(reasoning=design_brief) + guardrail_block
     design_full = ""
+    # ✅ analysis/thought 실시간 스트리밍
     async for chunk in stream_analysis_reply(prompt2):
-        design_full += chunk
-        yield format_sse({"type": "analysis", "content": chunk})
+        thought = chunk.get("thought")
+        content = chunk.get("content")
+        if thought:
+            yield format_sse({"type": "thought", "content": thought})
+        if content:
+            design_full += content
+            yield format_sse({"type": "analysis", "content": content})
+    session_memory.setdefault(session_id, {})["design"] = design_full
+    # design 이벤트 후 프론트는 직전 text 블록을 design 설계도 카드로 교체함 (이중 표시 없음)
+    yield format_sse({"type": "design", "content": design_full})
     try:
-        await db.save_chat_message(session_id, "assistant", design_full, "text")
+        await db.save_chat_message(session_id, "assistant", design_full, "design")
     except Exception as db_err:
         logger.error(f"Failed to save design message: {db_err}")
 
-    yield format_sse({"type": "stage", "stage": 3, 
-                      "label": f"⚙️ Python 전략 코드 구현 중... ({((os.getenv('CODE_GEN_MODEL') or 'DeepSeek Coder').split('/')[-1])})"})
-    logger.info(f"[{session_id}] Starting Stage 3: Code Generation")
+    yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ Python 전략 코드 구현 중... ({code_model})"})
+    logger.info(f"[{session_id}] Starting Stage 2: Code Generation")
     
     prompt3 = CODE_PROMPT_TEMPLATE.format(design=design_full) + guardrail_block
     code_full = ""
+    _code_chunk_count = 0
     try:
         async for chunk in stream_code_gen_reply(prompt3):
-            code_full += chunk
-            # No yield for code chunks to avoid UI clutter, but we could add a progress signal
+            thought = chunk.get("thought")
+            content = chunk.get("content")
+            if thought:
+                yield format_sse({"type": "thought", "content": thought})
+            if content:
+                code_full += content
+                _code_chunk_count += 1
+                # 코드 청크를 위해 status 한 개씩 전송 (keepalive)
+                if _code_chunk_count % 30 == 0:
+                    yield format_sse({"type": "status", "content": f"⚙️ 코드 생성 중... ({len(code_full)}자)"})
     except Exception as gen_err:
-        logger.error(f"Stage 3 Code Gen Error: {gen_err}")
+        logger.error(f"Stage 2 Code Gen Error: {gen_err}")
         yield format_sse({"type": "error", "content": f"코드 생성 중 오류가 발생했습니다: {gen_err}"})
         yield format_sse({"type": "done"})
         return
@@ -127,6 +160,8 @@ async def run_create_pipeline(
     validation_error: Optional[str] = None
     if not strategy_code:
         validation_error = "코드 추출 실패"
+    elif not _REQUIRED_SIGNAL_FN_RE.search(strategy_code):
+        validation_error = "필수 함수 시그니처 누락: def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series"
     else:
         try:
             StrategyLoader.validate_code(strategy_code)
@@ -173,7 +208,7 @@ async def run_create_pipeline(
     yield format_sse({"type": "strategy", "data": strategy_data})
     await db.save_chat_message(session_id, "assistant", strategy_title, "strategy", strategy_data)
 
-    yield format_sse({"type": "stage", "stage": 4, "label": "📈 백테스트 및 검증 중..."})
+    yield format_sse({"type": "stage", "stage": 3, "label": "📈 백테스트 및 검증 중..."})
     async for ev in run_backtest(
         strategy_code, strategy_title, message, context, session_id, db, session_memory,
         memory=memory, constitution=constitution, target_agent=target_agent,

@@ -23,7 +23,7 @@ export const API_BASE = rawPublicApiBase
 const API_BASE_URL = '/api';
 const RAW_FETCH_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_API_FETCH_TIMEOUT_MS || "30000");
 const FETCH_TIMEOUT_MS = Number.isFinite(RAW_FETCH_TIMEOUT_MS)
-  ? Math.max(3000, Math.min(RAW_FETCH_TIMEOUT_MS, 60000))
+  ? (RAW_FETCH_TIMEOUT_MS <= 0 ? 0 : Math.max(3000, RAW_FETCH_TIMEOUT_MS))
   : 30000;
 const LOCAL_API_FALLBACKS = [
   "http://localhost:8000",
@@ -53,6 +53,17 @@ export interface AgentImprovementRequest {
 
 type FetchWithBypassOptions = RequestInit & {
   timeoutMs?: number;
+};
+
+const resolveTimeoutMs = (timeoutMs?: number): number | null => {
+  if (!Number.isFinite(timeoutMs)) {
+    return FETCH_TIMEOUT_MS <= 0 ? null : FETCH_TIMEOUT_MS;
+  }
+  const parsed = Number(timeoutMs);
+  if (parsed <= 0) {
+    return null;
+  }
+  return Math.max(3000, parsed);
 };
 
 export interface ImprovementResponse {
@@ -417,9 +428,7 @@ const buildCandidates = (url: string): string[] => {
 
 export const fetchWithBypass = async (url: string, options: FetchWithBypassOptions = {}) => {
   const { timeoutMs, ...requestInit } = options;
-  const effectiveTimeoutMs = Number.isFinite(timeoutMs)
-    ? Math.max(3000, Math.min(Number(timeoutMs), 300000))
-    : FETCH_TIMEOUT_MS;
+  const effectiveTimeoutMs = resolveTimeoutMs(timeoutMs);
   const candidates = buildCandidates(url);
 
   let lastError: unknown = null;
@@ -428,14 +437,25 @@ export const fetchWithBypass = async (url: string, options: FetchWithBypassOptio
     const candidate = candidates[i];
     const isLast = i === candidates.length - 1;
     const timeoutController = new AbortController();
-    const timeoutId = setTimeout(() => timeoutController.abort("timeout"), effectiveTimeoutMs);
+    let abortReason: "timeout" | "aborted" | null = null;
+    const timeoutId = effectiveTimeoutMs === null
+      ? null
+      : setTimeout(() => {
+          abortReason = "timeout";
+          timeoutController.abort("timeout");
+        }, effectiveTimeoutMs);
     const externalSignal = requestInit.signal;
     let externalAbortListener: (() => void) | null = null;
 
     if (externalSignal) {
-      externalAbortListener = () => timeoutController.abort("aborted");
+      externalAbortListener = () => {
+        abortReason = "aborted";
+        timeoutController.abort("aborted");
+      };
       if (externalSignal.aborted) {
-        clearTimeout(timeoutId);
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+        }
         throw new DOMException("Request aborted", "AbortError");
       }
       externalSignal.addEventListener("abort", externalAbortListener, { once: true });
@@ -456,11 +476,17 @@ export const fetchWithBypass = async (url: string, options: FetchWithBypassOptio
       }
       return response;
     } catch (error) {
-      lastError = error;
-      console.warn(`[API] Candidate error: ${candidate}`, error);
-      if (isLast) throw error;
+      const normalizedError =
+        error instanceof DOMException && error.name === "AbortError" && abortReason === "timeout"
+          ? new Error("Request timed out")
+          : error;
+      lastError = normalizedError;
+      console.warn(`[API] Candidate error: ${candidate}`, normalizedError);
+      if (isLast) throw normalizedError;
     } finally {
-      clearTimeout(timeoutId);
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
       if (externalSignal && externalAbortListener) {
         externalSignal.removeEventListener("abort", externalAbortListener);
       }

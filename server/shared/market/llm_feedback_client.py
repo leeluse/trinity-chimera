@@ -228,8 +228,11 @@ class LLMFeedbackClient:
             start_time = time.time()
 
             # LiteLLM 비동기 호출 (acompletion)
-            timeout = float(os.environ.get("EVOLUTION_LLM_TIMEOUT_SECONDS", "120"))
-            response = await acompletion(
+            try:
+                timeout = float(os.environ.get("EVOLUTION_LLM_TIMEOUT_SECONDS", "0"))
+            except ValueError:
+                timeout = 0.0
+            request_kwargs = dict(
                 model=model,
                 messages=[
                     {"role": "system", "content": self._get_system_prompt(mode)},
@@ -237,8 +240,10 @@ class LLMFeedbackClient:
                 ],
                 max_tokens=4000,
                 temperature=0.3,
-                timeout=timeout,
             )
+            if timeout > 0:
+                request_kwargs["timeout"] = timeout
+            response = await acompletion(**request_kwargs)
 
             duration = time.time() - start_time
             logger.info(f"LLM call completed in {duration:.2f}s using {model}")

@@ -40,7 +40,11 @@ class LLMService:
         }
 
         # Global timeout settings
-        self.timeout = float(os.getenv("LLM_TIMEOUT", "120.0"))
+        try:
+            raw_timeout = float(os.getenv("LLM_TIMEOUT", "0"))
+        except ValueError:
+            raw_timeout = 0.0
+        self.timeout = None if raw_timeout <= 0 else max(1.0, raw_timeout)
         self.max_retries = int(os.getenv("LLM_MAX_RETRIES", "2"))
         self.retry_backoff = float(os.getenv("LLM_RETRY_BACKOFF", "2.0"))
 
@@ -99,15 +103,16 @@ class LLMService:
                 try:
                     # Prepare messages for chat completion
                     messages = [{"role": "user", "content": prompt}]
-
-                    response = await acompletion(
+                    request_kwargs = dict(
                         model=model_id,
                         messages=messages,
                         temperature=temperature,
                         max_tokens=max_tokens,
-                        timeout=self.timeout,
                         **kwargs
                     )
+                    if self.timeout is not None:
+                        request_kwargs["timeout"] = self.timeout
+                    response = await acompletion(**request_kwargs)
 
                     content = response.choices[0].message.content
                     if not content:

@@ -91,17 +91,17 @@ def _timeout_seconds() -> Optional[float]:
     raw_value = (
         os.getenv("EVOLUTION_LLM_TIMEOUT_SECONDS")
         or os.getenv("LLM_TIMEOUT")
-        or "120"
+        or "0"
     )
     try:
         timeout = float(raw_value)
     except ValueError:
-        timeout = 120.0
+        timeout = 0.0
 
     # 0 이하 값은 무제한 대기(채팅 경로와 동작 일관성 유지)
     if timeout <= 0:
         return None
-    return max(5.0, min(timeout, 300.0))
+    return max(5.0, timeout)
 
 
 def _request_retries() -> int:
@@ -279,6 +279,8 @@ class LiteLLMProxyService:
         kwargs: Dict[str, Any] = {}
         if self.fallback_models:
             kwargs["fallbacks"] = self.fallback_models
+        if self.timeout is not None:
+            kwargs["timeout"] = self.timeout
 
         try:
             response = await acompletion(
@@ -289,7 +291,6 @@ class LiteLLMProxyService:
                 stream=False,
                 api_base=self.base_url,
                 api_key=self.api_key,
-                timeout=self.timeout,
                 num_retries=self.request_retries,
                 **kwargs,
             )
@@ -311,7 +312,7 @@ class LiteLLMProxyService:
                 "stream": False,
                 "options": {"temperature": temperature},
             }
-            async with httpx.AsyncClient(timeout=self.timeout or 120.0) as client:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
                 res = await client.post(f"{ollama_base}/api/chat", json=payload)
                 res.raise_for_status()
                 data = res.json()

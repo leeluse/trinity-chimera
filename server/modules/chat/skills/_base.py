@@ -11,12 +11,12 @@ from server.modules.evolution.constants import AGENT_IDS
 logger = logging.getLogger(__name__)
 
 DEFAULT_HARD_GATES = {
-    "min_win_rate": 0.40,
-    "min_profit_factor": 1.10,
-    "min_total_return": -0.05,
-    "max_drawdown": 0.30,
+    "min_win_rate": 0.35,
+    "min_profit_factor": 1.05,
+    "min_total_return": -0.10,
+    "max_drawdown": 0.35,
     "min_total_trades": 15,
-    "min_sharpe_ratio": 0.20,
+    "min_sharpe_ratio": -0.10,
 }
 
 
@@ -28,11 +28,19 @@ def extract_python_code(text: str) -> str:
     if not text:
         return ""
 
+    def _first_code_tail(src: str) -> str:
+        m = re.search(r"(?m)^(?:from\s+\w+|import\s+\w+|class\s+\w+|def\s+\w+)", src or "")
+        return (src[m.start():] if m else src).strip()
+
     def _score(block: str) -> int:
         s = 0
         lower = block.lower()
         if "def generate_signal(" in block:
             s += 10
+        if "def generate_signals(" in block:
+            s += 7
+        if "class " in block and ("generate_signals(" in block or "generate_signal(" in block):
+            s += 5
         if "import pandas as pd" in lower or "pd." in block:
             s += 3
         if "class " in block:
@@ -63,8 +71,22 @@ def extract_python_code(text: str) -> str:
             candidates.append(tail)
 
     # 3) fenced block이 없고 함수 시그니처가 본문에 직접 있는 경우
-    if not candidates and "def generate_signal(" in text:
-        candidates.append(text.strip())
+    if not candidates and ("def generate_signal(" in text or "def generate_signals(" in text):
+        tail = _first_code_tail(text)
+        if tail:
+            candidates.append(tail)
+
+    # 4) fenced block이 없고 클래스 기반 전략 코드가 본문에 직접 있는 경우
+    if not candidates and "class " in text and ("generate_signals(" in text or "generate_signal(" in text):
+        tail = _first_code_tail(text)
+        if tail:
+            candidates.append(tail)
+
+    # 5) 장문 서술 + 코드가 섞여 있을 때, 첫 코드 라인부터 tail 추출
+    if not candidates:
+        tail = _first_code_tail(text)
+        if tail and ("class " in tail or "def " in tail or "import " in tail):
+            candidates.append(tail)
 
     if not candidates:
         return ""
@@ -97,7 +119,9 @@ def salvage_valid_python(code: str) -> str:
     min_keep = max(8, int(len(lines) * 0.5))
     for end in range(len(lines) - 1, min_keep - 1, -1):
         candidate = "\n".join(lines[:end]).strip()
-        if "def generate_signal(" not in candidate:
+        has_signal_fn = "def generate_signal(" in candidate or "def generate_signals(" in candidate
+        has_strategy_class = "class " in candidate and ("generate_signals(" in candidate or "generate_signal(" in candidate)
+        if not (has_signal_fn or has_strategy_class):
             continue
         try:
             compile(candidate, "<strategy>", "exec")

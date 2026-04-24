@@ -790,6 +790,9 @@ header {
   color: #cbd5e1;
   line-height: 1.6;
   font-size: 11.5px !important;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .markdown-content ul {

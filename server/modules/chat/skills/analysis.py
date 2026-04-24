@@ -1,4 +1,4 @@
-"""분석형 스킬 (확인 없이 즉시 실행): explain / risk / code_review / suggest_next"""
+"""분석형 스킬 (확인 없이 즉시 실행): explain / risk / code_review / suggest_next / code_from_design"""
 import logging
 from typing import Any, AsyncGenerator, Dict, List
 
@@ -11,6 +11,7 @@ from server.modules.chat.prompts import (
     SUGGEST_NEXT_TEMPLATE,
 )
 from server.modules.chat.skills._base import format_sse, get_last_strategy, resolve_target_agent
+from server.modules.chat.skills.pipeline_code_only import run_code_only_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,13 @@ async def run_explain_strategy(
     )
     full = ""
     async for chunk in stream_analysis_reply(prompt):
-        full += chunk
-        yield format_sse({"type": "analysis", "content": chunk})
+        thought = chunk.get("thought")
+        content = chunk.get("content")
+        if thought:
+            yield format_sse({"type": "thought", "content": thought})
+        if content:
+            full += content
+            yield format_sse({"type": "analysis", "content": content})
     await db.save_chat_message(session_id, "assistant", full, "text")
     yield format_sse({"type": "done"})
 
@@ -84,8 +90,13 @@ async def run_risk_analysis(
     )
     full = ""
     async for chunk in stream_analysis_reply(prompt):
-        full += chunk
-        yield format_sse({"type": "analysis", "content": chunk})
+        thought = chunk.get("thought")
+        content = chunk.get("content")
+        if thought:
+            yield format_sse({"type": "thought", "content": thought})
+        if content:
+            full += content
+            yield format_sse({"type": "analysis", "content": content})
     await db.save_chat_message(session_id, "assistant", full, "text")
     yield format_sse({"type": "done"})
 
@@ -107,10 +118,23 @@ async def run_code_review(
     )
     full = ""
     async for chunk in stream_analysis_reply(prompt):
-        full += chunk
-        yield format_sse({"type": "analysis", "content": chunk})
+        thought = chunk.get("thought")
+        content = chunk.get("content")
+        if thought:
+            yield format_sse({"type": "thought", "content": thought})
+        if content:
+            full += content
+            yield format_sse({"type": "analysis", "content": content})
     await db.save_chat_message(session_id, "assistant", full, "text")
     yield format_sse({"type": "done"})
+
+
+@skill("CODE_FROM_DESIGN")
+async def run_code_from_design(
+    message, session_id, context, history, db, session_memory
+) -> AsyncGenerator[str, None]:
+    async for ev in run_code_only_pipeline(message, session_id, context, history, db, session_memory):
+        yield ev
 
 
 @skill("SUGGEST_NEXT")
@@ -132,7 +156,12 @@ async def run_suggest_next(
     )
     full = ""
     async for chunk in stream_analysis_reply(prompt):
-        full += chunk
-        yield format_sse({"type": "analysis", "content": chunk})
+        thought = chunk.get("thought")
+        content = chunk.get("content")
+        if thought:
+            yield format_sse({"type": "thought", "content": thought})
+        if content:
+            full += content
+            yield format_sse({"type": "analysis", "content": content})
     await db.save_chat_message(session_id, "assistant", full, "text")
     yield format_sse({"type": "done"})

@@ -12,7 +12,7 @@ interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
-  type?: "text" | "strategy" | "backtest" | "thought" | "invocation";
+  type?: "text" | "strategy" | "backtest" | "thought" | "invocation" | "design";
   data?: any;
 }
 
@@ -21,6 +21,7 @@ interface ChatInterfaceProps {
   onBacktestGenerated?: (payload: any) => void;
   onApplyCode?: (code: string, name?: string, payload?: any) => void;
 }
+// const MAX_THINKING_CHARS = 10000; // 생략 비활성화됨 (사용 요청)
 
 const EXAMPLE_PROMPTS = [
   "돈치안/N봉 돌파 전략을 구축하고 ATR 포지션 관리와 가짜 돌파 필터를 결합해 주세요",
@@ -35,6 +36,7 @@ const SKILL_STAGE_META: Record<string, { total: number; showProgress: boolean }>
   RISK_ANALYSIS: { total: 1, showProgress: false },
   CODE_REVIEW: { total: 1, showProgress: false },
   SUGGEST_NEXT: { total: 1, showProgress: false },
+  CODE_FROM_DESIGN: { total: 2, showProgress: true },
 };
 
 const formatChatRunError = (error: unknown): string => {
@@ -51,15 +53,25 @@ const formatChatRunError = (error: unknown): string => {
 };
 
 // [PERF] Memoized individual message item to prevent re-rendering of entire list during streaming
-const MessageItem = memo(({ msg, onShowCode }: { msg: ChatMessage, onShowCode: (code: string, title?: string, payload?: any) => void }) => {
+const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming }: {
+  msg: ChatMessage,
+  onShowCode: (code: string, title?: string, payload?: any) => void,
+  onSendMessage?: (text: string) => void,
+  isStreaming?: boolean, // true 시 주목: 이 메시지가 현재 스트리밍 중인 마지막 메시지
+}) => {
   let mainContent = msg.content || "";
   let thinkingContent = "";
   let isThinkingStreaming = false;
 
-  // Extract <think> chunks from regular text messages dynamically
-  if (msg.role === 'assistant' && msg.type === 'text') {
-    const closedMatch = mainContent.match(/<(thought|think|think_process|reasoning)>([\s\S]*?)<\/\1>/i);
-    const streamingMatch = mainContent.match(/<(thought|think|think_process|reasoning)>([\s\S]*)$/i);
+  // thought 타입: 스트리밍 중 = 열림, 완료 후 = 자동 접힌
+  if (msg.role === 'assistant' && msg.type === 'thought') {
+    thinkingContent = (msg.content || "").replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '').trim();
+    mainContent = "";
+    isThinkingStreaming = !!isStreaming; // 스트리밍 중이면 true
+  } else if (msg.role === 'assistant' && msg.type === 'text') {
+    // text 타입 내 <think> 태그 파싱
+    const closedMatch = mainContent.match(/<(thought|think|think_process|reasoning)>([\/\s\S]*?)<\/\1>/i);
+    const streamingMatch = mainContent.match(/<(thought|think|think_process|reasoning)>([\/\s\S]*)$/i);
 
     if (closedMatch) {
       thinkingContent = closedMatch[2].trim();
@@ -67,15 +79,20 @@ const MessageItem = memo(({ msg, onShowCode }: { msg: ChatMessage, onShowCode: (
     } else if (streamingMatch) {
       thinkingContent = streamingMatch[2].replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '').trim();
       mainContent = mainContent.replace(streamingMatch[0], "").trim();
-      isThinkingStreaming = true; // Still streaming
+      isThinkingStreaming = true;
     }
-    
-    // Clean up any remaining orphan tags
     mainContent = mainContent.replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '').trim();
-  } else if (msg.type === 'thought') {
-    thinkingContent = (msg.content || "").replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '').trim();
-    mainContent = "";
   }
+
+  // 자동 스크롤: thought 컨텐츠 div ref
+  const thoughtScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (isThinkingStreaming && thoughtScrollRef.current) {
+      thoughtScrollRef.current.scrollTop = thoughtScrollRef.current.scrollHeight;
+    }
+  });
+
+  const displayThinkingContent = thinkingContent;
 
   return (
     <div className={`flex flex-col py-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -119,24 +136,29 @@ const MessageItem = memo(({ msg, onShowCode }: { msg: ChatMessage, onShowCode: (
             )}
 
             {thinkingContent && (
+              // 스트리밍 중: 열림 + 스피너 / 완료 후: 자동 접힌
               <details className="group mb-2 max-w-[95%]" open={isThinkingStreaming}>
-                <summary className="flex items-center gap-2 px-3 py-2 bg-amber-500/5 border border-amber-500/10 rounded-xl cursor-pointer hover:bg-amber-500/10 transition-all list-none">
+                <summary className="flex items-center gap-2 px-3 py-2 bg-amber-500/5 border border-amber-500/10 rounded-xl cursor-pointer hover:bg-amber-500/10 transition-all list-none select-none">
                   {isThinkingStreaming ? (
-                    <Loader2 size={12} className="text-amber-500 animate-spin" />
+                    <Loader2 size={12} className="text-amber-500 animate-spin flex-shrink-0" />
                   ) : (
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500/40" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500/40 flex-shrink-0" />
                   )}
                   <span className="text-[10px] font-bold tracking-widest uppercase text-amber-400/60">
-                    {isThinkingStreaming ? "AI Reasoning (Typing...)" : "AI Reasoning"}
+                    {isThinkingStreaming ? "AI Reasoning (Thinking...)" : "AI Reasoning"}
                   </span>
-                  <Plus size={10} className="ml-auto text-amber-400/40 group-open:rotate-45 transition-transform" />
+                  <Plus size={10} className="ml-auto text-amber-400/40 group-open:rotate-45 transition-transform flex-shrink-0" />
                 </summary>
-                <div className="mt-2 px-4 py-3 bg-amber-500/[0.02] border border-amber-500/5 rounded-xl text-[11px] text-slate-400/90 leading-relaxed font-medium italic thought-markdown markdown-content overflow-hidden">
-                  <ReactMarkdown 
+                {/* max-h 효 overflow-y-auto: 길어지면 스크롤 / 자동 마지막 줄 스크롤 */}
+                <div
+                  ref={thoughtScrollRef}
+                  className="mt-2 px-4 py-3 bg-amber-500/[0.02] border border-amber-500/5 rounded-xl text-[11px] text-slate-400/90 leading-relaxed font-medium italic thought-markdown markdown-content max-h-72 overflow-y-auto custom-scrollbar transition-all"
+                >
+                  <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeRaw]}
                   >
-                    {thinkingContent + (isThinkingStreaming ? " ▋" : "")}
+                    {displayThinkingContent + (isThinkingStreaming ? " █" : "")}
                   </ReactMarkdown>
                 </div>
               </details>
@@ -152,6 +174,37 @@ const MessageItem = memo(({ msg, onShowCode }: { msg: ChatMessage, onShowCode: (
                 </ReactMarkdown>
               </div>
             )}
+
+          {msg.type === 'design' && (
+            <div className="flex flex-col bg-white/[0.03] border border-blue-500/20 rounded-xl p-4 shadow-xl gap-3 backdrop-blur-md mb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-blue-400">
+                  <FileCode2 size={14} />
+                  <span className="text-[10px] font-bold tracking-tight uppercase">전략 설계도</span>
+                </div>
+              </div>
+              <div className="h-px bg-white/[0.05]" />
+              <details className="group">
+                <summary className="flex items-center gap-2 cursor-pointer list-none text-[10px] text-slate-400 hover:text-slate-200 transition-colors">
+                  <Plus size={10} className="group-open:rotate-45 transition-transform" />
+                  설계도 보기 / 접기
+                </summary>
+                <div className="mt-2 max-h-[200px] overflow-y-auto custom-scrollbar rounded-lg bg-black/40 border border-white/5 p-3">
+                  <pre className="text-[10px] text-slate-300 font-mono leading-relaxed whitespace-pre-wrap break-all">
+                    {msg.content}
+                  </pre>
+                </div>
+              </details>
+              <button
+                onClick={() => onSendMessage?.("이 설계도로 Python 백테스트 코드만 완전하게 작성해줘")}
+                className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-blue-600/10 border border-blue-500/30 rounded-xl text-[10px] font-bold text-blue-200 hover:bg-blue-600/20 transition-all active:scale-95"
+                title="설계도를 기반으로 코드만 재생성합니다 (Stage 3+4만 실행)"
+              >
+                <Zap size={12} />
+                이 설계도로 코드만 생성
+              </button>
+            </div>
+          )}
 
           {msg.type === 'strategy' && (
             <div className="flex flex-col bg-white/[0.03] border border-white/[0.08] rounded-xl p-4 shadow-xl gap-3 backdrop-blur-md mb-6">
@@ -225,6 +278,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   const [currentStage, setCurrentStage] = useState(0);
   const [totalStages, setTotalStages] = useState(0);
   const [showStageProgress, setShowStageProgress] = useState(false);
+  const [stageStartedAt, setStageStartedAt] = useState<number | null>(null);
+  const [stageElapsedSeconds, setStageElapsedSeconds] = useState(0);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   // stage 이벤트마다 새 블록을 강제 시작하기 위한 key
@@ -265,7 +320,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
             id: m.id,
             role: m.role,
             content: m.content || "",
-            type: (m.type === "analysis" ? "text" : (m.type || "text")) as any,
+            type: (m.type === "analysis" ? "text" : (m.type === "design" ? "design" : (m.type || "text"))) as any,
             data: m.data ?? {},
           }));
         setMessages(historyMessages);
@@ -385,6 +440,20 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     };
   }, []);
 
+  useEffect(() => {
+    if (!isLoading || !stageStartedAt) {
+      setStageElapsedSeconds(0);
+      return;
+    }
+    const updateElapsed = () => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - stageStartedAt) / 1000));
+      setStageElapsedSeconds(elapsed);
+    };
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [isLoading, stageStartedAt]);
+
   const appendMessage = (message: ChatMessage) => {
     setMessages((prev) => [...prev, message]);
   };
@@ -431,6 +500,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     setCurrentStage(0);
     setTotalStages(0);
     setShowStageProgress(false);
+    setStageStartedAt(Date.now());
+    setStageElapsedSeconds(0);
     currentStageIdRef.current = "";
     setStatusText("AI 분석 중...");
 
@@ -445,7 +516,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           role: msg.role,
           content: msg.content,
         }))
-        .slice(-15); 
+        .slice(-25); // proxy.py의 auto-truncation이 서버 측에서 컨텍스트 한도 초과분을 안전하게 자름
 
       // Vercel/Local 모두 Next.js API 프록시 경로를 고정 사용
       const url = `/api/chat/run?t=${Date.now()}`;
@@ -466,7 +537,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
         }),
         signal: controller.signal,
         cache: "no-store", // [중요] 브라우저 캐시 무시
-        timeoutMs: 300000
+        timeoutMs: 0
       });
 
       if (!response.ok) {
@@ -500,12 +571,26 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 setStatusText(event.content);
                 break;
 
+              case "progress":
+                if (typeof event.label === "string" && event.label.trim()) {
+                  setStatusText(event.label);
+                }
+                if (typeof event.stage === "number" && event.stage > 0) {
+                  setCurrentStage(event.stage);
+                }
+                if (typeof event.elapsed_sec === "number" && Number.isFinite(event.elapsed_sec)) {
+                  setStageElapsedSeconds(Math.max(0, Math.floor(event.elapsed_sec)));
+                }
+                break;
+
               // stage 이벤트: 새 덩어리(블록) 시작을 강제함
               case "stage": {
                 const newStageId = `stage-${event.stage}-${Date.now()}`;
                 currentStageIdRef.current = newStageId;
                 const stageNum = Number(event.stage) || 0;
                 setCurrentStage(stageNum);
+                setStageStartedAt(Date.now());
+                setStageElapsedSeconds(0);
                 // invocation 정보가 없는 승인 재요청(예/네) 케이스를 위한 fallback
                 if (stageNum > 1 && !showStageProgress) {
                   setShowStageProgress(true);
@@ -514,6 +599,16 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                   setTotalStages(stageNum >= 4 ? 5 : stageNum);
                 }
                 setStatusText(event.label ?? `단계 ${event.stage} 진행 중...`);
+
+                // Stage 1: thinking이 올 것이므로 미리 message 생성
+                if (stageNum === 1) {
+                  appendMessage({
+                    id: `thought-stage1-${Date.now()}`,
+                    role: "assistant",
+                    content: "",
+                    type: "thought",
+                  });
+                }
                 break;
               }
 
@@ -587,14 +682,38 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 setStatusText(`⚡ ${event.label || event.skill} 발동 중... ${event.model ? `(${event.model})` : ''}`);
                 break;
 
+              case "design":
+                // ✅ 직전 text 블록(설계도 스트리밍 누적본)을 design 카드로 교체
+                // → analysis로 실시간 스트리밍 후 완성되면 카드로 변신 (이중 표시 없음)
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  const designMsg = {
+                    id: `${Date.now()}-design`,
+                    role: "assistant" as const,
+                    content: event.content || "",
+                    type: "design" as const,
+                  };
+                  // 직전이 스트리밍 텍스트 블록이면 교체, 아니면 append
+                  if (last && last.role === "assistant" && last.type === "text") {
+                    const next = [...prev];
+                    next[next.length - 1] = { ...designMsg, id: last.id + "-design" };
+                    return next;
+                  }
+                  return [...prev, designMsg];
+                });
+                break;
+
               case "analysis":
                 setMessages((prev) => {
                   const last = prev[prev.length - 1];
+                  // 직전 메시지가 같은 스트리밍 텍스트 블록이면 이어 붙임
+                  // stage 이벤트가 오면 currentStageIdRef가 바뀌므로 자연스럽게 새 블록 생성
                   const stageId = currentStageIdRef.current;
-                  // 같은 컨텍스트면 이어 붙임
-                  const lastId = last?.id || "";
-                  const isSameContext = stageId ? lastId.startsWith(stageId) : (lastId && !lastId.includes("stage-"));
-                  const canAppend = last && last.role === "assistant" && last.type === "text" && isSameContext;
+                  const canAppend =
+                    last &&
+                    last.role === "assistant" &&
+                    last.type === "text" &&
+                    (stageId ? last.id.startsWith(stageId) : !last.id.includes("-invoke-") && !last.id.includes("-design") && !last.id.includes("-strategy") && !last.id.includes("-backtest"));
 
                   if (canAppend) {
                     const next = [...prev];
@@ -602,8 +721,11 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                     return next;
                   }
                   // 새 stage이거나 직전이 다른 타입이면 새 블록 생성
+                  const newId = stageId
+                    ? `${stageId}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+                    : `analysis-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
                   return [...prev, {
-                    id: `${stageId}-${Date.now()}-analysis-${Math.random().toString(36).substr(2, 5)}`,
+                    id: newId,
                     role: "assistant",
                     content: event.content,
                     type: "text",
@@ -640,6 +762,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
       });
     } finally {
       setIsLoading(false);
+      setStageStartedAt(null);
+      setStageElapsedSeconds(0);
       abortControllerRef.current = null;
     }
   };
@@ -713,9 +837,11 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           alignToBottom
           itemContent={(index, msg) => (
             <div className="px-4">
-              <MessageItem 
-                msg={msg} 
-                onShowCode={handleShowCode} 
+              <MessageItem
+                msg={msg}
+                onShowCode={handleShowCode}
+                onSendMessage={handleSend}
+                isStreaming={index === messages.length - 1 && isLoading}
               />
             </div>
           )}
@@ -762,6 +888,9 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
               </div>
               <span className="text-[10px] font-black tracking-[0.2em] text-slate-400 uppercase">
                 {statusText}
+              </span>
+              <span className="text-[10px] font-bold text-slate-500 tabular-nums">
+                {stageElapsedSeconds}초
               </span>
               {showStageProgress && totalStages > 1 && (
                 <div className="flex gap-1.5 ml-auto items-center">

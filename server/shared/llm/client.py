@@ -6,11 +6,16 @@ import logging
 import httpx
 from typing import Any, Dict, List, Optional, AsyncGenerator
 from litellm import acompletion
+import litellm
+
+# 디버그 모드 활성화 (LiteLLM Timeout 등의 원인을 상세히 로그로 출력하기 위함)
+if os.getenv("LITELLM_DEBUG", "1") == "1":
+    litellm._turn_on_debug()
 
 logger = logging.getLogger(__name__)
 
 
-async def stream_code_gen_reply(prompt: str) -> AsyncGenerator[str, None]:
+async def stream_code_gen_reply(prompt: str) -> AsyncGenerator[Dict[str, str], None]:
     """Stage 3 코드 생성 전용. CODE_GEN_MODEL(코더/툴콜 역할) 사용."""
     model = (os.getenv("CODE_GEN_MODEL") or "").strip()
     max_tokens = int(os.getenv("CHAT_CODE_GEN_MAX_TOKENS", "3200"))
@@ -19,38 +24,47 @@ async def stream_code_gen_reply(prompt: str) -> AsyncGenerator[str, None]:
     messages = _build_messages(prompt)
     if cfg["provider"] == "litellm":
         try:
-            response = await acompletion(
+            request_kwargs = dict(
                 model=target_model,
                 messages=messages,
                 api_base=cfg["base_url"],
                 api_key=cfg.get("api_key"),
                 temperature=0.3,
                 max_tokens=max_tokens,
-                timeout=_litellm_failover_timeout_seconds(),
                 num_retries=0,
                 stream=True,
             )
+            resolved_timeout = _code_gen_timeout_seconds()
+            if resolved_timeout is not None:
+                request_kwargs["timeout"] = resolved_timeout
+            response = await acompletion(
+                **request_kwargs,
+            )
             async for chunk in response:
-                content = chunk.choices[0].delta.content
-                if content:
-                    yield content
+                delta = chunk.choices[0].delta
+                # LiteLLM: reasoning_content 지원 (DeepSeek R1 등)
+                raw_thought = getattr(delta, "reasoning_content", None)
+                if raw_thought:
+                    yield {"thought": raw_thought}
+                if delta.content:
+                    yield {"content": delta.content}
             return
         except Exception as e:
             logger.error(f"stream_code_gen_reply error: {e}")
-            yield f"\n[코드 생성 오류: {e}]"
+            yield {"content": f"\n[코드 생성 오류: {e}]"}
             return
     async for chunk in stream_chat_reply(prompt, model=model or None, temperature=0.3):
         yield chunk
 
 
-async def stream_analysis_reply(prompt: str) -> AsyncGenerator[str, None]:
+async def stream_analysis_reply(prompt: str) -> AsyncGenerator[Dict[str, str], None]:
     """Stage 2 전략 설계 전용. ANALYSIS_MODEL(장문 분석 역할) 사용."""
     model = (os.getenv("ANALYSIS_MODEL") or "").strip()
     async for chunk in stream_chat_reply(prompt, model=model or None):
         yield chunk
 
 
-async def stream_quick_reply(prompt: str) -> AsyncGenerator[str, None]:
+async def stream_quick_reply(prompt: str) -> AsyncGenerator[Dict[str, str], None]:
     """빠른 응답 전용. QUICK_MODEL(빠른 응답 역할) 사용."""
     model = (os.getenv("QUICK_MODEL") or "").strip()
     async for chunk in stream_chat_reply(prompt, model=model or None):
@@ -61,20 +75,56 @@ def _safe_context(context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return {}
     return {k: v for k, v in context.items() if v is not None}
 
-def _timeout_seconds() -> float:
+def _timeout_seconds() -> Optional[float]:
+    """
+    Base timeout for non-streaming / fallback calls.
+    - `<= 0` means no timeout.
+    """
     try:
-        return float(os.getenv("LLM_TIMEOUT", "120.0"))
-    except:
-        return 120.0
-
-
-def _litellm_failover_timeout_seconds() -> float:
-    """Short timeout for primary LiteLLM call before local fallback."""
-    try:
-        raw = float(os.getenv("LITELLM_FAILOVER_TIMEOUT", "12.0"))
+        raw = float(os.getenv("LLM_TIMEOUT", "0"))
     except Exception:
-        raw = 12.0
-    return max(3.0, min(raw, _timeout_seconds()))
+        raw = 0.0
+    if raw <= 0:
+        return None
+    return max(1.0, raw)
+
+
+def _litellm_failover_timeout_seconds() -> Optional[float]:
+    """
+    Timeout for primary LiteLLM streaming calls.
+    - `<= 0` disables timeout.
+    """
+    try:
+        raw = float(os.getenv("LITELLM_FAILOVER_TIMEOUT", "0"))
+    except Exception:
+        raw = 0.0
+    if raw <= 0:
+        return None
+    base_timeout = _timeout_seconds()
+    timeout = max(1.0, raw)
+    if base_timeout is not None:
+        timeout = min(timeout, base_timeout)
+    return timeout
+
+def _code_gen_timeout_seconds() -> Optional[float]:
+    """
+    Timeout for Stage-3 code generation.
+    - `<= 0` disables timeout.
+    """
+    try:
+        raw = float(os.getenv("CHAT_CODE_GEN_TIMEOUT", "0"))
+    except Exception:
+        raw = 0.0
+    if raw <= 0:
+        return None
+    timeout = max(1.0, raw)
+    failover_timeout = _litellm_failover_timeout_seconds()
+    base_timeout = _timeout_seconds()
+    if failover_timeout is not None:
+        timeout = max(timeout, failover_timeout)
+    if base_timeout is not None:
+        timeout = min(timeout, base_timeout)
+    return timeout
 
 
 def _ollama_fallback_enabled() -> bool:
@@ -98,7 +148,7 @@ def _get_llm_config() -> Dict[str, str]:
     }
 
 def _normalize_model(model: Any, provider: str = "litellm") -> str:
-    """Ensure model name is a string and prepend provider if missing (litellm only)."""
+    """Ensure model name is a normalized string for the configured provider."""
     if not model:
         return ""
     if isinstance(model, list):
@@ -116,10 +166,12 @@ def _normalize_model(model: Any, provider: str = "litellm") -> str:
     if any(model_str.startswith(p) for p in known_providers):
         return model_str
     
-    # 만약 환경변수에서 이미 복잡한 이름을 사용 중이라면 (예: minimax-m2.5) 
-    # LiteLLM이 자체적으로 추론하게 두거나 기본값인 openai/를 명시함.
-    # 하지만 litellm 프록시 연동 시에는 openai/ 접두사가 가장 범용적임.
-    return f"openai/{model_str}"
+    # LiteLLM SDK는 provider prefix 없는 모델명을 거부할 수 있어 기본값을 ON으로 둔다.
+    force_openai_prefix = (os.getenv("LITELLM_FORCE_OPENAI_PREFIX") or "1").strip().lower()
+    if force_openai_prefix in {"1", "true", "yes", "on"}:
+        return f"openai/{model_str}"
+    # 필요 시 env로 비활성화 가능: LITELLM_FORCE_OPENAI_PREFIX=0
+    return model_str
 
 
 def _strip_provider_prefix(model_name: str) -> str:
@@ -189,6 +241,7 @@ async def generate_chat_reply(
     system_appendix: Optional[str] = None,
     custom_system_prompt: Optional[str] = None,
     timeout_sec: Optional[float] = None,
+    max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Unified LLM API non-streaming call"""
     cfg = _get_llm_config()
@@ -197,21 +250,35 @@ async def generate_chat_reply(
     
     if cfg["provider"] == "litellm":
         try:
-            response = await acompletion(
+            resolved_timeout = timeout_sec if timeout_sec is not None else _litellm_failover_timeout_seconds()
+            request_kwargs = dict(
                 model=target_model,
                 messages=messages,
                 api_base=cfg["base_url"],
                 api_key=cfg.get("api_key"),
                 temperature=float(temperature),
-                timeout=timeout_sec or _litellm_failover_timeout_seconds(),
                 num_retries=0,
-                stream=False
             )
+            if resolved_timeout is not None:
+                request_kwargs["timeout"] = resolved_timeout
+            if max_tokens is not None and int(max_tokens) > 0:
+                request_kwargs["max_tokens"] = int(max_tokens)
+            response = await acompletion(
+                stream=False,
+                **request_kwargs,
+            )
+            finish_reason = None
+            try:
+                finish_reason = response.choices[0].finish_reason
+            except Exception:
+                finish_reason = None
             return {
                 "content": response.choices[0].message.content,
+                "thought": getattr(response.choices[0].message, "reasoning_content", None),
                 "provider": "litellm",
                 "model": target_model,
-                "fallback": False
+                "fallback": False,
+                "finish_reason": finish_reason,
             }
         except Exception as e:
             if not _ollama_fallback_enabled():
@@ -227,11 +294,14 @@ async def generate_chat_reply(
             try:
                 ollama_model = _ollama_model_fallback(target_model)
                 ollama_url = f"{_ollama_base_url()}/api/chat"
+                options = {"temperature": float(temperature)}
+                if max_tokens is not None and int(max_tokens) > 0:
+                    options["num_predict"] = int(max_tokens)
                 payload = {
                     "model": ollama_model,
                     "messages": messages,
                     "stream": False,
-                    "options": {"temperature": float(temperature)},
+                    "options": options,
                 }
                 async with httpx.AsyncClient(timeout=timeout_sec or _timeout_seconds()) as client:
                     response = await client.post(ollama_url, json=payload)
@@ -242,6 +312,7 @@ async def generate_chat_reply(
                         "provider": "ollama_fallback",
                         "model": ollama_model,
                         "fallback": True,
+                        "finish_reason": None,
                     }
             except Exception as fb_err:
                 logger.error(f"Ollama fallback error: {fb_err}")
@@ -249,7 +320,10 @@ async def generate_chat_reply(
     
     # Ollama Fallback
     url = f"{cfg['base_url']}/api/chat"
-    payload = {"model": target_model, "messages": messages, "stream": False, "options": {"temperature": float(temperature)}}
+    options = {"temperature": float(temperature)}
+    if max_tokens is not None and int(max_tokens) > 0:
+        options["num_predict"] = int(max_tokens)
+    payload = {"model": target_model, "messages": messages, "stream": False, "options": options}
     try:
         async with httpx.AsyncClient(timeout=timeout_sec or _timeout_seconds()) as client:
             response = await client.post(url, json=payload)
@@ -259,7 +333,8 @@ async def generate_chat_reply(
                 "content": data["message"]["content"],
                 "provider": "ollama_direct",
                 "model": target_model,
-                "fallback": False
+                "fallback": False,
+                "finish_reason": None,
             }
     except Exception as e:
         logger.error(f"Ollama error: {e}")
@@ -273,7 +348,8 @@ async def stream_chat_reply(
     history: Optional[List[Dict[str, Any]]] = None,
     system_appendix: Optional[str] = None,
     custom_system_prompt: Optional[str] = None,
-) -> AsyncGenerator[str, None]:
+    max_tokens: Optional[int] = None,
+) -> AsyncGenerator[Dict[str, str], None]:
     """Unified LLM API streaming call"""
     cfg = _get_llm_config()
     target_model = _normalize_model(model or cfg["model"], provider=cfg["provider"])
@@ -290,21 +366,31 @@ async def stream_chat_reply(
     if cfg["provider"] == "litellm":
         emitted_chars = 0
         try:
-            response = await acompletion(
+            request_kwargs = dict(
                 model=target_model,
                 messages=messages,
                 api_base=cfg["base_url"],
                 api_key=cfg.get("api_key"),
                 temperature=float(temperature),
-                timeout=_litellm_failover_timeout_seconds(),
                 num_retries=0,
-                stream=True
+            )
+            resolved_timeout = _litellm_failover_timeout_seconds()
+            if resolved_timeout is not None:
+                request_kwargs["timeout"] = resolved_timeout
+            if max_tokens is not None and int(max_tokens) > 0:
+                request_kwargs["max_tokens"] = int(max_tokens)
+            response = await acompletion(
+                stream=True,
+                **request_kwargs,
             )
             async for chunk in response:
-                content = chunk.choices[0].delta.content
-                if content:
-                    emitted_chars += len(content)
-                    yield content
+                delta = chunk.choices[0].delta
+                raw_thought = getattr(delta, "reasoning_content", None)
+                if raw_thought:
+                    yield {"thought": raw_thought}
+                if delta.content:
+                    emitted_chars += len(delta.content)
+                    yield {"content": delta.content}
             logger.info(
                 "[llm.stream] done provider=litellm model=%s chars=%d",
                 target_model,
@@ -314,7 +400,7 @@ async def stream_chat_reply(
         except Exception as e:
             if not _ollama_fallback_enabled():
                 logger.error(f"LiteLLM stream error (Ollama fallback disabled): {e}")
-                yield f"\n[LLM 연결 오류: {str(e)}]"
+                yield {"content": f"\n[LLM 연결 오류: {str(e)}]\n"}
                 return
             logger.error(f"LiteLLM stream error: {e}")
             # Automatic streaming fallback to local Ollama
@@ -330,7 +416,10 @@ async def stream_chat_reply(
                     "model": ollama_model,
                     "messages": messages,
                     "stream": True,
-                    "options": {"temperature": float(temperature)},
+                    "options": {
+                        "temperature": float(temperature),
+                        **({"num_predict": int(max_tokens)} if max_tokens is not None and int(max_tokens) > 0 else {}),
+                    },
                 }
                 fb_chars = 0
                 async with httpx.AsyncClient(timeout=_timeout_seconds()) as client:
@@ -343,7 +432,7 @@ async def stream_chat_reply(
                                 if "message" in chunk and "content" in chunk["message"]:
                                     content = chunk["message"]["content"]
                                     fb_chars += len(content)
-                                    yield content
+                                    yield {"content": content}
                             except Exception:
                                 continue
                 logger.info(
@@ -354,12 +443,20 @@ async def stream_chat_reply(
                 return
             except Exception as fb_err:
                 logger.error(f"Ollama stream fallback error: {fb_err}")
-                yield f"\n[LLM 연결 오류: {str(e)}]"
+                yield {"content": f"\n[LLM 연결 오류: {str(e)}]\n"}
                 return
 
-    # Ollama Fallback
+    # Ollama Fallback (Direct)
     url = f"{cfg['base_url']}/api/chat"
-    payload = {"model": target_model, "messages": messages, "stream": True, "options": {"temperature": float(temperature)}}
+    payload = {
+        "model": target_model,
+        "messages": messages,
+        "stream": True,
+        "options": {
+            "temperature": float(temperature),
+            **({"num_predict": int(max_tokens)} if max_tokens is not None and int(max_tokens) > 0 else {}),
+        },
+    }
     try:
         emitted_chars = 0
         async with httpx.AsyncClient(timeout=_timeout_seconds()) as client:
@@ -371,7 +468,7 @@ async def stream_chat_reply(
                         if "message" in chunk and "content" in chunk["message"]:
                             content = chunk["message"]["content"]
                             emitted_chars += len(content)
-                            yield content
+                            yield {"content": content}
                     except: continue
         logger.info(
             "[llm.stream] done provider=ollama model=%s chars=%d",
@@ -380,4 +477,4 @@ async def stream_chat_reply(
         )
     except Exception as e:
         logger.error(f"Ollama stream error: {e}")
-        yield f"\n[로컬 Ollama 연결 오류: {str(e)}]"
+        yield {"content": f"\n[로컬 Ollama 연결 오류: {str(e)}]\n"}

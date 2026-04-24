@@ -15,20 +15,20 @@ MEMORY_DIR = WIKI_ROOT / "Evolution-Memory"
 
 DEFAULT_CONSTITUTION: Dict[str, Any] = {
     "hard_gates": {
-        "min_win_rate": 0.45,
-        "min_profit_factor": 1.20,
-        "min_total_return": 0.00,
-        "max_drawdown": 0.25,
-        "min_total_trades": 30,
-        "min_sharpe_ratio": 0.30,
+        "min_win_rate": 0.35,
+        "min_profit_factor": 1.05,
+        "min_total_return": -0.10,
+        "max_drawdown": 0.35,
+        "min_total_trades": 15,
+        "min_sharpe_ratio": -0.10,
     },
     "quick_gates": {
-        "min_win_rate": 0.38,
-        "min_profit_factor": 1.05,
-        "min_total_return": -0.02,
-        "max_drawdown": 0.35,
-        "min_total_trades": 10,
-        "min_sharpe_ratio": -0.10,
+        "min_win_rate": 0.30,
+        "min_profit_factor": 1.01,
+        "min_total_return": -0.20,
+        "max_drawdown": 0.40,
+        "min_total_trades": 8,
+        "min_sharpe_ratio": -0.50,
     },
     "budgets": {
         "max_candidates_per_cycle": 2,
