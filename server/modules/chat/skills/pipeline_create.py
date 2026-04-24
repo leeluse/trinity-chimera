@@ -112,10 +112,12 @@ async def run_create_pipeline(
     # ──────────────────────────────────────────────────────────────
     # code_gen_mode가 이미 있으면 Stage 1 생략 → 캐시된 설계로 바로 Stage 2
     # ──────────────────────────────────────────────────────────────
+    logger.info(f"[{session_id}] pipeline start: code_gen_mode={code_gen_mode!r}, session_keys={list(session_memory.get(session_id, {}).keys())}")
     if code_gen_mode:
         design_full = session_memory.get(session_id, {}).get("design", "")
+        logger.info(f"[{session_id}] cached design length={len(design_full)}")
         if not design_full:
-            # 설계가 없으면 어쩔 수 없이 Stage 1부터
+            logger.warning(f"[{session_id}] no cached design found → falling back to Stage 1")
             code_gen_mode = None
         else:
             logger.info(f"[{session_id}] Skipping Stage 1 — using cached design, mode={code_gen_mode}")
