@@ -58,7 +58,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
   onShowCode: (code: string, title?: string, payload?: any) => void,
   onSendMessage?: (text: string) => void,
   isStreaming?: boolean, // true 시 주목: 이 메시지가 현재 스트리밍 중인 마지막 메시지
-  onChoiceSelect?: (choiceValue: string) => void,
+  onChoiceSelect?: (choiceValue: string, originalMessage?: string) => void,
 }) => {
   let mainContent = msg.content || "";
   let thinkingContent = "";
@@ -181,7 +181,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
                 {msg.data.choices.map((choice: any) => (
                   <button
                     key={choice.value}
-                    onClick={() => onChoiceSelect?.(choice.value)}
+                    onClick={() => onChoiceSelect?.(choice.value, msg.data?.originalMessage)}
                     className="flex flex-col items-start gap-1 px-4 py-3 bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/40 rounded-xl hover:from-purple-600/30 hover:to-blue-600/30 transition-all active:scale-95 cursor-pointer"
                   >
                     <span className="text-[10px] font-bold text-purple-300">{choice.label}</span>
@@ -494,13 +494,13 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     }
   }, [onApplyCode]);
 
-  const handleCodeGenModeChoice = useCallback(async (mode: string) => {
+  const handleCodeGenModeChoice = useCallback(async (mode: string, originalMessage?: string) => {
     // code_gen_mode를 context에 추가해서 파이프라인 재호출
     const newContext = { ...context, code_gen_mode: mode };
 
-    // 마지막 사용자 메시지 찾기
-    const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
-    if (!lastUserMsg?.content) return;
+    // 원래 요청 메시지 사용
+    const userMessage = originalMessage || "";
+    if (!userMessage.trim()) return;
 
     setIsLoading(true);
     setCurrentStage(2);  // Stage 1은 이미 완료됨, Stage 2부터 시작
@@ -532,7 +532,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           "Pragma": "no-cache"
         },
         body: JSON.stringify({
-          message: lastUserMsg.content,
+          message: userMessage,
           session_id: sessionIdRef.current,
           context: newContext,
           history,
@@ -856,13 +856,17 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 break;
 
               case "choice": {
-                // 코드 생성 모드 선택
+                // 코드 생성 모드 선택 - 원래 사용자 메시지 저장
+                const originalMsg = messages
+                  .filter(m => m.role === "user")
+                  .filter(m => m.content && !m.content.includes("현재 시장 상황"))
+                  .slice(-1)[0]?.content;
                 appendMessage({
                   id: `${Date.now()}-choice`,
                   role: "assistant",
                   content: "",
                   type: "choice",
-                  data: { choices: event.choices || [] }
+                  data: { choices: event.choices || [], originalMessage: originalMsg }
                 });
                 setStatusText("⏸️ 코드 생성 방식을 선택해주세요");
                 break;
