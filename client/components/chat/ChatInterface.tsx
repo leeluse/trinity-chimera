@@ -12,7 +12,7 @@ interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
-  type?: "text" | "strategy" | "backtest" | "thought" | "invocation" | "design";
+  type?: "text" | "strategy" | "backtest" | "thought" | "invocation" | "design" | "choice";
   data?: any;
 }
 
@@ -176,13 +176,13 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
               </div>
             )}
 
-            {msg.data?.requiresChoice && msg.data?.choices && (
-              <div className="flex flex-col gap-2 mt-3 max-w-[95%]">
+            {msg.type === 'choice' && msg.data?.choices && (
+              <div className="flex flex-col gap-2 mt-4 max-w-[95%]">
                 {msg.data.choices.map((choice: any) => (
                   <button
                     key={choice.value}
                     onClick={() => onChoiceSelect?.(choice.value)}
-                    className="flex flex-col items-start gap-1 px-4 py-3 bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/30 rounded-xl hover:from-purple-600/30 hover:to-blue-600/30 transition-all active:scale-95"
+                    className="flex flex-col items-start gap-1 px-4 py-3 bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/40 rounded-xl hover:from-purple-600/30 hover:to-blue-600/30 transition-all active:scale-95 cursor-pointer"
                   >
                     <span className="text-[10px] font-bold text-purple-300">{choice.label}</span>
                     <span className="text-[9px] text-slate-400">{choice.description}</span>
@@ -855,18 +855,15 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 });
                 break;
 
-              case "choice_required": {
-                // 사용자 선택 필요 - UI에 선택지 표시
-                const choices = event.choices || [];
-                const choiceMessage = `코드 생성 방식 선택:\n${choices.map(c => `• ${c.label}: ${c.description}`).join('\n')}`;
+              case "choice": {
+                // 코드 생성 모드 선택
                 appendMessage({
                   id: `${Date.now()}-choice`,
                   role: "assistant",
-                  content: choiceMessage,
-                  type: "text",
-                  data: { choices, requiresChoice: true, pendingMessage: userInputRef.current }
+                  content: "",
+                  type: "choice",
+                  data: { choices: event.choices || [] }
                 });
-                // 사용자에게 선택을 위한 버튼 UI 표시 (별도 컴포넌트에서)
                 setStatusText("⏸️ 코드 생성 방식을 선택해주세요");
                 break;
               }

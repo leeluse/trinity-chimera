@@ -136,10 +136,11 @@ async def run_create_pipeline(
     # Stage 2 시작 전: 코드 생성 모드 선택
     # ──────────────────────────────────────────────────────────────
     if not code_gen_mode:
-        yield format_sse({"type": "choice_required", "choices": [
-            {"value": "loose", "label": "느슨하게 (코드만 바로 짜기)", "description": "검증 기준 없이 LLM이 자유롭게 생성"},
-            {"value": "relaxed", "label": "현실적 기준 적용", "description": "합리적인 검증 기준 적용 (승률 35%, PF 1.05 등)"},
-            {"value": "strict", "label": "엄격한 기준 적용", "description": "높은 수준의 검증 기준 (승률 45%, PF 1.20 등)"},
+        yield format_sse({"type": "analysis", "content": "\n**코드 생성 방식을 선택해주세요:**\n"})
+        yield format_sse({"type": "choice", "choices": [
+            {"value": "loose", "label": "느슨하게 (코드만 바로 짜기)", "description": "검증 기준 무시"},
+            {"value": "relaxed", "label": "현실적 기준 (권장)", "description": "승률 35%, PF 1.05 등"},
+            {"value": "strict", "label": "엄격한 기준", "description": "승률 45%, PF 1.20 등"},
         ]})
         logger.info(f"[{session_id}] Waiting for code generation mode choice")
         yield format_sse({"type": "done"})
