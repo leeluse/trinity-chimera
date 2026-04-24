@@ -505,10 +505,11 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     setIsLoading(true);
     setCurrentStage(2);  // Stage 1은 이미 완료됨, Stage 2부터 시작
     setTotalStages(5);
-    setShowStageProgress(true);
+    // loose 모드는 progress indicator 숨김 (빠른 코드 생성만 원함)
+    setShowStageProgress(mode !== "loose");
     setStageStartedAt(Date.now());
     setStageElapsedSeconds(0);
-    setStatusText("⚙️ Python 전략 코드 구현 중...");
+    setStatusText(mode === "loose" ? "⚙️ 코드 생성 중..." : "⚙️ Python 전략 코드 구현 중...");
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
