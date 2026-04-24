@@ -503,12 +503,12 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     if (!lastUserMsg?.content) return;
 
     setIsLoading(true);
-    setCurrentStage(1);
+    setCurrentStage(2);  // Stage 1은 이미 완료됨, Stage 2부터 시작
     setTotalStages(5);
     setShowStageProgress(true);
     setStageStartedAt(Date.now());
     setStageElapsedSeconds(0);
-    setStatusText("⚙️ 코드 생성 모드 선택 완료, 파이프라인 재개 중...");
+    setStatusText("⚙️ Python 전략 코드 구현 중...");
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
