@@ -89,6 +89,7 @@ async def run_create_pipeline(
     db,
     session_memory: Dict[str, Any],
     is_mining: bool = False,
+    code_gen_mode: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     memory = EvolutionWikiMemory()
     constitution = memory.load_constitution()
@@ -131,8 +132,23 @@ async def run_create_pipeline(
     except Exception as db_err:
         logger.error(f"Failed to save design message: {db_err}")
 
+    # ──────────────────────────────────────────────────────────────
+    # Stage 2 시작 전: 코드 생성 모드 선택
+    # ──────────────────────────────────────────────────────────────
+    if not code_gen_mode:
+        yield format_sse({"type": "choice_required", "choices": [
+            {"value": "loose", "label": "느슨하게 (코드만 바로 짜기)", "description": "검증 기준 없이 LLM이 자유롭게 생성"},
+            {"value": "relaxed", "label": "현실적 기준 적용", "description": "합리적인 검증 기준 적용 (승률 35%, PF 1.05 등)"},
+            {"value": "strict", "label": "엄격한 기준 적용", "description": "높은 수준의 검증 기준 (승률 45%, PF 1.20 등)"},
+        ]})
+        logger.info(f"[{session_id}] Waiting for code generation mode choice")
+        yield format_sse({"type": "done"})
+        return
+
+    session_memory.setdefault(session_id, {})["code_gen_mode"] = code_gen_mode
+
     yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ Python 전략 코드 구현 중... ({code_model})"})
-    logger.info(f"[{session_id}] Starting Stage 2: Code Generation")
+    logger.info(f"[{session_id}] Starting Stage 2: Code Generation (mode={code_gen_mode})")
     
     prompt3 = CODE_PROMPT_TEMPLATE.format(design=design_full) + guardrail_block
     code_full = ""

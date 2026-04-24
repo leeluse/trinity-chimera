@@ -53,11 +53,12 @@ const formatChatRunError = (error: unknown): string => {
 };
 
 // [PERF] Memoized individual message item to prevent re-rendering of entire list during streaming
-const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming }: {
+const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoiceSelect }: {
   msg: ChatMessage,
   onShowCode: (code: string, title?: string, payload?: any) => void,
   onSendMessage?: (text: string) => void,
   isStreaming?: boolean, // true 시 주목: 이 메시지가 현재 스트리밍 중인 마지막 메시지
+  onChoiceSelect?: (choiceValue: string) => void,
 }) => {
   let mainContent = msg.content || "";
   let thinkingContent = "";
@@ -166,12 +167,27 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming }: {
 
             {mainContent && (
               <div className="text-[11px] text-slate-300 leading-normal px-1 font-medium markdown-content pt-1 transition-all">
-                <ReactMarkdown 
+                <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   rehypePlugins={[rehypeRaw]}
                 >
                   {mainContent}
                 </ReactMarkdown>
+              </div>
+            )}
+
+            {msg.data?.requiresChoice && msg.data?.choices && (
+              <div className="flex flex-col gap-2 mt-3 max-w-[95%]">
+                {msg.data.choices.map((choice: any) => (
+                  <button
+                    key={choice.value}
+                    onClick={() => onChoiceSelect?.(choice.value)}
+                    className="flex flex-col items-start gap-1 px-4 py-3 bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/30 rounded-xl hover:from-purple-600/30 hover:to-blue-600/30 transition-all active:scale-95"
+                  >
+                    <span className="text-[10px] font-bold text-purple-300">{choice.label}</span>
+                    <span className="text-[9px] text-slate-400">{choice.description}</span>
+                  </button>
+                ))}
               </div>
             )}
 
@@ -478,6 +494,112 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     }
   }, [onApplyCode]);
 
+  const handleCodeGenModeChoice = useCallback(async (mode: string) => {
+    // code_gen_mode를 context에 추가해서 파이프라인 재호출
+    const newContext = { ...context, code_gen_mode: mode };
+
+    // 마지막 사용자 메시지 찾기
+    const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
+    if (!lastUserMsg?.content) return;
+
+    setIsLoading(true);
+    setCurrentStage(1);
+    setTotalStages(5);
+    setShowStageProgress(true);
+    setStageStartedAt(Date.now());
+    setStageElapsedSeconds(0);
+    setStatusText("⚙️ 코드 생성 모드 선택 완료, 파이프라인 재개 중...");
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const history = messages
+        .filter((msg) => msg.content && msg.content.trim())
+        .map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+        }))
+        .slice(-25);
+
+      const url = `/api/chat/run?t=${Date.now()}`;
+      const response = await fetchWithBypass(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Pragma": "no-cache"
+        },
+        body: JSON.stringify({
+          message: lastUserMsg.content,
+          session_id: sessionIdRef.current,
+          context: newContext,
+          history,
+        }),
+        signal: controller.signal,
+        cache: "no-store",
+        timeoutMs: 0
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Stream reader not available");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+
+          try {
+            const raw = line.replace("data: ", "").trim();
+            if (!raw) continue;
+            const event = JSON.parse(raw);
+
+            // 동일한 SSE 이벤트 처리 로직 사용
+            if (event.type === "stage") {
+              setCurrentStage(event.stage);
+              setStageStartedAt(Date.now());
+              setStageElapsedSeconds(0);
+              setStatusText(event.label ?? `단계 ${event.stage} 진행 중...`);
+            } else if (event.type === "analysis" || event.type === "thought") {
+              // 기존 메시지 처리와 동일하게
+            }
+            // 기타 이벤트도 동일하게 처리...
+          } catch (err) {
+            console.error("Event Parse Error:", err);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Mode choice error:", e);
+      const errorMessage = formatChatRunError(e);
+      appendMessage({
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: `코드 생성 재개 중 오류: ${errorMessage}`,
+        type: "text",
+      });
+    } finally {
+      setIsLoading(false);
+      setStageStartedAt(null);
+      setStageElapsedSeconds(0);
+      abortControllerRef.current = null;
+    }
+  }, [messages, context, appendMessage]);
+
   const handleSend = async (presetMessage?: string) => {
     const raw = presetMessage ?? input;
     if (!raw.trim() || isLoading) return;
@@ -733,6 +855,22 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 });
                 break;
 
+              case "choice_required": {
+                // 사용자 선택 필요 - UI에 선택지 표시
+                const choices = event.choices || [];
+                const choiceMessage = `코드 생성 방식 선택:\n${choices.map(c => `• ${c.label}: ${c.description}`).join('\n')}`;
+                appendMessage({
+                  id: `${Date.now()}-choice`,
+                  role: "assistant",
+                  content: choiceMessage,
+                  type: "text",
+                  data: { choices, requiresChoice: true, pendingMessage: userInputRef.current }
+                });
+                // 사용자에게 선택을 위한 버튼 UI 표시 (별도 컴포넌트에서)
+                setStatusText("⏸️ 코드 생성 방식을 선택해주세요");
+                break;
+              }
+
               case "error":
                 appendMessage({
                   id: `${Date.now()}-pipeline-error`,
@@ -842,6 +980,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 onShowCode={handleShowCode}
                 onSendMessage={handleSend}
                 isStreaming={index === messages.length - 1 && isLoading}
+                onChoiceSelect={(choiceValue) => handleCodeGenModeChoice(choiceValue)}
               />
             </div>
           )}

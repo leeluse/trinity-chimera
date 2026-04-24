@@ -581,14 +581,15 @@ class ChatHandler:
     ) -> AsyncGenerator[str, None]:
         logger.info("[chat] pipeline start session=%s intent=%s", session_id, intent)
         sm = self._session_last_strategy
+        code_gen_mode = context.get("code_gen_mode")
         if intent == INTENT_CREATE:
-            async for ev in run_create_pipeline(message, session_id, context, history, db, sm):
+            async for ev in run_create_pipeline(message, session_id, context, history, db, sm, code_gen_mode=code_gen_mode):
                 yield ev
         elif intent == INTENT_MODIFY:
             async for ev in run_modify_pipeline(message, session_id, context, history, db, sm):
                 yield ev
         elif intent == INTENT_EVOLVE:
-            async for ev in run_create_pipeline(message, session_id, context, history, db, sm, is_mining=True):
+            async for ev in run_create_pipeline(message, session_id, context, history, db, sm, is_mining=True, code_gen_mode=code_gen_mode):
                 yield ev
         elif intent == INTENT_BACKTEST:
             prev = await get_last_strategy(session_id, db, sm)
