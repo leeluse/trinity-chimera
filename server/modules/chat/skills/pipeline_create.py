@@ -109,44 +109,50 @@ async def run_create_pipeline(
     else:
         stage1_label = f"📋 전략 설계도 작성 중... ({analysis_model})"
 
-    yield format_sse({"type": "stage", "stage": 1, "label": stage1_label})
-    yield format_sse({"type": "thought", "content": "사전 추론 단계는 생략하고, 요청을 바로 설계도로 변환 중입니다..."})
-
-    design_brief = _build_direct_design_brief(message, is_mining, persona, seed)
-    prompt2 = DESIGN_PROMPT_TEMPLATE.format(reasoning=design_brief) + guardrail_block
-    design_full = ""
-    # ✅ analysis/thought 실시간 스트리밍
-    async for chunk in stream_analysis_reply(prompt2):
-        thought = chunk.get("thought")
-        content = chunk.get("content")
-        if thought:
-            yield format_sse({"type": "thought", "content": thought})
-        if content:
-            design_full += content
-            yield format_sse({"type": "analysis", "content": content})
-    session_memory.setdefault(session_id, {})["design"] = design_full
-    # design 이벤트 후 프론트는 직전 text 블록을 design 설계도 카드로 교체함 (이중 표시 없음)
-    yield format_sse({"type": "design", "content": design_full})
-    try:
-        await db.save_chat_message(session_id, "assistant", design_full, "design")
-    except Exception as db_err:
-        logger.error(f"Failed to save design message: {db_err}")
-
     # ──────────────────────────────────────────────────────────────
-    # Stage 2 시작 전: 코드 생성 모드 선택
+    # code_gen_mode가 이미 있으면 Stage 1 생략 → 캐시된 설계로 바로 Stage 2
     # ──────────────────────────────────────────────────────────────
+    if code_gen_mode:
+        design_full = session_memory.get(session_id, {}).get("design", "")
+        if not design_full:
+            # 설계가 없으면 어쩔 수 없이 Stage 1부터
+            code_gen_mode = None
+        else:
+            logger.info(f"[{session_id}] Skipping Stage 1 — using cached design, mode={code_gen_mode}")
+            yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ Python 전략 코드 구현 중... ({code_model})"})
+
     if not code_gen_mode:
-        yield format_sse({"type": "analysis", "content": "\n**코드 생성 방식을 선택해주세요:**\n"})
+        # Stage 1: 설계 생성
+        yield format_sse({"type": "stage", "stage": 1, "label": stage1_label})
+        yield format_sse({"type": "thought", "content": "사전 추론 단계는 생략하고, 요청을 바로 설계도로 변환 중입니다..."})
+
+        design_brief = _build_direct_design_brief(message, is_mining, persona, seed)
+        prompt2 = DESIGN_PROMPT_TEMPLATE.format(reasoning=design_brief) + guardrail_block
+        design_full = ""
+        async for chunk in stream_analysis_reply(prompt2):
+            thought = chunk.get("thought")
+            content = chunk.get("content")
+            if thought:
+                yield format_sse({"type": "thought", "content": thought})
+            if content:
+                design_full += content
+                yield format_sse({"type": "analysis", "content": content})
+        session_memory.setdefault(session_id, {})["design"] = design_full
+        yield format_sse({"type": "design", "content": design_full})
+        try:
+            await db.save_chat_message(session_id, "assistant", design_full, "design")
+        except Exception as db_err:
+            logger.error(f"Failed to save design message: {db_err}")
+
+        # 모드 선택 대기
         yield format_sse({"type": "choice", "choices": [
-            {"value": "loose", "label": "느슨하게 (코드만 바로 짜기)", "description": "검증 기준 무시"},
-            {"value": "relaxed", "label": "현실적 기준 (권장)", "description": "승률 35%, PF 1.05 등"},
-            {"value": "strict", "label": "엄격한 기준", "description": "승률 45%, PF 1.20 등"},
+            {"value": "loose",   "label": "느슨하게 (코드만 바로 짜기)", "description": "검증 기준 무시"},
+            {"value": "relaxed", "label": "현실적 기준 (권장)",          "description": "승률 35%, PF 1.05 등"},
+            {"value": "strict",  "label": "엄격한 기준",                 "description": "승률 45%, PF 1.20 등"},
         ]})
         logger.info(f"[{session_id}] Waiting for code generation mode choice")
         yield format_sse({"type": "done"})
         return
-
-    session_memory.setdefault(session_id, {})["code_gen_mode"] = code_gen_mode
 
     yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ Python 전략 코드 구현 중... ({code_model})"})
     logger.info(f"[{session_id}] Starting Stage 2: Code Generation (mode={code_gen_mode})")
