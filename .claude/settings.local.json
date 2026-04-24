@@ -31,7 +31,9 @@
       "Bash(python3 -m py_compile server/modules/backtest/evolution/evolution_engine.py server/modules/evolution/scoring.py server/modules/evolution/llm.py server/modules/evolution/orchestrator.py server/modules/evolution/trigger.py server/modules/chat/skills/pipeline_backtest.py)",
       "Bash(curl -s --max-time 5 https://lsy-super-trend.loca.lt/api/health)",
       "Bash(python -c ' *)",
-      "Bash(python3 -c \"import ast; ast.parse\\(open\\('server/shared/llm/client.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('server/shared/llm/client.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m 'fix: pass originalMessage to handleCodeGenModeChoice in button click handler *)"
     ],
     "tools": "dontAsk",
     "commands": "dontAsk",

@@ -982,7 +982,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 onShowCode={handleShowCode}
                 onSendMessage={handleSend}
                 isStreaming={index === messages.length - 1 && isLoading}
-                onChoiceSelect={(choiceValue) => handleCodeGenModeChoice(choiceValue)}
+                onChoiceSelect={(choiceValue, originalMsg) => handleCodeGenModeChoice(choiceValue, originalMsg)}
               />
             </div>
           )}
