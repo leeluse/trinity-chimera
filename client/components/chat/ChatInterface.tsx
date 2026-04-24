@@ -53,12 +53,13 @@ const formatChatRunError = (error: unknown): string => {
 };
 
 // [PERF] Memoized individual message item to prevent re-rendering of entire list during streaming
-const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoiceSelect }: {
+const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoiceSelect, onDesignCodeRequest }: {
   msg: ChatMessage,
   onShowCode: (code: string, title?: string, payload?: any) => void,
   onSendMessage?: (text: string) => void,
-  isStreaming?: boolean, // true 시 주목: 이 메시지가 현재 스트리밍 중인 마지막 메시지
-  onChoiceSelect?: (choiceValue: string, originalMessage?: string) => void,
+  isStreaming?: boolean,
+  onChoiceSelect?: (choiceValue: string, originalMessage?: string, design?: string) => void,
+  onDesignCodeRequest?: (designContent: string) => void,
 }) => {
   let mainContent = msg.content || "";
   let thinkingContent = "";
@@ -181,7 +182,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
                 {msg.data.choices.map((choice: any) => (
                   <button
                     key={choice.value}
-                    onClick={() => onChoiceSelect?.(choice.value, msg.data?.originalMessage)}
+                    onClick={() => onChoiceSelect?.(choice.value, msg.data?.originalMessage, msg.data?.design)}
                     className="flex flex-col items-start gap-1 px-4 py-3 bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/40 rounded-xl hover:from-purple-600/30 hover:to-blue-600/30 transition-all active:scale-95 cursor-pointer"
                   >
                     <span className="text-[10px] font-bold text-purple-300">{choice.label}</span>
@@ -212,9 +213,9 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
                 </div>
               </details>
               <button
-                onClick={() => onSendMessage?.("이 설계도로 Python 백테스트 코드만 완전하게 작성해줘")}
+                onClick={() => onDesignCodeRequest?.(msg.content)}
                 className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-blue-600/10 border border-blue-500/30 rounded-xl text-[10px] font-bold text-blue-200 hover:bg-blue-600/20 transition-all active:scale-95"
-                title="설계도를 기반으로 코드만 재생성합니다 (Stage 3+4만 실행)"
+                title="설계도를 기반으로 코드를 생성합니다"
               >
                 <Zap size={12} />
                 이 설계도로 코드만 생성
@@ -494,12 +495,30 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     }
   }, [onApplyCode]);
 
-  const handleCodeGenModeChoice = useCallback(async (mode: string, originalMessage?: string) => {
-    // code_gen_mode를 context에 추가해서 파이프라인 재호출
-    const newContext = { ...context, code_gen_mode: mode };
+  const handleDesignCodeRequest = useCallback((designContent: string) => {
+    // API 호출 없이 choice UI만 바로 표시
+    appendMessage({
+      id: `${Date.now()}-choice`,
+      role: "assistant",
+      content: "",
+      type: "choice",
+      data: {
+        choices: [
+          { value: "loose",   label: "느슨하게 (코드만 바로 짜기)", description: "검증 기준 무시" },
+          { value: "relaxed", label: "현실적 기준 (권장)",          description: "승률 35%, PF 1.05 등" },
+          { value: "strict",  label: "엄격한 기준",                 description: "승률 45%, PF 1.20 등" },
+        ],
+        design: designContent,  // 설계 내용 직접 저장
+      }
+    });
+  }, [appendMessage]);
 
-    // 원래 요청 메시지 사용
-    const userMessage = originalMessage || "";
+  const handleCodeGenModeChoice = useCallback(async (mode: string, originalMessage?: string, design?: string) => {
+    // design이 있으면 (설계도 카드에서 직접 호출) context에 design 포함
+    const newContext = { ...context, code_gen_mode: mode, ...(design ? { design } : {}) };
+
+    // 원래 요청 메시지 사용 (design만 있을 경우엔 더미 메시지)
+    const userMessage = originalMessage || (design ? "코드 생성" : "");
     if (!userMessage.trim()) return;
 
     setIsLoading(true);
@@ -982,7 +1001,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 onShowCode={handleShowCode}
                 onSendMessage={handleSend}
                 isStreaming={index === messages.length - 1 && isLoading}
-                onChoiceSelect={(choiceValue, originalMsg) => handleCodeGenModeChoice(choiceValue, originalMsg)}
+                onChoiceSelect={(choiceValue, originalMsg, design) => handleCodeGenModeChoice(choiceValue, originalMsg, design)}
+                onDesignCodeRequest={handleDesignCodeRequest}
               />
             </div>
           )}

@@ -112,9 +112,13 @@ async def run_create_pipeline(
     # ──────────────────────────────────────────────────────────────
     # code_gen_mode가 이미 있으면 Stage 1 생략 → 캐시된 설계로 바로 Stage 2
     # ──────────────────────────────────────────────────────────────
-    logger.info(f"[{session_id}] pipeline start: code_gen_mode={code_gen_mode!r}, session_keys={list(session_memory.get(session_id, {}).keys())}")
+    # context에 design이 직접 있으면 최우선 사용 (설계도 카드 버튼 경로)
+    design_from_context = (context or {}).get("design", "")
+
+    logger.info(f"[{session_id}] pipeline start: code_gen_mode={code_gen_mode!r}, design_from_context={bool(design_from_context)}, session_keys={list(session_memory.get(session_id, {}).keys())}")
+
     if code_gen_mode:
-        design_full = session_memory.get(session_id, {}).get("design", "")
+        design_full = design_from_context or session_memory.get(session_id, {}).get("design", "")
         logger.info(f"[{session_id}] cached design length={len(design_full)}")
         if not design_full:
             logger.warning(f"[{session_id}] no cached design found → falling back to Stage 1")
