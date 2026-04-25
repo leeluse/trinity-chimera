@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback, Suspense } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Chart from "chart.js/auto";
 import Head from "next/head";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -58,7 +59,8 @@ const areLabelPositionsEqual = (prev: LabelPosition[], next: LabelPosition[]) =>
   return true;
 };
 
-export default function Dashboard() {
+function DashboardContent() {
+  const queryClient = useQueryClient();
   const chartRef = useRef<HTMLCanvasElement | null>(null);
   const chartInstance = useRef<Chart | null>(null);
   const currentMetric = useDashboardStore((state) => state.currentMetric);
@@ -288,7 +290,10 @@ export default function Dashboard() {
               <MetricSelector />
 
               <div className="mt-2">
-                <BotList bots={bots} />
+                <BotList 
+                  bots={bots} 
+                  onRefresh={() => queryClient.invalidateQueries({ queryKey: ["dashboard", "bots"] })} 
+                />
               </div>
 
               <div className="flex flex-col min-h-0 gap-3 mt-2">
@@ -299,6 +304,20 @@ export default function Dashboard() {
           </div>
         </PageLayout.Main>
       </PageLayout>
+    </>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <>
+      <Head>
+        <title>Trinity AI Trading Dashboard</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+      </Head>
+      <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-[#060912] text-white">동기화 중...</div>}>
+        <DashboardContent />
+      </Suspense>
     </>
   );
 }

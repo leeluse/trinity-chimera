@@ -144,7 +144,7 @@ class BotManager:
 
         logger.debug(f"Running tick for {len(self._active_bots)} active bots")
 
-        for bot_id, simulator in self._active_bots.items():
+        for bot_id, simulator in list(self._active_bots.items()):
             try:
                 # 현재가 수집 (binance에서 가져옴)
                 current_price = await self._fetch_current_price(simulator.symbol)

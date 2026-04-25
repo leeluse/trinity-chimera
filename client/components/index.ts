@@ -4,7 +4,6 @@ export { default as PageHeader } from "./layout/PageHeader";
 
 // Dashboard
 export { MetricSelector } from "./dashboard/MetricSelector";
-export { AgentsList } from "./dashboard/AgentsList";
 export { ChartLegend } from "./dashboard/ChartLegend";
 export { PerformanceChart } from "./dashboard/PerformanceChart";
 export { default as ModelSettingsModal } from "./dashboard/ModelSettingsModal";
@@ -27,7 +26,6 @@ export { TradeAnalysis } from "./backtest/TradeAnalysis";
 export { default as PanelContainer } from "./panel/PanelContainer";
 export { default as DashboardRightPanel } from "./panel/DashboardRightPanel";
 export { default as BacktestRightPanel } from "./panel/BacktestRightPanel";
-export { default as RightPanel } from "./panel/PanelContainer";
 
 // Bots
 export { default as BotList } from "./bots/BotList";

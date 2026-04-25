@@ -40,16 +40,6 @@ const withBypassHeaders = (options: RequestInit): RequestInit => ({
   },
 });
 
-export interface AgentImprovementRequest {
-  current_strategy: any;
-  recent_performance: {
-    sharpe: number;
-    mdd: number;
-    win_rate: number;
-  };
-  market_regime: string;
-  improvement_goal?: string;
-}
 
 type FetchWithBypassOptions = RequestInit & {
   timeoutMs?: number;
@@ -66,12 +56,6 @@ const resolveTimeoutMs = (timeoutMs?: number): number | null => {
   return Math.max(3000, parsed);
 };
 
-export interface ImprovementResponse {
-  success: boolean;
-  improvement_id: string;
-  status: string;
-  message: string;
-}
 
 export interface RunLoopResponse {
   success: boolean;
@@ -150,38 +134,6 @@ export interface DashboardProgress {
   }>;
 }
 
-export interface BacktestResult {
-  improvement_id: string;
-  agent_id: string;
-  strategy_params: any;
-  total_return: number;
-  sharpe_ratio: number;
-  max_drawdown: number;
-  win_rate: number;
-  profit_factor: number;
-  trinity_score: number;
-  start_date: string;
-  end_date: string;
-  duration_days: number;
-  trades_count: number;
-  avg_trade_return: number;
-  best_trade_return: number;
-  worst_trade_return: number;
-}
-
-export interface LLMFeedback {
-  improvement_id: string;
-  agent_id: string;
-  analysis_summary: string;
-  strengths: string[];
-  weaknesses: string[];
-  recommendations: string[];
-  parameter_suggestions: any;
-  expected_improvement: any;
-  confidence_score: number;
-  created_at: string;
-  model_used: string;
-}
 
 // API 호출 함수들 - fetchWithBypass를 사용하여 네트워크 안정성 확보
 export class APIClient {
@@ -203,24 +155,6 @@ export class APIClient {
     return response.json();
   }
 
-  static async requestImprovement(
-    agentId: string,
-    request: AgentImprovementRequest
-  ): Promise<ImprovementResponse> {
-    const response = await fetchWithBypass(`${API_BASE_URL}/agents/${agentId}/improve`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-    });
-
-    if (!response.ok) {
-      throw new Error(`API request failed: ${response.status}`);
-    }
-
-    return response.json();
-  }
 
   static async getDashboardProgress(): Promise<DashboardProgress> {
     const ts = Date.now();
@@ -267,39 +201,6 @@ export class APIClient {
     return Array.isArray(payload?.events) ? payload.events : [];
   }
 
-  static async getBacktestResult(agentId: string): Promise<BacktestResult | null> {
-    const response = await fetchWithBypass(`${API_BASE_URL}/agents/${agentId}/backtest`);
-
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch backtest results: ${response.status}`);
-    }
-
-    return response.json();
-  }
-
-  static async getFeedbackHistory(agentId: string): Promise<LLMFeedback[]> {
-    const response = await fetchWithBypass(`${API_BASE_URL}/agents/${agentId}/feedback`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch feedback history: ${response.status}`);
-    }
-
-    return response.json();
-  }
-
-  static async getAgentPerformance(agentId: string): Promise<any> {
-    const response = await fetchWithBypass(`${API_BASE_URL}/agents/${agentId}/performance`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch performance data: ${response.status}`);
-    }
-
-    return response.json();
-  }
 
   static async getAgentTimeseries(agentId: string, metric: string): Promise<number[]> {
     const response = await fetchWithBypass(`${API_BASE_URL}/agents/${agentId}/timeseries?metric=${metric}`);
@@ -346,14 +247,6 @@ export const AGENT_IDS = [
   'chaos_agent'
 ] as const;
 
-// Trinity Score 계산 함수
-export function calculateTrinityScore(
-  totalReturn: number,
-  sharpe: number,
-  maxDrawdown: number
-): number {
-  return (totalReturn * 0.4) + (sharpe * 25 * 0.35) + ((1 + Math.max(maxDrawdown, -0.3)) * 100 * 0.25);
-}
 
 export interface AgentPerformanceMetrics {
   agent_id: string;

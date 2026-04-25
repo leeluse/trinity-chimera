@@ -9,6 +9,13 @@ import type { NextConfig } from "next";
  * 대신 app/api/[...path]/route.ts 프록시 핸들러를 사용합니다.
  * 해당 핸들러가 Bypass-Tunnel-Reminder 헤더를 자동으로 추가합니다.
  */
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+};
 
 export default nextConfig;

@@ -23,10 +23,11 @@ interface BotData {
 
 interface BotListProps {
   bots: BotData[];
+  onRefresh?: () => void;
   refreshTrigger?: number;
 }
 
-export default function BotList({ bots, refreshTrigger }: BotListProps) {
+export default function BotList({ bots, onRefresh, refreshTrigger }: BotListProps) {
   const isLoading = false; // Now handled by parent
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export default function BotList({ bots, refreshTrigger }: BotListProps) {
     try {
       const res = await startBot(botId);
       if (res.success) {
-        loadBots();
+        onRefresh?.();
       } else {
         alert(`봇 시작 실패: ${res.error || '알 수 없는 오류'}`);
       }
@@ -50,7 +51,7 @@ export default function BotList({ bots, refreshTrigger }: BotListProps) {
     try {
       const res = await stopBot(botId);
       if (res.success) {
-        loadBots();
+        onRefresh?.();
       } else {
         alert(`봇 중지 실패: ${res.error || '알 수 없는 오류'}`);
       }
@@ -64,7 +65,7 @@ export default function BotList({ bots, refreshTrigger }: BotListProps) {
     try {
       const res = await deleteBot(botId);
       if (res.success) {
-        loadBots();
+        onRefresh?.();
       } else {
         alert(`봇 삭제 실패: ${res.error || '알 수 없는 오류'}`);
       }
