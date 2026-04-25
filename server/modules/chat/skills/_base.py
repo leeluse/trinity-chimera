@@ -100,6 +100,27 @@ def extract_python_code(text: str) -> str:
     return best.strip()
 
 
+def sanitize_generated_code(code: str) -> str:
+    """LLM 코드 출력에 섞인 마크다운/제어문자 노이즈를 제거."""
+    text = (code or "")
+    if not text:
+        return ""
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\u200b", "").replace("\ufeff", "").replace("\x00", "")
+    text = re.sub(r"```(?:python|py)?", "", text, flags=re.IGNORECASE)
+    text = text.replace("```", "")
+
+    lines: List[str] = []
+    for line in text.splitlines():
+        stripped = line.strip().lower()
+        # fence 제거 후 남는 단독 "python"/"py" 라인은 노이즈로 간주
+        if stripped in {"python", "py"} and (not lines or lines[-1].strip() == ""):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def salvage_valid_python(code: str) -> str:
     """후행 잡음/미완성 응답에서 컴파일 가능한 최대 prefix를 복구."""
     text = (code or "").strip()
@@ -278,6 +299,9 @@ async def get_last_strategy(
                 "title": data.get("title", "복구된 전략"),
                 "code": code,
                 "metrics": data.get("metrics") or {},
+                "gate_metrics": data.get("gate_metrics") or {},
+                "last_failure": data.get("failure") or data.get("last_failure") or "",
+                "last_feedback": data.get("feedback") or data.get("last_feedback") or "",
             }
         return None
 

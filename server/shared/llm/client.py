@@ -8,51 +8,248 @@ from typing import Any, Dict, List, Optional, AsyncGenerator
 from litellm import acompletion
 import litellm
 
-# 디버그 모드 활성화 (LiteLLM Timeout 등의 원인을 상세히 로그로 출력하기 위함)
-if os.getenv("LITELLM_DEBUG", "1") == "1":
+# 디버그 모드 활성화 (필요할 때만 켜기: LITELLM_DEBUG=1)
+if os.getenv("LITELLM_DEBUG", "0") == "1":
     litellm._turn_on_debug()
 
 logger = logging.getLogger(__name__)
 
 
-async def stream_code_gen_reply(prompt: str) -> AsyncGenerator[Dict[str, str], None]:
+def _env_enabled(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _code_gen_stream_retries() -> int:
+    try:
+        raw = int(os.getenv("CHAT_CODE_GEN_STREAM_RETRIES", "1"))
+    except Exception:
+        raw = 1
+    return max(0, min(raw, 3))
+
+
+def _code_gen_fallback_timeout_seconds(stream_timeout: Optional[float]) -> Optional[float]:
+    try:
+        raw = float(os.getenv("CHAT_CODE_GEN_FALLBACK_TIMEOUT", "60"))
+    except Exception:
+        raw = 60.0
+    if raw <= 0:
+        return None
+    fallback_timeout = max(5.0, raw)
+    if stream_timeout is not None:
+        fallback_timeout = min(fallback_timeout, max(5.0, stream_timeout))
+    return fallback_timeout
+
+
+def _code_gen_hard_timeout_seconds(stream_timeout: Optional[float]) -> Optional[float]:
+    try:
+        raw = float(os.getenv("CHAT_CODE_GEN_HARD_TIMEOUT", "75"))
+    except Exception:
+        raw = 75.0
+    if raw <= 0:
+        return None
+    hard_timeout = max(5.0, raw)
+    if stream_timeout is not None:
+        # SDK timeout보다 약간 큰 절대 상한으로 벽시계 시간 보장
+        hard_timeout = min(hard_timeout, max(5.0, stream_timeout + 5.0))
+    return hard_timeout
+
+
+def _is_timeout_error(exc: Exception) -> bool:
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return True
+    text = str(exc or "").lower()
+    if not text:
+        return False
+    return (
+        "timeout" in text
+        or "timed out" in text
+        or "apitimeouterror" in text
+        or "connecttimeout" in text
+        or "readtimeout" in text
+    )
+
+
+def _exc_text(exc: Optional[Exception]) -> str:
+    if exc is None:
+        return "unknown error"
+    text = str(exc).strip()
+    if text:
+        return text
+    name = exc.__class__.__name__ if hasattr(exc, "__class__") else "Exception"
+    return name
+
+
+def _iter_text_chunks(text: str, chunk_size: int = 1200) -> List[str]:
+    body = str(text or "")
+    if not body:
+        return []
+    size = max(200, chunk_size)
+    return [body[i:i + size] for i in range(0, len(body), size)]
+
+
+async def stream_code_gen_reply(prompt: str, max_tokens: Optional[int] = None) -> AsyncGenerator[Dict[str, str], None]:
     """Stage 3 코드 생성 전용. CODE_GEN_MODEL(코더/툴콜 역할) 사용."""
     model = (os.getenv("CODE_GEN_MODEL") or "").strip()
-    max_tokens = int(os.getenv("CHAT_CODE_GEN_MAX_TOKENS", "3200"))
+    max_tokens = max_tokens or int(os.getenv("CHAT_CODE_GEN_MAX_TOKENS", "4000"))
     cfg = _get_llm_config()
     target_model = _normalize_model(model or cfg["model"], provider=cfg["provider"])
     messages = _build_messages(prompt)
     if cfg["provider"] == "litellm":
-        try:
-            request_kwargs = dict(
-                model=target_model,
-                messages=messages,
-                api_base=cfg["base_url"],
-                api_key=cfg.get("api_key"),
-                temperature=0.3,
-                max_tokens=max_tokens,
-                num_retries=0,
-                stream=True,
+        request_kwargs = dict(
+            model=target_model,
+            messages=messages,
+            api_base=cfg["base_url"],
+            api_key=cfg.get("api_key"),
+            temperature=0.3,
+            max_tokens=max_tokens,
+            num_retries=0,
+        )
+        resolved_timeout = _code_gen_timeout_seconds()
+        if resolved_timeout is not None:
+            request_kwargs["timeout"] = resolved_timeout
+        _apply_litellm_provider_hint(target_model, request_kwargs)
+
+        max_attempts = _code_gen_stream_retries() + 1
+        last_error: Optional[Exception] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                hard_timeout = _code_gen_hard_timeout_seconds(resolved_timeout)
+                emitted_chars = 0
+                if hard_timeout is not None:
+                    async with asyncio.timeout(hard_timeout):
+                        response = await acompletion(
+                            stream=True,
+                            **request_kwargs,
+                        )
+                        async for chunk in response:
+                            delta = chunk.choices[0].delta
+                            raw_thought = getattr(delta, "reasoning_content", None)
+                            if raw_thought:
+                                yield {"thought": raw_thought}
+                            if delta.content:
+                                emitted_chars += len(delta.content)
+                                yield {"content": delta.content}
+                else:
+                    response = await acompletion(
+                        stream=True,
+                        **request_kwargs,
+                    )
+                    async for chunk in response:
+                        delta = chunk.choices[0].delta
+                        raw_thought = getattr(delta, "reasoning_content", None)
+                        if raw_thought:
+                            yield {"thought": raw_thought}
+                        if delta.content:
+                            emitted_chars += len(delta.content)
+                            yield {"content": delta.content}
+                if emitted_chars == 0:
+                    raise RuntimeError("empty streaming response")
+                return
+            except Exception as e:
+                last_error = e
+                is_timeout = _is_timeout_error(e)
+                logger.error(
+                    "[codegen.stream] attempt %d/%d failed model=%s timeout=%s err=%s",
+                    attempt,
+                    max_attempts,
+                    target_model,
+                    is_timeout,
+                    _exc_text(e),
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(min(3.0, 0.8 * attempt))
+                    continue
+
+        # Streaming 실패 시 non-stream 폴백으로 완료 코드 확보 시도
+        if _env_enabled("CHAT_CODE_GEN_NON_STREAM_FALLBACK", True):
+            try:
+                fallback_timeout = _code_gen_fallback_timeout_seconds(resolved_timeout)
+                fallback_kwargs = dict(request_kwargs)
+                if fallback_timeout is not None:
+                    fallback_kwargs["timeout"] = fallback_timeout
+                if fallback_timeout is not None:
+                    async with asyncio.timeout(max(5.0, fallback_timeout + 5.0)):
+                        response = await acompletion(
+                            stream=False,
+                            **fallback_kwargs,
+                        )
+                else:
+                    response = await acompletion(
+                        stream=False,
+                        **fallback_kwargs,
+                    )
+                fallback_thought = getattr(response.choices[0].message, "reasoning_content", None)
+                fallback_content = str(response.choices[0].message.content or "")
+                if fallback_thought:
+                    yield {"thought": fallback_thought}
+                if fallback_content.strip():
+                    for part in _iter_text_chunks(fallback_content):
+                        yield {"content": part}
+                    logger.info(
+                        "[codegen.stream] non-stream fallback success model=%s chars=%d",
+                        target_model,
+                        len(fallback_content),
+                    )
+                    return
+                raise RuntimeError("empty non-stream fallback response")
+            except Exception as fb_err:
+                logger.error("[codegen.stream] non-stream fallback failed model=%s err=%s", target_model, _exc_text(fb_err))
+                if last_error is None:
+                    last_error = fb_err
+
+        # 모델 폴백: CODE_GEN_FALLBACK_MODEL로 재시도
+        fallback_code_model = (os.getenv("CODE_GEN_FALLBACK_MODEL") or "").strip()
+        if fallback_code_model and fallback_code_model != model:
+            logger.warning(
+                "[codegen.stream] primary model=%s failed, trying CODE_GEN_FALLBACK_MODEL=%s",
+                target_model,
+                fallback_code_model,
             )
-            resolved_timeout = _code_gen_timeout_seconds()
-            if resolved_timeout is not None:
-                request_kwargs["timeout"] = resolved_timeout
-            response = await acompletion(
-                **request_kwargs,
-            )
-            async for chunk in response:
-                delta = chunk.choices[0].delta
-                # LiteLLM: reasoning_content 지원 (DeepSeek R1 등)
-                raw_thought = getattr(delta, "reasoning_content", None)
-                if raw_thought:
-                    yield {"thought": raw_thought}
-                if delta.content:
-                    yield {"content": delta.content}
-            return
-        except Exception as e:
-            logger.error(f"stream_code_gen_reply error: {e}")
-            yield {"content": f"\n[코드 생성 오류: {e}]"}
-            return
+            fb_target = _normalize_model(fallback_code_model, provider=cfg["provider"])
+            fb_kwargs = dict(request_kwargs)
+            fb_kwargs["model"] = fb_target
+            _apply_litellm_provider_hint(fb_target, fb_kwargs)
+            try:
+                fb_hard = resolved_timeout + 10.0 if resolved_timeout else None
+                fb_chars = 0
+                if fb_hard is not None:
+                    async with asyncio.timeout(fb_hard):
+                        fb_resp = await acompletion(stream=True, **fb_kwargs)
+                        async for chunk in fb_resp:
+                            delta = chunk.choices[0].delta
+                            raw_thought = getattr(delta, "reasoning_content", None)
+                            if raw_thought:
+                                yield {"thought": raw_thought}
+                            if delta.content:
+                                fb_chars += len(delta.content)
+                                yield {"content": delta.content}
+                else:
+                    fb_resp = await acompletion(stream=True, **fb_kwargs)
+                    async for chunk in fb_resp:
+                        delta = chunk.choices[0].delta
+                        raw_thought = getattr(delta, "reasoning_content", None)
+                        if raw_thought:
+                            yield {"thought": raw_thought}
+                        if delta.content:
+                            fb_chars += len(delta.content)
+                            yield {"content": delta.content}
+                if fb_chars > 0:
+                    logger.info("[codegen.stream] fallback model success model=%s chars=%d", fb_target, fb_chars)
+                    return
+                last_error = RuntimeError(f"empty response from fallback model {fallback_code_model}")
+            except Exception as fb_model_err:
+                logger.error("[codegen.stream] fallback model failed model=%s err=%s", fb_target, _exc_text(fb_model_err))
+                if last_error is None:
+                    last_error = fb_model_err
+
+        final_err = last_error or RuntimeError("unknown code generation error")
+        err_text = _exc_text(final_err)
+        logger.error(f"stream_code_gen_reply error: {err_text}")
+        yield {"content": f"\n[코드 생성 오류: {err_text}]"}
+        return
     async for chunk in stream_chat_reply(prompt, model=model or None, temperature=0.3):
         yield chunk
 
@@ -174,6 +371,27 @@ def _normalize_model(model: Any, provider: str = "litellm") -> str:
     return model_str
 
 
+def _litellm_provider_hint() -> str:
+    # bare model 이름(minimax-m2.5 등) 사용 시 LiteLLM SDK가 provider 힌트를 요구할 수 있다.
+    return (
+        os.getenv("LITELLM_CUSTOM_PROVIDER")
+        or os.getenv("EVOLUTION_LITELLM_PROVIDER")
+        or "openai"
+    ).strip()
+
+
+def _apply_litellm_provider_hint(model_name: str, request_kwargs: Dict[str, Any]) -> None:
+    text = str(model_name or "").strip()
+    if not text:
+        return
+    # provider prefix가 이미 있으면 추가 힌트 불필요
+    if "/" in text:
+        return
+    hint = _litellm_provider_hint()
+    if hint:
+        request_kwargs.setdefault("custom_llm_provider", hint)
+
+
 def _strip_provider_prefix(model_name: str) -> str:
     text = str(model_name or "").strip()
     if not text:
@@ -263,6 +481,7 @@ async def generate_chat_reply(
                 request_kwargs["timeout"] = resolved_timeout
             if max_tokens is not None and int(max_tokens) > 0:
                 request_kwargs["max_tokens"] = int(max_tokens)
+            _apply_litellm_provider_hint(target_model, request_kwargs)
             response = await acompletion(
                 stream=False,
                 **request_kwargs,
@@ -379,6 +598,7 @@ async def stream_chat_reply(
                 request_kwargs["timeout"] = resolved_timeout
             if max_tokens is not None and int(max_tokens) > 0:
                 request_kwargs["max_tokens"] = int(max_tokens)
+            _apply_litellm_provider_hint(target_model, request_kwargs)
             response = await acompletion(
                 stream=True,
                 **request_kwargs,

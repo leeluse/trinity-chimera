@@ -2,7 +2,7 @@
 import logging
 from typing import Any, AsyncGenerator, Dict, List
 
-from server.shared.llm.client import stream_analysis_reply
+from server.shared.llm.client import stream_analysis_reply, stream_quick_reply
 from server.modules.evolution.wiki_memory import EvolutionWikiMemory
 from server.modules.chat.prompts import (
     EXPLAIN_STRATEGY_TEMPLATE,
@@ -105,19 +105,38 @@ async def run_risk_analysis(
 async def run_code_review(
     message, session_id, context, history, db, session_memory
 ) -> AsyncGenerator[str, None]:
-    prev = await get_last_strategy(session_id, db, session_memory)
-    if not prev:
-        yield format_sse({"type": "analysis", "content": "리뷰할 코드가 없어요."})
-        yield format_sse({"type": "done"})
-        return
+    # 에디터에 열린 코드 우선 사용 → session/DB fallback
+    ctx = context or {}
+    editor_code = (
+        str(ctx.get("editor_code") or "").strip()
+        or str((ctx.get("current_strategy") or {}).get("code") or "").strip()
+    )
+    if editor_code:
+        code_title = str(ctx.get("strategy_title") or ctx.get("strategy") or
+                        (ctx.get("current_strategy") or {}).get("title") or "현재 코드").strip()
+        ctx_metrics = {k: ctx.get(k) for k in ("total_return", "winRate", "maxDrawdown",
+                                                "profitFactor", "sharpe", "trades") if ctx.get(k) is not None}
+        target_code = editor_code
+        target_title = code_title
+        target_metrics = ctx_metrics
+    else:
+        prev = await get_last_strategy(session_id, db, session_memory)
+        if not prev:
+            yield format_sse({"type": "analysis", "content": "리뷰할 코드가 없어요. 에디터에 전략을 열거나 먼저 전략을 생성해 주세요."})
+            yield format_sse({"type": "done"})
+            return
+        target_code = prev["code"]
+        target_title = prev.get("title", "전략")
+        target_metrics = prev.get("metrics", {})
 
-    yield format_sse({"type": "stage", "stage": 1, "label": f"🔍 '{prev['title']}' 코드 리뷰 중..."})
+    yield format_sse({"type": "stage", "stage": 1, "label": f"🔍 '{target_title}' 진단 중..."})
     prompt = CODE_REVIEW_TEMPLATE.format(
-        code=prev["code"],
-        metrics=str(prev.get("metrics", {})),
+        code=target_code,
+        metrics=str(target_metrics),
     )
     full = ""
-    async for chunk in stream_analysis_reply(prompt):
+    # 빠른 진단은 minimax (TTFB 0.9s) — glm5 설계용, minimax 리뷰용
+    async for chunk in stream_quick_reply(prompt):
         thought = chunk.get("thought")
         content = chunk.get("content")
         if thought:
@@ -125,6 +144,8 @@ async def run_code_review(
         if content:
             full += content
             yield format_sse({"type": "analysis", "content": content})
+    full += "\n\n---\n> 문제를 수정하려면 **\"고쳐줘\"** 라고 입력하세요."
+    yield format_sse({"type": "analysis", "content": "\n\n---\n> 문제를 수정하려면 **\"고쳐줘\"** 라고 입력하세요."})
     await db.save_chat_message(session_id, "assistant", full, "text")
     yield format_sse({"type": "done"})
 

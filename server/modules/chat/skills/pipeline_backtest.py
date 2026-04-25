@@ -1,6 +1,7 @@
 """공통 백테스트 실행기 + 마이닝 백테스트 (WFO + Monte Carlo)"""
 import asyncio
 import logging
+import os
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, Optional
 
@@ -18,6 +19,13 @@ from server.modules.chat.skills._base import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _env_enabled(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 async def run_backtest(
@@ -38,6 +46,7 @@ async def run_backtest(
     prev_metrics: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[str, None]:
     try:
+        skip_tips = bool((context or {}).get("skip_tips")) or _env_enabled("CHAT_BACKTEST_SKIP_TIPS", False)
         if is_mining_mode:
             async for ev in _run_mining_backtest(
                 strategy_code, strategy_title, request_message,
@@ -50,20 +59,89 @@ async def run_backtest(
         bt_res = await engine.run(strategy_code, request_message, context)
 
         if not bt_res.get("success"):
+            error_text = str(bt_res.get("error") or "unknown backtest error")
+            error_payload = {
+                "title": strategy_title,
+                "code": strategy_code,
+                "metrics": {},
+                "gate_metrics": {},
+                "failure": "backtest_error",
+                "feedback": error_text,
+            }
+            await db.save_chat_message(
+                session_id,
+                "assistant",
+                f"{strategy_title} | 백테스트 실패: {error_text}",
+                "backtest",
+                error_payload,
+            )
+            session_memory[session_id] = {
+                "code": strategy_code,
+                "title": strategy_title,
+                "metrics": {},
+                "gate_metrics": {},
+                "last_failure": "backtest_error",
+                "last_feedback": error_text,
+                "timestamp": datetime.now().isoformat(),
+            }
             yield format_sse({"type": "error", "content": f"백테스트 실패: {bt_res.get('error')}"})
             logger.error(f"[backtest] {bt_res.get('error')}")
             return
 
         metrics = bt_res.get("metrics", {})
+        gate_metrics = normalize_metrics_for_gate(metrics)
+        backtest_data = {
+            "ret": f"{metrics.get('total_return', 0):+.2f}%",
+            "mdd": f"{metrics.get('max_drawdown', 0):.2f}%",
+            "winRate": f"{metrics.get('win_rate', 0):.1f}%",
+            "sharpe": f"{metrics.get('sharpe_ratio', 0):.2f}",
+        }
 
         if int(metrics.get("total_trades", 0)) == 0:
+            feedback = "진입 조건이 너무 엄격하거나 필터가 서로 충돌해 거래가 발생하지 않았습니다. 다음 수정은 조건 완화와 신호 수 회복을 최우선으로 해야 합니다."
+            zero_payload = {
+                **backtest_data,
+                "title": strategy_title,
+                "code": strategy_code,
+                "metrics": metrics,
+                "gate_metrics": gate_metrics,
+                "trades": 0,
+                "pf": f"{metrics.get('profit_factor', 0):.2f}",
+                "failure": "zero_trades",
+                "feedback": feedback,
+            }
+            yield format_sse({"type": "backtest", "data": zero_payload, "payload": bt_res.get("backtest_payload")})
+            await db.save_chat_message(
+                session_id,
+                "assistant",
+                f"{strategy_title} | 진입 신호 0건",
+                "backtest",
+                zero_payload,
+            )
+            session_memory[session_id] = {
+                "code": strategy_code,
+                "title": strategy_title,
+                "metrics": metrics,
+                "gate_metrics": gate_metrics,
+                "last_failure": "zero_trades",
+                "last_feedback": feedback,
+                "timestamp": datetime.now().isoformat(),
+            }
+            if memory:
+                try:
+                    memory.log_failure_pattern(
+                        agent_id=target_agent,
+                        reason="chat_zero_trades: entry conditions too strict or conflicting",
+                        fingerprint=memory.compute_fingerprint(strategy_code),
+                        metrics=gate_metrics,
+                    )
+                except Exception:
+                    logger.debug("[backtest] zero-trade memory logging failed", exc_info=True)
             yield format_sse({"type": "analysis", "content": (
                 "\n🚫 **진입 신호 0건** — 백테스트 기간 동안 거래가 한 건도 발생하지 않았습니다.\n"
-                "진입 조건이 너무 엄격합니다. 전략을 수정하거나 새로 생성해 주세요.\n"
+                "진입 조건이 너무 엄격합니다. 다음 수정 루프에서는 이 실패를 기준으로 조건을 완화합니다.\n"
             )})
             return
-
-        gate_metrics = normalize_metrics_for_gate(metrics)
 
         gates = (constitution.get("hard_gates", DEFAULT_HARD_GATES) if constitution else DEFAULT_HARD_GATES)
         hard_ok, hard_reasons = evaluate_hard_gates(gate_metrics, gates)
@@ -87,12 +165,6 @@ async def run_backtest(
                     fingerprint=fingerprint, metrics=gate_metrics,
                 )
 
-        backtest_data = {
-            "ret": f"{metrics.get('total_return', 0):+.2f}%",
-            "mdd": f"{metrics.get('max_drawdown', 0):.2f}%",
-            "winRate": f"{metrics.get('win_rate', 0):.1f}%",
-            "sharpe": f"{metrics.get('sharpe_ratio', 0):.2f}",
-        }
         yield format_sse({"type": "backtest", "data": {
             **backtest_data,
             "code": strategy_code,
@@ -100,16 +172,22 @@ async def run_backtest(
             "pf": f"{metrics.get('profit_factor', 0):.2f}",
         }, "payload": bt_res.get("backtest_payload")})
         
-        yield format_sse({"type": "stage", "stage": 5, "label": "🏆 전략 생성 및 백테스트 완료!"})
+        # Stage 5는 후처리(비교/가이드) 단계로 사용하고, "완료" 문구는 진짜 종료 직전에 보낸다.
+        yield format_sse({"type": "stage", "stage": 5, "label": "🧾 결과 요약 정리 중..."})
         
         bt_summary = f"{strategy_title} | 수익률 {backtest_data['ret']} MDD {backtest_data['mdd']} Sharpe {backtest_data['sharpe']}"
+        failure = "" if hard_ok else "hard_gate_failed"
+        feedback = "" if hard_ok else "; ".join(hard_reasons)
         await db.save_chat_message(session_id, "assistant", bt_summary, "backtest", {
             **backtest_data,
             "title": strategy_title,
             "code": strategy_code,
             "metrics": metrics,
+            "gate_metrics": gate_metrics,
             "trades": metrics.get("total_trades", 0),
             "pf": f"{metrics.get('profit_factor', 0):.2f}",
+            "failure": failure,
+            "feedback": feedback,
         })
 
         session_memory[session_id] = {
@@ -117,6 +195,8 @@ async def run_backtest(
             "title": strategy_title,
             "metrics": metrics,
             "gate_metrics": gate_metrics,
+            "last_failure": failure,
+            "last_feedback": feedback,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -147,13 +227,20 @@ async def run_backtest(
                 + "\n".join(f"- {r}" for r in hard_reasons) + "\n"
             )})
 
-        tips_full = ""
-        async for chunk in stream_quick_reply(TIPS_PROMPT_TEMPLATE.format(metrics=metrics)):
-            tips_full += chunk
-            yield format_sse({"type": "analysis", "content": chunk})
-        await db.save_chat_message(session_id, "assistant", tips_full, "text")
+        if not skip_tips:
+            tips_full = ""
+            async for chunk in stream_quick_reply(TIPS_PROMPT_TEMPLATE.format(metrics=metrics)):
+                thought = chunk.get("thought")
+                content = chunk.get("content")
+                if thought:
+                    yield format_sse({"type": "thought", "content": thought})
+                if content:
+                    tips_full += content
+                    yield format_sse({"type": "analysis", "content": content})
+            await db.save_chat_message(session_id, "assistant", tips_full, "text")
 
         log_strategy_to_file(request_message, metrics)
+        yield format_sse({"type": "stage", "stage": 5, "label": "🏆 전략 생성 및 백테스트 완료!"})
 
     except Exception as e:
         logger.exception("백테스트 실행 오류")

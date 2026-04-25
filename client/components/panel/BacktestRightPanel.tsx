@@ -17,6 +17,8 @@ interface BacktestRightPanelProps {
   timeframe: TimeFrame;
   startDate: string;
   endDate: string;
+  currentStrategyCode?: string;
+  currentStrategyName?: string;
   results: Results | null;
   onBacktestGenerated: (payload: any) => void;
   onApplyCode?: (code: string, name?: string, payload?: any) => void;
@@ -38,6 +40,8 @@ export default function BacktestRightPanel({
   timeframe,
   startDate,
   endDate,
+  currentStrategyCode,
+  currentStrategyName,
   results,
   onBacktestGenerated,
   onApplyCode,
@@ -71,11 +75,19 @@ export default function BacktestRightPanel({
               start_date: startDate,
               end_date: endDate,
               netProfitAmt: results?.netProfitAmt,
+              total_return: results?.totalReturnNum,
               winRate: results?.winRateNum,
               maxDrawdown: results?.mddPct,
               sharpe: results?.sharpeRatio,
               profitFactor: results?.profitFactor,
               trades: results?.totalTradesCount,
+              strategy: currentStrategyName,
+              strategy_title: currentStrategyName,
+              editor_code: currentStrategyCode,
+              current_strategy: {
+                title: currentStrategyName,
+                code: currentStrategyCode,
+              },
             }}
             onBacktestGenerated={onBacktestGenerated}
             onApplyCode={onApplyCode}

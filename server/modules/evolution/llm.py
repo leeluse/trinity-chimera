@@ -70,6 +70,17 @@ class EvolutionLLM:
                 if attempt >= max_retries: raise e
             except Exception as e:
                 logger.error(f"[{label}] LLM 생성 중 예외 발생: {e}")
+                text = str(e).lower()
+                if any(
+                    key in text for key in (
+                        "connecttimeout",
+                        "timed out",
+                        "operation timed out",
+                        "all connection attempts failed",
+                        "connection refused",
+                    )
+                ):
+                    raise LLMUnavailableError(f"LLM 연결 실패(네트워크/타임아웃): {e}") from e
                 raise e
 
     # -------------------------------------------------------------------------

@@ -47,6 +47,11 @@ _INVOKE_MAP = {
 _INVOKE_RE = re.compile(r'\[INVOKE:(\w+)\]')
 _THINK_BLOCK_RE = re.compile(r"<(thought|think|think_process|reasoning)>[\s\S]*?</\1>", re.IGNORECASE)
 _THINK_TAG_RE = re.compile(r"</?(thought|think|think_process|reasoning)[^>]*>", re.IGNORECASE)
+_CONTINUATION_META_RE = re.compile(
+    r"(?:사용자가\s*직전\s*답변|직전\s*답변이\s*중간에\s*끊겼|문맥상|중복\s*없이\s*자연스럽게\s*이어서|"
+    r"\[직전\s*답변\]|이것이中途)",
+    re.IGNORECASE,
+)
 
 # 빠른 규칙 기반 분류 (LLM 없이 ~95% 커버)
 _KEYWORD_INTENT_MAP = {
@@ -61,9 +66,21 @@ _KEYWORD_INTENT_MAP = {
     "RUN_EVOLUTION": [r"(채굴|에볼루션|자동|자율|진화|마이닝)", r"(최적|탐색|최상)\s*(후보|전략)"],
     "EXPLAIN_STRATEGY": [r"(설명|어떻게|작동|로직|왜|이유|원리)", r"(이\s*(전략|코드)|코드)\s*(어떻게|설명)"],
     "RISK_ANALYSIS": [r"(리스크|위험|손실|위험도|MDD|낙폭)", r"(언제|언제쯤)\s*(망|실패|손실)"],
-    "CODE_REVIEW": [r"(버그|버그\s*있|오버피팅|리뷰|검토|문제)", r"(코드|코딩)\s*(괜찮|문제|버그)"],
+    "CODE_REVIEW": [
+        r"(버그|오버피팅|리뷰|검토)\s*(있|해|봐|줘|있어|있냐|있나)?",
+        r"(코드|전략).{0,6}(뭐가|어디가|어떤\s*점).{0,6}(문제|이상|잘못|나쁜|별로)",
+        r"(문제|이상한|잘못된|나쁜)\s*(점|부분|코드|거|게).{0,6}(있|뭐|어디|알|봐|찾)",
+        r"(코드|전략)\s*(봐줘|점검|진단|확인해|체크)",
+        r"(과최적화|오버피팅|룩어헤드|미래참조).{0,6}(있|됐|됩|체크|확인)",
+        r"현재\s*(코드|전략).{0,10}(문제|이상|잘못|별로|나쁜|점검|진단)",
+    ],
     "SUGGEST_NEXT": [r"(다음|뭘|뭘\s*할|아이디어|방향|시도)", r"(어떻게|뭐)\s*(해볼|시도|할)"],
-    "CODE_FROM_DESIGN": [r"(코드만|코드\s*만|설계도)", r"(설계|디자인|블루프린트)\s*(기반|이용)", r"(다시|재)\s*(코드|생성)"],
+    "CODE_FROM_DESIGN": [
+        r"(코드만|코드\s*만|설계도)",
+        r"(설계|디자인|블루프린트)\s*(기반|이용)",
+        r"다시\s*(코드|생성|만들)",   # "재" 단독 제거 — "현재"의 재와 충돌
+        r"재코딩|재생성",             # "재" + 코딩/생성이 붙어있을 때만
+    ],
 }
 
 def _classify_by_keywords(text: str) -> Optional[str]:
@@ -98,6 +115,13 @@ class ChatHandler:
             return ""
         return text.split("/")[-1]
 
+    @staticmethod
+    def _env_enabled(name: str, default: bool) -> bool:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
     @classmethod
     def _pipeline_model_stack(cls) -> Dict[str, str]:
         default_model = os.getenv("LITELLM_MODEL") or os.getenv("OLLAMA_MODEL") or ""
@@ -107,12 +131,64 @@ class ChatHandler:
             "quick": cls._short_model_name(os.getenv("QUICK_MODEL") or default_model),
         }
 
+    @classmethod
+    def _should_require_pipeline_confirm(cls, intent: str) -> bool:
+        if not cls._env_enabled("CHAT_PIPELINE_CONFIRM_ENABLED", True):
+            return False
+        if intent == INTENT_MODIFY and cls._env_enabled("CHAT_MODIFY_AUTO_RUN", True):
+            return False
+        return True
+
+    @classmethod
+    def _should_stage_review(cls, intent: str, stage_num: int) -> bool:
+        if stage_num >= 5:
+            return False
+        if not cls._env_enabled("CHAT_STAGE_REVIEW_ENABLED", True):
+            return False
+        if intent == INTENT_MODIFY and not cls._env_enabled("CHAT_MODIFY_STAGE_REVIEW", False):
+            return False
+        return True
+
     @staticmethod
     def _sanitize_chat_text(text: str) -> str:
         clean = _INVOKE_RE.sub("", text or "")
         clean = _THINK_BLOCK_RE.sub("", clean)
         clean = _THINK_TAG_RE.sub("", clean)
         return clean.strip()
+
+    @staticmethod
+    def _looks_structured_response(text: str) -> bool:
+        body = (text or "").strip()
+        if not body:
+            return False
+        if "```" in body:
+            return True
+        if body.count("\n") >= 6:
+            return True
+        if re.search(r"(?m)^\s*[a-zA-Z_][\w\-]*\s*:\s*(?:\||$)", body):
+            return True
+        if re.search(r"(?m)^\s*def\s+\w+\s*\(", body):
+            return True
+        return False
+
+    @staticmethod
+    def _is_bad_continuation(text: str) -> bool:
+        body = (text or "").strip()
+        if not body:
+            return True
+        return bool(_CONTINUATION_META_RE.search(body))
+
+    @staticmethod
+    def _looks_code_request(message: str) -> bool:
+        text = (message or "").lower()
+        if not text:
+            return False
+        return bool(
+            re.search(
+                r"(generate_signal|python|코드|전략 코드|함수|def\s+\w+\(|yaml|json|백테스트 로직|signal\s*=)",
+                text,
+            )
+        )
 
     @staticmethod
     def _execution_preface(intent: str) -> str:
@@ -203,6 +279,9 @@ class ChatHandler:
             if payload and payload.get("type") == "stage":
                 stage_num = int(payload.get("stage") or 0)
                 stage_label = str(payload.get("label") or f"단계 {stage_num}")
+                if not self._should_stage_review(intent, stage_num):
+                    yield event
+                    continue
                 self._pending_stage_confirmations[session_id] = {
                     "intent": intent,
                     "stage": stage_num,
@@ -341,22 +420,35 @@ class ChatHandler:
             logger.info("[chat] pending replaced by new request session=%s", session_id)
             self._pending_pipeline_confirmations.pop(session_id, None)
 
+        # ── code_gen_mode 직행 (설계도 카드 버튼 경로) ────────────────
+        code_gen_mode = str((context or {}).get("code_gen_mode") or "").strip()
+        if code_gen_mode:
+            logger.info(
+                "[chat] code_gen_mode fast-path session=%s mode=%s has_design=%s",
+                session_id,
+                code_gen_mode,
+                bool((context or {}).get("design")),
+            )
+            async for ev in self._route_pipeline(INTENT_CREATE, message, session_id, context, history, db):
+                yield ev
+            return
+
         # ── 1. 규칙 기반 트리거 확인 (즉시, <1ms) ────────────────────
         quick_invoke_key = _classify_by_keywords(message)
         if quick_invoke_key:
             logger.info("[chat] trigger matched session=%s invoke=%s", session_id, quick_invoke_key)
-            intent = _INVOKE_MAP.get(quick_invoke_key)
-            if intent and quick_invoke_key in NO_CONFIRM_SKILLS:
-                # 분석형 스킬 (즉시 실행)
+            # 분석형 스킬은 _INVOKE_MAP 없이 직접 dispatch (CODE_REVIEW 등이 intent=None 되는 버그 방지)
+            if quick_invoke_key in NO_CONFIRM_SKILLS:
                 yield format_sse({"type": "invocation", "skill": quick_invoke_key,
-                                 "label": _INTENT_LABEL.get(intent), "model": "keyword-trigger"})
+                                 "label": quick_invoke_key.replace("_", " ").title(), "model": "keyword-trigger"})
                 async for ev in dispatch_analysis(
                     quick_invoke_key, message, session_id, context, history, db,
                     self._session_last_strategy,
                 ):
                     yield ev
                 return
-            elif intent:
+            intent = _INVOKE_MAP.get(quick_invoke_key)
+            if intent:
                 # 실행형 스킬 (확인 필요)
                 last_strat = await get_last_strategy(session_id, db, self._session_last_strategy)
                 if intent == INTENT_MODIFY and not last_strat:
@@ -365,16 +457,20 @@ class ChatHandler:
                     confirm_text = "\n\n" + fallback_note + self._build_confirm_text(intent, message, None)
                 else:
                     confirm_text = "\n\n" + self._build_confirm_text(intent, message, last_strat)
-                self._pending_pipeline_confirmations[session_id] = {
-                    "message": message,
-                    "intent": intent,
-                    "created_at": datetime.utcnow().isoformat() + "Z",
-                }
                 yield format_sse({"type": "invocation", "skill": quick_invoke_key,
                                  "label": _INTENT_LABEL.get(intent), "model": "keyword-trigger"})
-                yield format_sse({"type": "analysis", "content": confirm_text})
-                await db.save_chat_message(session_id, "assistant", confirm_text, "text")
-                yield format_sse({"type": "done"})
+                if self._should_require_pipeline_confirm(intent):
+                    self._pending_pipeline_confirmations[session_id] = {
+                        "message": message,
+                        "intent": intent,
+                        "created_at": datetime.utcnow().isoformat() + "Z",
+                    }
+                    yield format_sse({"type": "analysis", "content": confirm_text})
+                    await db.save_chat_message(session_id, "assistant", confirm_text, "text")
+                    yield format_sse({"type": "done"})
+                else:
+                    async for ev in self._route_pipeline(intent, message, session_id, context, history, db):
+                        yield ev
                 return
 
         # ── 2. 일반 대화 fast-path (인사/핑은 LLM 생략) ───────────
@@ -398,6 +494,17 @@ class ChatHandler:
             except Exception:
                 general_max_tokens = 768
             general_max_tokens = max(128, general_max_tokens)
+            if self._looks_code_request(message):
+                try:
+                    code_max_tokens = int(os.getenv("CHAT_GENERAL_CODE_MAX_TOKENS", "2200"))
+                except Exception:
+                    code_max_tokens = 2200
+                try:
+                    code_timeout = float(os.getenv("CHAT_GENERAL_CODE_TIMEOUT", "180"))
+                except Exception:
+                    code_timeout = 180.0
+                general_max_tokens = max(general_max_tokens, max(512, code_max_tokens))
+                general_timeout = max(general_timeout, max(60.0, code_timeout))
 
             resp = await generate_chat_reply(
                 user_message=message,
@@ -410,32 +517,68 @@ class ChatHandler:
             )
             full_response = self._sanitize_chat_text(resp.get("content", "응답을 생성할 수 없습니다."))
 
-            # 응답이 잘렸거나 패턴으로 끊길 탐지 (더 정교하게)
+            # 응답이 잘렸거나 패턴으로 끊긴 경우 안전한 이어쓰기 수행 (최대 2회)
             finish_reason = str(resp.get("finish_reason") or "").strip().lower()
-            _tail = full_response.strip()
-            looks_cut = (
-                finish_reason == "length"
-                or bool(re.search(r"[~\-/(:`\[\{]$", _tail))
-                or bool(re.search(r"20\d{2}-\d{2}-$", _tail))
-                # 마지막 문자가 문장 종결부호가 아닌 상태로 length 종료
-            )
-            if looks_cut:
+            for _ in range(2):
+                _tail = full_response.strip()
+                looks_cut = (
+                    finish_reason == "length"
+                    or bool(re.search(r"[~\-/(:`\[\{]$", _tail))
+                    or bool(re.search(r"20\d{2}-\d{2}-$", _tail))
+                    # 마지막 문자가 문장 종결부호가 아닌 상태로 length 종료
+                )
+                if not looks_cut:
+                    break
+
+                is_structured = self._looks_structured_response(full_response)
+                if is_structured:
+                    cont_user = (
+                        "다음 본문은 중간에서 잘렸습니다. 동일한 형식으로 나머지 부분만 이어서 출력하세요.\n"
+                        "- 이미 나온 내용 반복 금지\n"
+                        "- 지시문/메타 설명 금지\n"
+                        "- 코드/목록/YAML 형식이면 그 형식을 유지\n\n"
+                        f"{full_response[-2200:]}"
+                    )
+                    cont_system = (
+                        "너는 본문 복원 엔진이다. "
+                        "중복 없는 continuation fragment만 출력하라."
+                    )
+                    cont_max_tokens = 900
+                    cont_timeout = min(general_timeout, 35.0)
+                else:
+                    cont_user = (
+                        "아래 텍스트의 마지막 문장만 자연스럽게 마무리하세요.\n"
+                        "- 1~2문장만 출력\n"
+                        "- 지시문/설명문/메타 문구 금지\n"
+                        "- 본문 반복 금지\n\n"
+                        f"{full_response[-1600:]}"
+                    )
+                    cont_system = (
+                        "너는 문장 마무리 전용 엔진이다. "
+                        "질문/설명/메타 발화 없이 결과 문장 1~2개만 반환하라."
+                    )
+                    cont_max_tokens = 192
+                    cont_timeout = min(general_timeout, 20.0)
+
                 continuation = await generate_chat_reply(
-                    user_message=(
-                        "직전 답변이 중간에 끊겼습니다. 아래 문장을 중복 없이 자연스럽게 이어서 "
-                        "완결된 1~2문장으로만 마무리하세요.\n\n"
-                        f"[직전 답변]\n{full_response}"
-                    ),
+                    user_message=cont_user,
                     context=None,
                     history=[],
+                    custom_system_prompt=cont_system,
                     model=(os.getenv("QUICK_MODEL") or None),
                     temperature=0.1,
-                    timeout_sec=min(general_timeout, 20.0),
-                    max_tokens=192,
+                    timeout_sec=cont_timeout,
+                    max_tokens=cont_max_tokens,
                 )
                 cont_text = self._sanitize_chat_text(continuation.get("content", ""))
-                if cont_text:
-                    full_response = f"{full_response.rstrip()} {cont_text.lstrip()}".strip()
+                if self._is_bad_continuation(cont_text):
+                    logger.warning("[chat] continuation artifact dropped session=%s", session_id)
+                    cont_text = ""
+                if not cont_text:
+                    break
+                glue = "\n" if is_structured else " "
+                full_response = f"{full_response.rstrip()}{glue}{cont_text.lstrip()}".strip()
+                finish_reason = str(continuation.get("finish_reason") or "").strip().lower()
 
             if not full_response:
                 full_response = "요청을 이해했어요. 계속 진행할 내용을 한 줄로 알려주세요."
@@ -558,14 +701,19 @@ class ChatHandler:
                     confirm_text = "\n\n" + fallback_note + self._build_confirm_text(intent, message, None)
                 else:
                     confirm_text = "\n\n" + self._build_confirm_text(intent, message, last_strat)
-                self._pending_pipeline_confirmations[session_id] = {
-                    "message": message,
-                    "intent": intent,
-                    "created_at": datetime.utcnow().isoformat() + "Z",
-                }
-                logger.info("[chat] confirmation queued session=%s intent=%s", session_id, intent)
-                yield format_sse({"type": "analysis", "content": confirm_text})
-                await db.save_chat_message(session_id, "assistant", confirm_text, "text")
+                if self._should_require_pipeline_confirm(intent):
+                    self._pending_pipeline_confirmations[session_id] = {
+                        "message": message,
+                        "intent": intent,
+                        "created_at": datetime.utcnow().isoformat() + "Z",
+                    }
+                    logger.info("[chat] confirmation queued session=%s intent=%s", session_id, intent)
+                    yield format_sse({"type": "analysis", "content": confirm_text})
+                    await db.save_chat_message(session_id, "assistant", confirm_text, "text")
+                else:
+                    async for ev in self._route_pipeline(intent, message, session_id, context, history, db):
+                        yield ev
+                    return
             else:
                 logger.warning(f"[invoke] 알 수 없는 스킬: {invoke_key!r}")
         else:

@@ -235,6 +235,29 @@ class RealisticSimulator:
         signal: +1 / 0 / -1 시리즈 (df.index와 같은 인덱스)
         반환: (전체수익률, 거래수입, 개별매매리스트, 비용Series, 롱수익Series, 숏수익Series)
         """
+        if signal is None:
+            signal = pd.Series(0, index=df.index, dtype=int)
+        elif not isinstance(signal, pd.Series):
+            if isinstance(signal, (list, tuple, np.ndarray)):
+                arr = np.asarray(signal).reshape(-1)
+                if arr.size < len(df.index):
+                    padded = np.zeros(len(df.index), dtype=float)
+                    padded[:arr.size] = arr
+                    arr = padded
+                elif arr.size > len(df.index):
+                    arr = arr[-len(df.index):]
+                signal = pd.Series(arr, index=df.index)
+            elif isinstance(signal, (int, float, bool, np.number)):
+                v = 1 if signal > 0 else -1 if signal < 0 else 0
+                signal = pd.Series(v, index=df.index, dtype=int)
+            else:
+                signal = pd.Series(0, index=df.index, dtype=int)
+
+        if not signal.index.equals(df.index):
+            signal = signal.reindex(df.index).fillna(0.0)
+        signal = pd.to_numeric(signal, errors="coerce").fillna(0.0)
+        signal = pd.Series(np.sign(signal).astype(int), index=df.index, dtype=int)
+
         close = df["close"].reindex(signal.index)
         price_ret = close.pct_change().fillna(0)
 
@@ -716,8 +739,83 @@ def strategy_from_code(code: str) -> Callable:
     if "generate_signal" in namespace:
         original_fn = namespace["generate_signal"]
 
+        def _normalize_to_series(raw_signal, test_df: pd.DataFrame) -> pd.Series:
+            """전략 함수 반환값을 항상 test_df.index 기준의 -1/0/1 Series로 강제 변환."""
+            idx = test_df.index
+            zero_sig = pd.Series(0, index=idx, dtype=int)
+
+            if raw_signal is None:
+                return zero_sig
+
+            # Signal 객체 / dict 호환
+            if isinstance(raw_signal, dict):
+                signal_val = raw_signal.get("signal")
+                if isinstance(signal_val, (int, float, bool, np.number)):
+                    v = 1 if signal_val > 0 else -1 if signal_val < 0 else 0
+                    return pd.Series(v, index=idx, dtype=int)
+                entry = bool(raw_signal.get("entry", False))
+                exit_signal = bool(raw_signal.get("exit", False))
+                direction = str(raw_signal.get("direction", "long")).lower()
+                if exit_signal:
+                    return zero_sig
+                if entry:
+                    return pd.Series(-1 if direction == "short" else 1, index=idx, dtype=int)
+                return zero_sig
+
+            entry_attr = getattr(raw_signal, "entry", None)
+            exit_attr = getattr(raw_signal, "exit", None)
+            if entry_attr is not None or exit_attr is not None:
+                entry = bool(getattr(raw_signal, "entry", False))
+                exit_signal = bool(getattr(raw_signal, "exit", False))
+                direction = str(getattr(raw_signal, "direction", "long")).lower()
+                if exit_signal:
+                    return zero_sig
+                if entry:
+                    return pd.Series(-1 if direction == "short" else 1, index=idx, dtype=int)
+                return zero_sig
+
+            # 숫자 스칼라 → 전구간 동일 시그널
+            if isinstance(raw_signal, (int, float, bool, np.number)):
+                v = 1 if raw_signal > 0 else -1 if raw_signal < 0 else 0
+                return pd.Series(v, index=idx, dtype=int)
+
+            # DataFrame이면 signal 컬럼 우선, 없으면 첫 컬럼 사용
+            if isinstance(raw_signal, pd.DataFrame):
+                if raw_signal.empty:
+                    return zero_sig
+                raw_signal = raw_signal["signal"] if "signal" in raw_signal.columns else raw_signal.iloc[:, 0]
+
+            # 시퀀스/시리즈 처리
+            if isinstance(raw_signal, pd.Series):
+                s = raw_signal.copy()
+                # 인덱스가 다르면 test_df 인덱스로 강제 정렬
+                if not s.index.equals(idx):
+                    s = s.reindex(idx)
+                s = pd.to_numeric(s, errors="coerce").fillna(0.0)
+                s = np.sign(s).astype(int)
+                return pd.Series(s, index=idx, dtype=int)
+
+            if isinstance(raw_signal, (list, tuple, np.ndarray)):
+                arr = np.asarray(raw_signal).reshape(-1)
+                if arr.size == 0:
+                    return zero_sig
+                if arr.size < len(idx):
+                    padded = np.zeros(len(idx), dtype=float)
+                    padded[:arr.size] = arr
+                    arr = padded
+                elif arr.size > len(idx):
+                    arr = arr[-len(idx):]
+                s = pd.to_numeric(pd.Series(arr, index=idx), errors="coerce").fillna(0.0)
+                s = np.sign(s).astype(int)
+                return pd.Series(s, index=idx, dtype=int)
+
+            # 알 수 없는 타입은 안전하게 관망 처리
+            return zero_sig
+
         # 안전장치가 적용된 래퍼 함수 생성
         def safe_generate_signal(train_df, test_df):
+            if test_df is None or not hasattr(test_df, "index"):
+                return pd.Series(dtype=int)
             # 데이터 길이 확인 (안전장치)
             if len(test_df) < 20:
                 return pd.Series(0, index=test_df.index, dtype=int)
@@ -730,7 +828,11 @@ def strategy_from_code(code: str) -> Callable:
                 if not required_cols.issubset(test_df.columns):
                     raise ValueError(f"test_df must contain columns {required_cols}")
 
-            return original_fn(train_df, test_df)
+            try:
+                raw = original_fn(train_df, test_df)
+            except Exception:
+                raise
+            return _normalize_to_series(raw, test_df)
 
         return safe_generate_signal
 

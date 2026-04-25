@@ -17,7 +17,8 @@ import {
   EquityChart,
   StrategyCodeSection,
   PerformanceDetails,
-  TradeAnalysis
+  TradeAnalysis,
+  ExecutionLog
 } from "@/components";
 
 import { useDashboardQueries } from "@/hooks/useDashboardQueries";
@@ -240,7 +241,7 @@ export default function BacktestPage() {
     // 2. Apply backtest results if present
     if (payload) {
       applyBacktestPayload(payload);
-      setActiveTab("백테스트"); // Switch to chart/results view
+      setActiveTab("지표"); // "지표" 탭으로 자동 전환하여 통계/차트 요약 표시
     } else {
       setActiveTab("코드"); // Switch to code if no results yet
     }
@@ -303,6 +304,8 @@ export default function BacktestPage() {
           timeframe={timeFrame}
           startDate={startDate}
           endDate={endDate}
+          currentStrategyCode={strategyCode}
+          currentStrategyName={strategy}
           results={results}
           onBacktestGenerated={applyBacktestPayload}
           onApplyCode={applyGeneratedCode}
@@ -353,6 +356,16 @@ export default function BacktestPage() {
                   <TradeAnalysis results={results} />
                 </div>
               </>
+            )}
+
+            {activeTab === "거래 내역" && (
+              <div className="bg-white/[0.02] border border-white/[0.05] rounded-xl overflow-hidden flex flex-col min-h-[500px]">
+                <ExecutionLog 
+                  trades={results?.trades || []} 
+                  totalTradesCount={results?.totalTradesCount || 0} 
+                  fmtMoney={fmtMoney} 
+                />
+              </div>
             )}
 
             {activeTab === "코드" && (

@@ -567,35 +567,57 @@ def run_skill_backtest(
     markers = []
     pos = signal.shift(1).fillna(0)
     
+    entry_price = 0.0
+    
     for i in range(1, len(df)):
         current_pos = pos.iloc[i]
         prev_pos = pos.iloc[i-1]
+        
         if current_pos != prev_pos:
             t_ms = int(df.index[i].timestamp())
-            is_long = current_pos > 0
-            is_exit = current_pos == 0
             
-            if not is_exit:
-                markers.append({
-                    "time": t_ms, "position": "belowBar" if is_long else "aboveBar",
-                    "color": "#4ade80" if is_long else "#fb7185",
-                    "shape": "arrowUp" if is_long else "arrowDown", "text": "L" if is_long else "S",
-                })
-            else:
-                markers.append({
-                    "time": t_ms, "position": "aboveBar" if prev_pos > 0 else "belowBar",
-                    "color": "#94a3b8", "shape": "circle", "text": "X",
-                })
-            
+            # [A] 이전 포지션 종료 (Exit)
             if prev_pos != 0:
+                is_long_exit = prev_pos > 0
+                exit_price = float(df["close"].iloc[i-1]) # 전 봉 종가에 종료
+                
+                # 수익 계산 (롱: 종가/진입가 - 1, 숏: 진입가/종가 - 1)
+                if entry_price > 0:
+                    profit_pct = (exit_price / entry_price - 1) if is_long_exit else (entry_price / exit_price - 1)
+                else:
+                    profit_pct = 0.0
+                
+                is_profit = profit_pct >= 0
+                
+                markers.append({
+                    "time": t_ms, 
+                    "position": "aboveBar" if is_long_exit else "belowBar",
+                    "color": "#10b981" if is_profit else "#f43f5e", # TP: Emerald Green, SL: Rose Red
+                    "shape": "circle", 
+                    "text": "TP" if is_profit else "SL",
+                })
+                
                 trades_payload.append({
-                    "type": "LONG" if prev_pos > 0 else "SHORT",
+                    "type": "LONG" if is_long_exit else "SHORT",
                     "time": df.index[i].isoformat(),
-                    "exitReason": "signal",
-                    "entry": float(df["close"].iloc[i-1]),
-                    "exit": float(df["close"].iloc[i]),
-                    "profitPct": f"{(df['close'].iloc[i]/df['close'].iloc[i-1] - 1)*100:+.2f}%",
+                    "exitReason": "TP" if is_profit else "SL",
+                    "entry": entry_price,
+                    "exit": exit_price,
+                    "profitPct": f"{profit_pct*100:+.2f}%",
                     "posSize": 1.0
+                })
+            
+            # [B] 새 포지션 진입 (Entry)
+            if current_pos != 0:
+                is_long_entry = current_pos > 0
+                entry_price = float(df["close"].iloc[i-1]) # 신호 발생 시점의 가격으로 진입가 기록
+                
+                markers.append({
+                    "time": t_ms, 
+                    "position": "belowBar" if is_long_entry else "aboveBar",
+                    "color": "#4ade80" if is_long_entry else "#fb7185",
+                    "shape": "arrowUp" if is_long_entry else "arrowDown", 
+                    "text": "L" if is_long_entry else "S",
                 })
 
     # 6. 자산 곡선(Equity Curve) 생성

@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 import argparse
 import asyncio
 
-from server.shared.llm.llm_client import build_default_llm_service
+from server.shared.llm.llm_client import build_default_llm_service, LLMUnavailableError
 from server.modules.evolution.constants import BANNED_INDICATORS, CROSS_DOMAIN_SEEDS, PERSONAS
 from dotenv import load_dotenv
 
@@ -306,6 +306,24 @@ class StrategyPipeline:
         self.generator = LLMStrategyGenerator(model=llm_model)
         self.history: list[dict] = []
 
+    @staticmethod
+    def _is_transient_llm_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        if isinstance(exc, LLMUnavailableError):
+            return True
+        return any(
+            key in text
+            for key in (
+                "connecttimeout",
+                "timed out",
+                "operation timed out",
+                "connection refused",
+                "all connection attempts failed",
+                "llm unavailable",
+                "llm call failed",
+            )
+        )
+
     async def run(
         self,
         n_strategies: int = 6,
@@ -474,8 +492,13 @@ class StrategyPipeline:
             except Exception as e:
                 err_msg = str(e)
                 last_code_feedback = f"예상 밖의 에러: {err_msg[:100]}"
-                print(f"{prefix} ❌ 에러: {err_msg[:50]}...")
-                if attempt == max_retries - 1:
+                transient = self._is_transient_llm_error(e)
+                if transient:
+                    print(f"{prefix} ⏳ LLM 연결 오류: {err_msg[:80]}... (잠시 후 재시도)")
+                    await asyncio.sleep(min(2 * (attempt + 1), 8))
+                else:
+                    print(f"{prefix} ❌ 에러: {err_msg[:50]}...")
+                if attempt == max_retries - 1 and not transient:
                     traceback.print_exc()
 
         return None
@@ -539,7 +562,16 @@ async def main():
         
     except Exception as e:
         print(f"❌ 실행 중 오류 발생: {e}")
-        traceback.print_exc()
+        text = str(e).lower()
+        if not any(
+            key in text for key in (
+                "connecttimeout",
+                "timed out",
+                "operation timed out",
+                "llm",
+            )
+        ):
+            traceback.print_exc()
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -194,11 +194,10 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
 
           {msg.type === 'design' && (
             <div className="flex flex-col bg-white/[0.03] border border-blue-500/20 rounded-xl p-4 shadow-xl gap-3 backdrop-blur-md mb-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-blue-400">
-                  <FileCode2 size={14} />
-                  <span className="text-[10px] font-bold tracking-tight uppercase">전략 설계도</span>
-                </div>
+              <div className="flex items-center gap-2 text-blue-400">
+                <FileCode2 size={14} />
+                <span className="text-[10px] font-bold tracking-tight uppercase">전략 설계도</span>
+                <span className="ml-auto text-[9px] text-slate-500">코드 생성 자동 진행 중...</span>
               </div>
               <div className="h-px bg-white/[0.05]" />
               <details className="group">
@@ -212,14 +211,6 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
                   </pre>
                 </div>
               </details>
-              <button
-                onClick={() => onDesignCodeRequest?.(msg.content)}
-                className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-blue-600/10 border border-blue-500/30 rounded-xl text-[10px] font-bold text-blue-200 hover:bg-blue-600/20 transition-all active:scale-95"
-                title="설계도를 기반으로 코드를 생성합니다"
-              >
-                <Zap size={12} />
-                이 설계도로 코드만 생성
-              </button>
             </div>
           )}
 
@@ -496,6 +487,10 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   }, [onApplyCode]);
 
   const handleDesignCodeRequest = useCallback((designContent: string) => {
+    const originalMessage = [...messages]
+      .reverse()
+      .find((m) => m.role === "user" && m.content && m.content.trim())?.content;
+
     // API 호출 없이 choice UI만 바로 표시
     appendMessage({
       id: `${Date.now()}-choice`,
@@ -508,10 +503,11 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           { value: "relaxed", label: "현실적 기준 (권장)",          description: "승률 35%, PF 1.05 등" },
           { value: "strict",  label: "엄격한 기준",                 description: "승률 45%, PF 1.20 등" },
         ],
+        originalMessage,
         design: designContent,  // 설계 내용 직접 저장
       }
     });
-  }, [appendMessage]);
+  }, [appendMessage, messages]);
 
   const handleCodeGenModeChoice = useCallback(async (mode: string, originalMessage?: string, design?: string) => {
     // design이 있으면 (설계도 카드에서 직접 호출) context에 design 포함
@@ -528,6 +524,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     setShowStageProgress(mode !== "loose");
     setStageStartedAt(Date.now());
     setStageElapsedSeconds(0);
+    currentStageIdRef.current = "";
     setStatusText(mode === "loose" ? "⚙️ 코드 생성 중..." : "⚙️ Python 전략 코드 구현 중...");
 
     const controller = new AbortController();
@@ -535,12 +532,13 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
     try {
       const history = messages
-        .filter((msg) => msg.content && msg.content.trim())
-        .map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        }))
-        .slice(-25);
+        .filter((msg) =>
+          msg.content &&
+          msg.content.trim() &&
+          !["choice", "design", "thought", "invocation", "strategy", "backtest"].includes(msg.type ?? "")
+        )
+        .map((msg) => ({ role: msg.role, content: msg.content }))
+        .slice(-20);
 
       const url = `/api/chat/run?t=${Date.now()}`;
       const response = await fetchWithBypass(url, {
@@ -571,6 +569,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
       const decoder = new TextDecoder();
       let buffer = "";
+      let shouldStop = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -588,20 +587,172 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
             if (!raw) continue;
             const event = JSON.parse(raw);
 
-            // 동일한 SSE 이벤트 처리 로직 사용
-            if (event.type === "stage") {
-              setCurrentStage(event.stage);
-              setStageStartedAt(Date.now());
-              setStageElapsedSeconds(0);
-              setStatusText(event.label ?? `단계 ${event.stage} 진행 중...`);
-            } else if (event.type === "analysis" || event.type === "thought") {
-              // 기존 메시지 처리와 동일하게
+            switch (event.type) {
+              case "status":
+                setStatusText(event.content);
+                break;
+
+              case "progress":
+                if (typeof event.label === "string" && event.label.trim()) {
+                  setStatusText(event.label);
+                }
+                if (typeof event.stage === "number" && event.stage > 0) {
+                  setCurrentStage(event.stage);
+                }
+                if (typeof event.elapsed_sec === "number" && Number.isFinite(event.elapsed_sec)) {
+                  setStageElapsedSeconds(Math.max(0, Math.floor(event.elapsed_sec)));
+                }
+                break;
+
+              case "stage":
+                currentStageIdRef.current = `stage-${event.stage}-${Date.now()}`;
+                setCurrentStage(event.stage);
+                setStageStartedAt(Date.now());
+                setStageElapsedSeconds(0);
+                setStatusText(event.label ?? `단계 ${event.stage} 진행 중...`);
+                break;
+
+              case "thought":
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  const canAppend = last && last.role === "assistant" && last.type === "thought";
+                  if (canAppend) {
+                    const next = [...prev];
+                    next[next.length - 1] = { ...last, content: last.content + event.content };
+                    return next;
+                  }
+                  return [...prev, {
+                    id: `thought-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                    role: "assistant",
+                    content: event.content,
+                    type: "thought",
+                  }];
+                });
+                break;
+
+              case "analysis":
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  const stageId = currentStageIdRef.current;
+                  const canAppend =
+                    last &&
+                    last.role === "assistant" &&
+                    last.type === "text" &&
+                    (stageId
+                      ? last.id.startsWith(stageId)
+                      : !last.id.includes("-invoke-") &&
+                        !last.id.includes("-design") &&
+                        !last.id.includes("-strategy") &&
+                        !last.id.includes("-backtest"));
+
+                  if (canAppend) {
+                    const next = [...prev];
+                    next[next.length - 1] = { ...last, content: last.content + event.content };
+                    return next;
+                  }
+
+                  const newId = stageId
+                    ? `${stageId}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+                    : `analysis-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+                  return [...prev, {
+                    id: newId,
+                    role: "assistant",
+                    content: event.content,
+                    type: "text",
+                  }];
+                });
+                break;
+
+              case "strategy":
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  const strategyMsg = {
+                    id: `${Date.now()}-strategy`,
+                    role: "assistant" as const,
+                    content: "",
+                    type: "strategy" as const,
+                    data: event.data,
+                  };
+                  // 스트리밍 코드 텍스트 블록을 strategy 카드로 교체
+                  if (last && last.role === "assistant" && last.type === "text") {
+                    return [...prev.slice(0, -1), strategyMsg];
+                  }
+                  return [...prev, strategyMsg];
+                });
+                break;
+
+              case "backtest":
+                appendMessage({
+                  id: `${Date.now()}-backtest`,
+                  role: "assistant",
+                  content: "",
+                  type: "backtest",
+                  data: {
+                    ...event.data,
+                    code: event.data.code || event.strategy_code,
+                    payload: event.payload,
+                  },
+                });
+                {
+                  const finalCode = event.data.code || event.strategy_code;
+                  if (finalCode && onApplyCode) {
+                    onApplyCode(finalCode, event.data?.title || "Mined Strategy", event.payload);
+                  }
+                }
+                if (event.payload && onBacktestGenerated) {
+                  onBacktestGenerated(event.payload);
+                }
+                break;
+
+              case "invocation":
+                appendMessage({
+                  id: `${Date.now()}-invoke-${event.skill}`,
+                  role: "assistant",
+                  content: event.label || event.skill,
+                  type: "invocation",
+                  data: { skill: event.skill, model: event.model, router_model: event.router_model, models: event.models },
+                });
+                setStatusText(`⚡ ${event.label || event.skill} 발동 중... ${event.model ? `(${event.model})` : ''}`);
+                break;
+
+              case "design":
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  const designMsg = {
+                    id: `${Date.now()}-design`,
+                    role: "assistant" as const,
+                    content: event.content || "",
+                    type: "design" as const,
+                  };
+                  if (last && last.role === "assistant" && last.type === "text") {
+                    const next = [...prev];
+                    next[next.length - 1] = { ...designMsg, id: last.id + "-design" };
+                    return next;
+                  }
+                  return [...prev, designMsg];
+                });
+                break;
+
+              case "error":
+                appendMessage({
+                  id: `${Date.now()}-pipeline-error`,
+                  role: "assistant",
+                  content: event.content || "파이프라인 실행 중 오류가 발생했습니다.",
+                  type: "text",
+                });
+                setStatusText("❌ 파이프라인 오류");
+                break;
+
+              case "done":
+                shouldStop = true;
+                break;
             }
-            // 기타 이벤트도 동일하게 처리...
           } catch (err) {
             console.error("Event Parse Error:", err);
           }
         }
+
+        if (shouldStop) break;
       }
     } catch (e) {
       console.error("Mode choice error:", e);
@@ -618,7 +769,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
       setStageElapsedSeconds(0);
       abortControllerRef.current = null;
     }
-  }, [messages, context, appendMessage]);
+  }, [messages, context, appendMessage, onApplyCode, onBacktestGenerated]);
 
   const handleSend = async (presetMessage?: string) => {
     const raw = presetMessage ?? input;
@@ -653,12 +804,13 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     try {
       // LLM에 보낼 히스토리: 너무 길면 Context Window 초과 위험이 있으므로 최근 15개로 제한
       const history = messages
-        .filter((msg) => msg.content && msg.content.trim())
-        .map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        }))
-        .slice(-25); // proxy.py의 auto-truncation이 서버 측에서 컨텍스트 한도 초과분을 안전하게 자름
+        .filter((msg) =>
+          msg.content &&
+          msg.content.trim() &&
+          !["choice", "design", "thought", "invocation", "strategy", "backtest"].includes(msg.type ?? "")
+        )
+        .map((msg) => ({ role: msg.role, content: msg.content }))
+        .slice(-20);
 
       // Vercel/Local 모두 Next.js API 프록시 경로를 고정 사용
       const url = `/api/chat/run?t=${Date.now()}`;
@@ -691,6 +843,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
       const decoder = new TextDecoder();
       let buffer = "";
+      let shouldStop = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -776,12 +929,20 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 break;
 
               case "strategy":
-                appendMessage({
-                  id: `${Date.now()}-strategy`,
-                  role: "assistant",
-                  content: "",
-                  type: "strategy",
-                  data: event.data,
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  const strategyMsg = {
+                    id: `${Date.now()}-strategy`,
+                    role: "assistant" as const,
+                    content: "",
+                    type: "strategy" as const,
+                    data: event.data,
+                  };
+                  // 스트리밍 코드 텍스트 블록을 strategy 카드로 교체
+                  if (last && last.role === "assistant" && last.type === "text") {
+                    return [...prev.slice(0, -1), strategyMsg];
+                  }
+                  return [...prev, strategyMsg];
                 });
                 break;
 
@@ -901,11 +1062,17 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 });
                 setStatusText("❌ 파이프라인 오류");
                 break;
+
+              case "done":
+                shouldStop = true;
+                break;
             }
           } catch (err) {
             console.error("Event Parse Error:", err, line);
           }
         }
+
+        if (shouldStop) break;
       }
     } catch (e) {
       console.error(e);

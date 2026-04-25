@@ -141,133 +141,51 @@ risk_profile:
 CODE_PROMPT_TEMPLATE = """설계도:
 {design}
 
-위 설계도를 바탕으로 아래 규격에 맞는 **완전한 Python 전략 코드**를 구현해라.
-**오직 코드 블록 1개만 출력** — 설명문, <think> 태그, 분석 prose 일절 금지.
+위 설계도 기반으로 완전한 Python 전략 코드를 구현해라.
+**코드 블록 1개만 출력** — 설명문, <think> 태그 일절 금지.
 
----
 ### 함수 시그니처 (변경 불가)
 ```python
 def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
-    \"\"\"
-    train_df: 학습 구간 데이터 — 적응형 임계값 계산에만 사용
-    test_df:  신호 생성 대상 데이터
-    반환: pd.Series (1=롱, -1=숏, 0=관망), index = test_df.index
-    \"\"\"
 ```
+- train_df: 학습 구간 (적응형 임계값 계산 전용)
+- test_df: 신호 생성 대상. 컬럼: open/high/low/close/volume (DatetimeIndex)
+- 반환: pd.Series (1=롱, -1=숏, 0=관망), index=test_df.index
 
----
-### 데이터 스키마
-- `train_df` / `test_df`: DatetimeIndex, 컬럼 = open / high / low / close / volume (모두 float)
-- 행 수: 수백~수천 개 (1시간봉 기준)
+### 필수 원칙
+1. **train_df 기반 동적 임계값** — 정적 수치(rsi>70 등) 사용 금지
+2. **ATR 기반 레짐 필터** — `atr > atr_ma * 0.7` 수준, 너무 엄격하지 않게
+3. **3-Tier 신호 구조** — 추세 판단 → 진입 타이밍 → 오신호 필터
+4. **롱/숏 양방향 대칭 설계**
+5. **AND 조건 3개 이하** — 전체 구간 신호 ≥ 50건 보장
+6. **numpy/pandas만 허용** — ta/talib/scipy 금지
+7. **간결하게 100줄 이내** — 불필요한 주석/헬퍼 함수 최소화
+8. **명시적 청산 로직 필수** — 진입 조건이 사라진다고 즉시 청산(0)하면 1봉 보유가 돼 백테스터와 전략 의도가 어긋난다.
+   - 권장: 진입 후 `ffill(limit=N)`으로 최소 N봉 유지 **또는** 명시적 청산 조건(RSI 정상화, 반전 모멘텀 등)을 별도로 설계
+   - 예시: `sig = entry_sig.replace(0, np.nan).ffill(limit=hold_bars).fillna(0).astype(int)`
+   - `hold_bars`는 train_df에서 계산: 예) `hold_bars = max(3, int(train_df['volume'].rolling(20).std().mean() / train_df['volume'].mean() * 20))`
 
----
-### 필수 구현 원칙 (모두 적용할 것)
-
-**① train_df 기반 적응형 임계값 (필수 — 정적 수치 사용 금지)**
+### 출력 형식
 ```python
-# 나쁜 예 (하드코딩 → 오버피팅)
-if rsi > 70: signal = -1
-
-# 좋은 예 (train_df 통계 기반)
-d_tr = train_df['close'].diff()
-rsi_tr = 100 - 100/(1 + d_tr.clip(lower=0).rolling(14).mean()/
-          (-d_tr.clip(upper=0).rolling(14).mean()).replace(0,1e-9))
-rsi_upper = rsi_tr.quantile(0.78)
-rsi_lower = rsi_tr.quantile(0.22)
-vol_baseline = train_df['volume'].mean()
-```
-
-**② 시장 레짐 필터 (필수)**
-```python
-tr = pd.concat([(high-low),(high-close.shift()).abs(),(low-close.shift()).abs()],axis=1).max(axis=1)
-atr = tr.ewm(span=14, adjust=False).mean()
-atr_ma = atr.rolling(50).mean()
-regime_ok = atr > atr_ma * 0.7
-```
-
-**③ 3-Tier 신호 구조 (필수)**
-```python
-sig = pd.Series(0, index=test_df.index, dtype=int)
-sig[regime_ok & long_bias & entry_long & filter_ok] = 1
-sig[regime_ok & short_bias & entry_short & filter_ok] = -1
-```
-
----
-### 지표 구현 레시피 (numpy/pandas만 — ta/talib/scipy 절대 금지)
-```python
-close = test_df['close']; high = test_df['high']
-low = test_df['low']; vol = test_df['volume']
-
-ema = lambda s, n: s.ewm(span=n, adjust=False).mean()
-sma = lambda s, n: s.rolling(n).mean()
-hull = lambda s, n: ema(2*ema(s,n//2) - ema(s,n), int(n**0.5))
-
-def compute_rsi(s, n=14):
-    d = s.diff()
-    return 100 - 100/(1 + d.clip(lower=0).rolling(n).mean()/
-           (-d.clip(upper=0).rolling(n).mean()).replace(0,1e-9))
-
-bb_mid = close.rolling(20).mean(); bb_std = close.rolling(20).std()
-bb_upper = bb_mid + 2*bb_std; bb_lower = bb_mid - 2*bb_std
-
-macd = close.ewm(span=12,adjust=False).mean() - close.ewm(span=26,adjust=False).mean()
-macd_sig = macd.ewm(span=9,adjust=False).mean()
-
-lowest = low.rolling(14).min(); highest = high.rolling(14).max()
-stoch_k = 100*(close-lowest)/(highest-lowest).replace(0,1e-9)
-stoch_d = stoch_k.rolling(3).mean()
-
-def compute_adx(high, low, close, n=14):
-    tr_ = pd.concat([(high-low),(high-close.shift()).abs(),(low-close.shift()).abs()],axis=1).max(axis=1)
-    dm_p = ((high-high.shift()).clip(lower=0)).where((high-high.shift())>(low.shift()-low), 0)
-    dm_m = ((low.shift()-low).clip(lower=0)).where((low.shift()-low)>(high-high.shift()), 0)
-    atr_ = tr_.ewm(span=n,adjust=False).mean()
-    di_p = 100*dm_p.ewm(span=n,adjust=False).mean()/atr_.replace(0,1e-9)
-    di_m = 100*dm_m.ewm(span=n,adjust=False).mean()/atr_.replace(0,1e-9)
-    dx = 100*(di_p-di_m).abs()/(di_p+di_m).replace(0,1e-9)
-    return dx.ewm(span=n,adjust=False).mean()
-
-obv = (vol * close.diff().apply(lambda x: 1 if x>0 else (-1 if x<0 else 0))).cumsum()
-vwap = (close * vol).rolling(20).sum() / vol.rolling(20).sum().replace(0,1e-9)
-vol_ratio = vol / vol.rolling(20).mean().replace(0,1e-9)
-```
-
----
-### 품질 체크리스트 (주석 내 자기 검토)
-- train_df 기반 동적 임계값 1개 이상
-- 시장 레짐 필터 포함
-- Tier 1/2/3 신호 구조
-- 롱/숏 양방향 신호
-- `shift(-1)` 등 미래 참조 없음
-- **AND 조건 3개 이하** — 신호 ≥ 50건 보장
-- ta / talib / scipy 미사용
-
----
-### 출력 형식 (이 구조 그대로)
-```python
-# [Title: 전략의 의미 있는 이름]
+# [Title: 전략명]
 import numpy as np
 import pandas as pd
 
 def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
-    # === 1. 적응형 임계값 (train_df 기반) ===
+    # 1. 적응형 임계값 (train_df)
     ...
-
-    # === 2. 지표 계산 (test_df) ===
+    # 2. 지표 계산 (test_df)
     close = test_df['close']; high = test_df['high']
     low = test_df['low']; vol = test_df['volume']
     ...
-
-    # === 3. 시장 레짐 필터 ===
+    # 3. 레짐 필터
     regime_ok = ...
-
-    # === 4. 신호 생성 (3-Tier) ===
+    # 4. 신호 (3-Tier)
     sig = pd.Series(0, index=test_df.index, dtype=int)
-    sig[regime_ok & long_condition] = 1
-    sig[regime_ok & short_condition] = -1
+    sig[regime_ok & long_cond] = 1
+    sig[regime_ok & short_cond] = -1
     return sig.fillna(0).astype(int)
 ```
----
 """
 
 # ─────────────────────────────────────────────────────────────────
@@ -338,6 +256,10 @@ MODIFY_CODE_TEMPLATE = """수정 분석:
 - 개선된 부분은 `# [개선] 이유` 주석으로 명시해라.
 - train_df 기반 적응형 임계값이 없으면 추가해라.
 - 레짐 필터가 없으면 추가해라.
+- 조건을 많이 쌓아 신호를 죽이지 마라. long/short 최종 조건은 각각 핵심 필터 3개 내외로 유지해라.
+- train_df quantile 결과가 NaN/inf이면 합리적인 fallback 값을 사용해라.
+- 쿨다운/중복 신호 제거는 pandas rolling/shift 기반 vectorized 방식으로 구현해라.
+- **청산 로직 필수**: 진입 조건 소멸 시 즉시 0 반환 금지(1봉만 보유됨). `sig.replace(0, np.nan).ffill(limit=hold_bars).fillna(0).astype(int)` 또는 상태 머신으로 명시적 청산 조건을 설계해라.
 
 ### 함수 시그니처 (변경 불가)
 ```python
@@ -464,17 +386,17 @@ CODE_REVIEW_TEMPLATE = """전략 코드:
 {code}
 ```
 
-백테스트 성과:
-{metrics}
+백테스트 성과: {metrics}
 
-시니어 퀀트 개발자 시각으로 이 코드를 리뷰하세요.
+시니어 퀀트 개발자 시각으로 아래 7가지를 **간결하게** 진단하라. 각 항목 3줄 이내.
 
-1. **버그 / 잠재 오류** — 실제로 잘못된 코드 (인덱스, 연산, NaN 처리, edge case)
-2. **룩어헤드 바이어스** — shift(-1), 미래 데이터 참조, 데이터 누출 위험 부분
-3. **오버피팅 위험** — 조건이 너무 specific하거나 파라미터가 과최적화된 부분
-4. **성과-코드 불일치** — 코드 구조와 성과 지표 사이의 설명되지 않는 갭
-5. **개선 포인트 2가지** — 코드 레벨에서 즉시 적용 가능한 개선 (구체적 코드 제시)
-6. **종합 판정** — Pass / Caution / Fail + 이유 한 줄
+1. **청산 로직** — 진입 조건 소멸 시 즉시 0 반환(1봉 보유)인지, ffill/상태머신으로 보유기간이 명시적으로 설계됐는지
+2. **신호 품질** — AND 조건 과적층 여부, 신호 ≥50건 보장 여부, 롱/숏 비대칭 여부
+3. **과최적화 위험** — 하드코딩 매직넘버, train/test 분리 없는 임계값, 구간 특화 파라미터
+4. **룩어헤드 바이어스** — shift(-1) 또는 미래 데이터 참조 여부
+5. **레짐 필터 강도** — ATR/변동성 필터가 너무 엄격해 신호를 죽이는지
+6. **즉시 개선점 2가지** — 코드 한 줄 수준의 구체적 수정 제안
+7. **종합** — ✅Pass / ⚠️Caution / ❌Fail + 핵심 이유 한 줄
 """
 
 SUGGEST_NEXT_TEMPLATE = """최근 진화 메모리:

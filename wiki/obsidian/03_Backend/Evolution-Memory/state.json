@@ -3318,6 +3318,234 @@
         "sharpe_ratio": -1.04128455599656,
         "trinity_score": 0.0
       }
+    },
+    {
+      "time": "2026-04-24T13:41:39Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.309 < 0.350; profit_factor 0.638 < 1.050; total_return -0.176 < -0.100; sharpe_ratio -2.996 < -0.100",
+      "reason_tag": "profit_factor_low",
+      "fingerprint": "4be06318537766a1dd2cdf6b757d5e6be9e55386aaa924f407b342444dec1ade",
+      "mutation_hint": "risk_reduction",
+      "metrics": {
+        "win_rate": 0.3090909090909091,
+        "profit_factor": 0.6383966474084829,
+        "total_return": -0.17638690338654028,
+        "max_drawdown": -0.24752460224019773,
+        "total_trades": 110,
+        "sharpe_ratio": -2.9960328314173563,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-24T14:01:56Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.238 < 0.350; profit_factor 0.482 < 1.050; total_return -0.375 < -0.100; |max_drawdown| 0.424 > 0.350; sharpe_ratio -6.060 < -0.100",
+      "reason_tag": "mdd_exceeded",
+      "fingerprint": "e69e6174bbd26b6410ca6c1eadb12eae7d767f129ebe942d04679017f8af666f",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.23809523809523805,
+        "profit_factor": 0.4823461699490461,
+        "total_return": -0.3751762415779333,
+        "max_drawdown": -0.4242806994569904,
+        "total_trades": 147,
+        "sharpe_ratio": -6.060085160586014,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-24T14:07:08Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.314 < 0.350; profit_factor 0.452 < 1.050; sharpe_ratio -3.422 < -0.100",
+      "reason_tag": "profit_factor_low",
+      "fingerprint": "032ce1ee596f30496e3e8b19ee0f82651d5bc7283e12c8dad83872c0e26abca0",
+      "mutation_hint": "risk_reduction",
+      "metrics": {
+        "win_rate": 0.3142857142857143,
+        "profit_factor": 0.45215926418266517,
+        "total_return": -0.08317271121963765,
+        "max_drawdown": -0.09476511735157639,
+        "total_trades": 35,
+        "sharpe_ratio": -3.422498670864311,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-24T14:18:43Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.148 < 0.350; profit_factor 0.535 < 1.050; sharpe_ratio -2.069 < -0.100",
+      "reason_tag": "profit_factor_low",
+      "fingerprint": "9d333dcdcbda35494e01c093e23d0d47794bd52b3637a7c54f8c497e76d35264",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.14814814814814814,
+        "profit_factor": 0.5347652592397627,
+        "total_return": -0.04760631481137267,
+        "max_drawdown": -0.07184162482360534,
+        "total_trades": 27,
+        "sharpe_ratio": -2.0692338015219334,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-24T14:39:35Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.265 < 0.350; profit_factor 0.394 < 1.050; total_return -0.115 < -0.100; sharpe_ratio -4.439 < -0.100",
+      "reason_tag": "profit_factor_low",
+      "fingerprint": "ecdf1beb21f73f62d6ea0fc9542171255c530dfb4b6d4c4da41387f0e9584423",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.2653061224489796,
+        "profit_factor": 0.3939009205196213,
+        "total_return": -0.11523918254457222,
+        "max_drawdown": -0.12944787805817945,
+        "total_trades": 49,
+        "sharpe_ratio": -4.439411859561735,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-25T07:52:45Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "profit_factor 0.503 < 1.050; total_return -0.143 < -0.100; sharpe_ratio -2.846 < -0.100",
+      "reason_tag": "profit_factor_low",
+      "fingerprint": "bfcd805c58f863c09bde42364ad91376256c32ac606048e1dd51be45aa1e29c2",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.48936170212765956,
+        "profit_factor": 0.5033157468637626,
+        "total_return": -0.14270475950575312,
+        "max_drawdown": -0.1829203765999666,
+        "total_trades": 47,
+        "sharpe_ratio": -2.8456048073732507,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-25T09:17:39Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.292 < 0.350; profit_factor 0.618 < 1.050; total_return -0.156 < -0.100; sharpe_ratio -3.041 < -0.100",
+      "reason_tag": "profit_factor_low",
+      "fingerprint": "ef84a0888569bc848401777d306b71c0dc163e218a888ad5ad53c140adb4e591",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.29213483146067415,
+        "profit_factor": 0.6181757350334198,
+        "total_return": -0.15611129131012902,
+        "max_drawdown": -0.19820539745658214,
+        "total_trades": 89,
+        "sharpe_ratio": -3.0405302589843934,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-25T09:40:40Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "profit_factor 1.027 < 1.050",
+      "reason_tag": "profit_factor_low",
+      "fingerprint": "c3696204efefa6ebaf53b7a34916cacd32cc3d63e2ffbac97c43b83c27fb675c",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.4146341463414634,
+        "profit_factor": 1.0270669863669588,
+        "total_return": 0.017411694808666667,
+        "max_drawdown": -0.10625716256333083,
+        "total_trades": 41,
+        "sharpe_ratio": 0.28823562334413266,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-25T09:48:53Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.259 < 0.350; profit_factor 0.507 < 1.050; total_return -0.343 < -0.100; |max_drawdown| 0.405 > 0.350; sharpe_ratio -5.395 < -0.100",
+      "reason_tag": "mdd_exceeded",
+      "fingerprint": "58cd22d2bafcff4ff14d218a7308f854ebd9827ff0dc7dfc1ac4f13ed424e7c6",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.25882352941176473,
+        "profit_factor": 0.5069256251448112,
+        "total_return": -0.34300339374031574,
+        "max_drawdown": -0.40533920903289766,
+        "total_trades": 170,
+        "sharpe_ratio": -5.394586860550926,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-25T09:53:04Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.280 < 0.350; profit_factor 0.544 < 1.050; total_return -0.177 < -0.100; sharpe_ratio -3.462 < -0.100",
+      "reason_tag": "profit_factor_low",
+      "fingerprint": "51f89a42a954648f93ba9b8e67c874deb126973ec4182f28455f0663daf1c1e6",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.2804878048780488,
+        "profit_factor": 0.5442194622092781,
+        "total_return": -0.17657147476190338,
+        "max_drawdown": -0.24016357261192328,
+        "total_trades": 82,
+        "sharpe_ratio": -3.461809070572984,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-25T09:54:58Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.267 < 0.350; profit_factor 0.549 < 1.050; total_return -0.240 < -0.100; sharpe_ratio -4.269 < -0.100",
+      "reason_tag": "profit_factor_low",
+      "fingerprint": "3b996cebb0421906c101e090ad15375aa3c19f5e924cdcb793dd6e70bc05af82",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.2672413793103448,
+        "profit_factor": 0.5489861045190889,
+        "total_return": -0.2399261078335223,
+        "max_drawdown": -0.27847092434192317,
+        "total_trades": 116,
+        "sharpe_ratio": -4.269141910791164,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-25T10:23:06Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.258 < 0.350; profit_factor 0.379 < 1.050; total_return -0.809 < -0.100; |max_drawdown| 0.811 > 0.350; sharpe_ratio -6.125 < -0.100",
+      "reason_tag": "mdd_exceeded",
+      "fingerprint": "047136e836791d852b4533f4c2d6badf866b4c81391977d8d8b37526ac90c2f3",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.2575,
+        "profit_factor": 0.37860418998504763,
+        "total_return": -0.8094327221784057,
+        "max_drawdown": -0.8106528964719469,
+        "total_trades": 400,
+        "sharpe_ratio": -6.125289134326231,
+        "trinity_score": 0.0
+      }
     }
   ],
   "accepted": []

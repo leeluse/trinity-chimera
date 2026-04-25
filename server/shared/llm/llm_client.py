@@ -161,6 +161,25 @@ def _is_retryable_llm_error(exc: Exception) -> bool:
     return any(code in message for code in ("upstream 500", "upstream 502", "upstream 503", "upstream 504"))
 
 
+def _is_connectivity_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    if isinstance(exc, (httpx.ConnectTimeout, httpx.ConnectError, httpx.ReadTimeout)):
+        return True
+    return any(
+        token in message
+        for token in (
+            "connecttimeout",
+            "readtimeout",
+            "operation timed out",
+            "timed out",
+            "connection refused",
+            "all connection attempts failed",
+            "name or service not known",
+            "temporary failure in name resolution",
+        )
+    )
+
+
 def _extract_openai_text(data: Dict[str, Any]) -> str:
     content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content")) or ""
     if isinstance(content, str):
@@ -301,7 +320,11 @@ class LiteLLMProxyService:
         except Exception as exc:
             if not _ollama_fallback_enabled():
                 logger.error("LiteLLM generate failed (Ollama fallback disabled): %s", exc)
-                raise
+                if _is_connectivity_error(exc):
+                    raise LLMUnavailableError(
+                        f"LiteLLM 연결 실패(네트워크/타임아웃): {exc}"
+                    ) from exc
+                raise LLMUnavailableError(f"LiteLLM 호출 실패: {exc}") from exc
             # Local resilience path: fallback to direct Ollama when LiteLLM is unreachable.
             logger.warning("LiteLLM generate failed, fallback to Ollama: %s", exc)
             ollama_base = (os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/")
@@ -312,13 +335,20 @@ class LiteLLMProxyService:
                 "stream": False,
                 "options": {"temperature": temperature},
             }
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                res = await client.post(f"{ollama_base}/api/chat", json=payload)
-                res.raise_for_status()
-                data = res.json()
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    res = await client.post(f"{ollama_base}/api/chat", json=payload)
+                    res.raise_for_status()
+                    data = res.json()
+            except Exception as fb_exc:
+                if _is_connectivity_error(fb_exc):
+                    raise LLMUnavailableError(
+                        f"Ollama fallback 연결 실패(네트워크/타임아웃): {fb_exc}"
+                    ) from fb_exc
+                raise LLMUnavailableError(f"Ollama fallback 호출 실패: {fb_exc}") from fb_exc
             content = ((data.get("message") or {}).get("content") or "").strip()
             if not content:
-                raise RuntimeError("Ollama fallback returned empty content.")
+                raise LLMUnavailableError("Ollama fallback returned empty content.")
             return content
 
 

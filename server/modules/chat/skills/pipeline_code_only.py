@@ -12,6 +12,7 @@ from server.modules.chat.skills._base import (
     format_sse,
     extract_python_code,
     extract_strategy_title,
+    sanitize_generated_code,
     salvage_valid_python,
     resolve_target_agent,
     build_memory_guardrail,
@@ -23,6 +24,18 @@ _REQUIRED_SIGNAL_FN_RE = re.compile(
     r"def\s+generate_signal\s*\(\s*train_df\s*:\s*pd\.DataFrame\s*,\s*test_df\s*:\s*pd\.DataFrame\s*\)\s*->\s*pd\.Series",
     re.IGNORECASE,
 )
+
+
+def _validate_strategy_code(strategy_code: str) -> Optional[str]:
+    if not strategy_code:
+        return "코드 추출 실패"
+    if not _REQUIRED_SIGNAL_FN_RE.search(strategy_code):
+        return "필수 함수 시그니처 누락: def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series"
+    try:
+        StrategyLoader.validate_code(strategy_code)
+    except (SecurityError, SyntaxError) as e:
+        return str(e)
+    return None
 
 
 async def _get_last_design(session_id: str, db) -> Optional[str]:
@@ -97,47 +110,38 @@ async def run_code_only_pipeline(
         return
 
     strategy_code = extract_python_code(code_full)
-    strategy_code = salvage_valid_python(strategy_code)
-    validation_error: Optional[str] = None
+    strategy_code = salvage_valid_python(sanitize_generated_code(strategy_code))
+    validation_error = _validate_strategy_code(strategy_code)
 
-    if not strategy_code:
-        validation_error = "코드 추출 실패"
-    elif not _REQUIRED_SIGNAL_FN_RE.search(strategy_code):
-        validation_error = "필수 함수 시그니처 누락: def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series"
-    else:
-        try:
-            StrategyLoader.validate_code(strategy_code)
-        except (SecurityError, SyntaxError) as e:
-            validation_error = str(e)
-
-    # 1회 복구 시도
+    # 최대 2회 복구 시도
     if validation_error:
-        yield format_sse({"type": "analysis", "content": "\n코드가 중간에 끊겨 자동 복구를 시도합니다...\n"})
-        recovery_prompt = (
-            "아래 출력은 중간에 끊겼거나 형식이 깨진 전략 코드다.\n"
-            "실행 가능한 완전한 Python 코드만 출력하라.\n"
-            "def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series\n"
-            "코드블록 1개 또는 순수 코드만 출력.\n\n"
-            f"[실패 원인]\n{validation_error}\n\n"
-            f"[원래 설계도]\n{design[-2000:]}\n\n"
-            f"[끊긴 출력]\n{code_full[-3000:]}\n"
-        )
-        repaired = ""
-        async for chunk in stream_code_gen_reply(recovery_prompt):
-            thought = chunk.get("thought")
-            content = chunk.get("content")
-            if thought:
-                yield format_sse({"type": "thought", "content": thought})
-            if content:
-                repaired += content
-        recovered = salvage_valid_python(extract_python_code(repaired))
-        if recovered:
-            strategy_code = recovered
-            try:
-                StrategyLoader.validate_code(strategy_code)
-                validation_error = None
-            except (SecurityError, SyntaxError) as e:
-                validation_error = str(e)
+        for attempt in range(2):
+            yield format_sse({"type": "analysis", "content": (
+                f"\n코드가 중간에 끊겨 자동 복구를 시도합니다... ({attempt + 1}/2)\n"
+            )})
+            recovery_prompt = (
+                "아래 출력은 중간에 끊겼거나 형식이 깨진 전략 코드다.\n"
+                "실행 가능한 완전한 Python 코드만 출력하라.\n"
+                "def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series\n"
+                "백틱(```) 절대 사용 금지. 순수 코드만 출력.\n\n"
+                f"[실패 원인]\n{validation_error}\n\n"
+                f"[원래 설계도]\n{design[-2200:]}\n\n"
+                f"[끊긴 출력]\n{code_full[-3200:]}\n"
+            )
+            repaired = ""
+            async for chunk in stream_code_gen_reply(recovery_prompt):
+                thought = chunk.get("thought")
+                content = chunk.get("content")
+                if thought:
+                    yield format_sse({"type": "thought", "content": thought})
+                if content:
+                    repaired += content
+            recovered = salvage_valid_python(sanitize_generated_code(extract_python_code(repaired)))
+            if recovered:
+                strategy_code = recovered
+                validation_error = _validate_strategy_code(strategy_code)
+            if not validation_error:
+                break
 
     if not strategy_code:
         yield format_sse({"type": "error", "content": "코드 추출 실패: 출력이 중간에 끊겼습니다."})
