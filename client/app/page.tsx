@@ -288,7 +288,7 @@ export default function Dashboard() {
               <MetricSelector />
 
               <div className="mt-2">
-                <BotList />
+                <BotList bots={bots} />
               </div>
 
               <div className="flex flex-col min-h-0 gap-3 mt-2">

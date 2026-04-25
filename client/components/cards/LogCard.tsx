@@ -59,37 +59,32 @@ export default function LogCard({
   return (
     <div 
       onClick={onClick}
-      className="bg-[#0b0f1a] border border-white/[0.08] rounded-2xl overflow-hidden shrink-0 shadow-2xl group cursor-pointer transition-all hover:border-white/20"
+      className="bg-[#0b0f1a] border border-white/[0.08] rounded-2xl overflow-hidden shrink-0 shadow-2xl group cursor-pointer"
     >
       <div className="flex items-center justify-between px-4 py-3 sm:py-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <div
             className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-bold"
             style={{ background: avatarBg, color }}
           >
             {avatar}
           </div>
-          <span className="text-sm font-semibold" style={{ color }}>{agentName}</span>
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-black tracking-tight" style={{ color }}>{agentName}</span>
+              {analysis.includes("LONG_SIGNAL") && (
+                <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 text-[8px] font-black rounded border border-emerald-500/30 animate-pulse">LONG ENTRY</span>
+              )}
+              {analysis.includes("SHORT_SIGNAL") && (
+                <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 text-[8px] font-black rounded border border-rose-500/30 animate-pulse">SHORT ENTRY</span>
+              )}
+            </div>
+            <span className="text-[10px] text-[#4a5a7a] font-mono leading-none" suppressHydrationWarning>{time}</span>
+          </div>
         </div>
-        <span className="text-[11px] text-[#4a5a7a] font-mono" suppressHydrationWarning>{time}</span>
       </div>
 
       <div className="flex flex-col px-4 pb-4 gap-4">
-        {/* 현재 전략 분석 섹션 */}
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between border-b border-white/[0.03] pb-2">
-            <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c]">현재 전략 분석</div>
-            {analysis.includes("LONG_SIGNAL") && (
-              <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 text-[9px] font-black rounded border border-emerald-500/30 animate-pulse">LONG SIGNAL</span>
-            )}
-            {analysis.includes("SHORT_SIGNAL") && (
-              <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 text-[9px] font-black rounded border border-rose-500/30 animate-pulse">SHORT SIGNAL</span>
-            )}
-          </div>
-          <p className="text-[12.5px] leading-relaxed text-[#94a3b8] pt-1 whitespace-pre-wrap break-words italic">
-            "{analysis.replace(/^(LONG_SIGNAL|SHORT_SIGNAL)\s*/, "")}"
-          </p>
-        </div>
 
         {/* 📊 성과 변화 (사용자 요청 시각적 블록 빌트인) */}
         {hasStats && (

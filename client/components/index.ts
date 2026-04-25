@@ -31,4 +31,4 @@ export { default as RightPanel } from "./panel/PanelContainer";
 
 // Bots
 export { default as BotList } from "./bots/BotList";
-export { default as BotSettingsModal } from "./bots/BotSettingsModal";
+export { BotSettingsModal } from "./bots/BotSettingsModal";

@@ -22,28 +22,15 @@ interface BotData {
 }
 
 interface BotListProps {
+  bots: BotData[];
   refreshTrigger?: number;
 }
 
-export default function BotList({ refreshTrigger }: BotListProps) {
-  const [bots, setBots] = useState<BotData[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  const loadBots = async () => {
-    try {
-      const result = await fetchBots();
-      setBots(result);
-    } catch (error) {
-      console.error('Failed to load bots:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+export default function BotList({ bots, refreshTrigger }: BotListProps) {
+  const isLoading = false; // Now handled by parent
 
   useEffect(() => {
-    loadBots();
-    const interval = setInterval(loadBots, 2000);
-    return () => clearInterval(interval);
+    // Parent handles loading now.
   }, [refreshTrigger]);
 
   const handleStart = async (botId: string) => {
