@@ -588,6 +588,7 @@ def run_skill_backtest(
                     profit_pct = 0.0
                 
                 is_profit = profit_pct >= 0
+                profit_amt = 10000 * profit_pct # 기본 자본 10,000 기준 단순 계산
                 
                 markers.append({
                     "time": t_ms, 
@@ -603,7 +604,10 @@ def run_skill_backtest(
                     "exitReason": "TP" if is_profit else "SL",
                     "entry": entry_price,
                     "exit": exit_price,
+                    "sl": 0.0, # 추후 엔진 연동 가능
+                    "tp": 0.0,
                     "profitPct": f"{profit_pct*100:+.2f}%",
+                    "profitAmt": float(profit_amt),
                     "posSize": 1.0
                 })
             

@@ -17,6 +17,7 @@ interface BacktestHeaderProps {
   setStrategy: (s: string) => void;
   onRun: () => void;
   onDeploy?: () => void;
+  onCopy?: () => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
   loading?: boolean;
@@ -32,6 +33,7 @@ export default function BacktestHeader({
   setStrategy,
   onRun,
   onDeploy,
+  onCopy,
   activeTab,
   onTabChange,
   loading
@@ -129,7 +131,10 @@ export default function BacktestHeader({
             <Save size={14} className="group-hover:scale-110 transition-transform" />
             <span className="text-[10px] font-black uppercase tracking-widest">저장</span>
           </button>
-          <button className="flex items-center gap-1.5 hover:text-purple-400 transition-colors group">
+          <button 
+            onClick={onCopy}
+            className="flex items-center gap-1.5 hover:text-purple-400 transition-colors group"
+          >
             <Copy size={14} className="group-hover:scale-110 transition-transform" />
             <span className="text-[10px] font-black uppercase tracking-widest">복사</span>
           </button>

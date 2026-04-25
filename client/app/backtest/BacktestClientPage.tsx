@@ -292,6 +292,22 @@ export default function BacktestPage() {
     }
   };
 
+  const handleCopyResults = () => {
+    if (!results) {
+      alert("복사할 결과가 없습니다.");
+      return;
+    }
+    // Filter out complex objects like trades, markers, equityCurve for a clean metrics JSON
+    const { trades: _, markers: __, equityCurve: ___, ...metrics } = results;
+    const json = JSON.stringify(metrics, null, 2);
+    navigator.clipboard.writeText(json)
+      .then(() => alert("지표 수치가 JSON으로 복사되었습니다."))
+      .catch((err) => {
+        console.error("Copy failed:", err);
+        alert("복사 중 오류가 발생했습니다.");
+      });
+  };
+
   const fmtMoney = (v: number) => `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
@@ -341,6 +357,7 @@ export default function BacktestPage() {
               strategy={strategy} strategies={strategies} setStrategy={setStrategy}
               onRun={handleStartTest}
               onDeploy={handleDeploy}
+              onCopy={handleCopyResults}
               activeTab={activeTab}
               onTabChange={handleTabChange}
               loading={loading}

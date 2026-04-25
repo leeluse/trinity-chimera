@@ -36,7 +36,8 @@ export default function EquityChart({ results }: EquityChartProps) {
   const chartRef = useRef<any>(null);
 
   const generateData = (): ChartData<"line"> => {
-    if (!results || !results.trades || results.trades.length === 0) {
+    // 1. 결과가 없을 때 더미 데이터 표시
+    if (!results || (!results.equityCurve && (!results.trades || results.trades.length === 0))) {
       const labels = Array.from({ length: 60 }, (_, i) => "");
       return {
         labels,
@@ -50,32 +51,48 @@ export default function EquityChart({ results }: EquityChartProps) {
             pointRadius: 0,
             tension: 0,
           },
+        ]
+      };
+    }
+
+    // 2. 엔진에서 보낸 equityCurve가 있으면 최우선으로 사용
+    if (results.equityCurve && results.equityCurve.length > 0) {
+      return {
+        labels: results.equityCurve.map(d => {
+          const date = new Date(d.time * 1000);
+          return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:00`;
+        }),
+        datasets: [
           {
-            label: "매수 후 보유",
-            data: labels.map((_, i) => 10000 + (Math.cos(i / 10) * 200) + (i * 25)),
-            borderColor: "rgba(148, 163, 184, 0.1)",
-            borderWidth: 1,
+            label: "자산 곡선",
+            data: results.equityCurve.map(d => 10000 * d.value),
+            borderColor: "#9f7aea",
+            backgroundColor: "rgba(159, 122, 234, 0.05)",
+            borderWidth: 1.5,
             pointRadius: 0,
-            tension: 0,
+            pointHoverRadius: 4,
+            tension: 0.1,
+            fill: true,
           }
         ]
       };
     }
 
+    // 3. (Fallback) 거래 내역만 있을 때 수동 계산
     let currentEquity = 10000;
     const equityData = [currentEquity];
-    const buyHoldData = [currentEquity];
-    const labels = [""];
+    const labels = ["시작"];
 
     const sortedTrades = [...results.trades].sort((a, b) =>
       new Date(a.time).getTime() - new Date(b.time).getTime()
     );
 
     sortedTrades.forEach((trade) => {
-      currentEquity += trade.profitAmt;
+      // profitAmt가 없으면 profitPct(string)에서 파싱 시도
+      const pAmt = trade.profitAmt || (parseFloat(trade.profitPct) / 100 * currentEquity) || 0;
+      currentEquity += pAmt;
       equityData.push(currentEquity);
-      buyHoldData.push(10000 + (currentEquity - 10000) * 0.7);
-      labels.push("");
+      labels.push(new Date(trade.time).toLocaleDateString());
     });
 
     return {
@@ -85,21 +102,11 @@ export default function EquityChart({ results }: EquityChartProps) {
           label: "자산 곡선",
           data: equityData,
           borderColor: "#9f7aea",
-          backgroundColor: "rgba(96, 117, 255, 0.03)",
-          borderWidth: 1.2,
+          backgroundColor: "rgba(159, 122, 234, 0.05)",
+          borderWidth: 1.5,
           pointRadius: 0,
-          pointHoverRadius: 3,
-          tension: 0,
+          tension: 0.1,
           fill: true,
-        },
-        {
-          label: "매수 후 보유",
-          data: buyHoldData,
-          borderColor: "rgba(122, 145, 178, 0.1)",
-          borderWidth: 1,
-          pointRadius: 0,
-          tension: 0,
-          fill: false,
         }
       ]
     };
