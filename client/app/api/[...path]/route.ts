@@ -16,7 +16,7 @@ const getBackendBase = (): string => {
     process.env.NEXT_PUBLIC_API_URL ||
     (process.env.NODE_ENV === "production"
       ? "https://lsy-super-trend.loca.lt"
-      : "http://localhost:8000")
+      : "http://127.0.0.1:8000")
   )
     .trim()
     .replace(/\/+$/, "");

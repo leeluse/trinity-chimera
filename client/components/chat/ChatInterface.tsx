@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from 'rehype-raw';
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw } from "lucide-react";
+import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown } from "lucide-react";
 import { fetchWithBypass } from "@/lib/api";
 
 interface ChatMessage {
@@ -282,6 +282,9 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [forceChatMode, setForceChatMode] = useState(false);
+  const [chatModel, setChatModel] = useState("deepseek-v4-flash");
+  const [showModelSelect, setShowModelSelect] = useState(false);
   const [statusText, setStatusText] = useState("AI 분석 중...");
   const [currentStage, setCurrentStage] = useState(0);
   const [totalStages, setTotalStages] = useState(0);
@@ -470,14 +473,24 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   useEffect(() => {
     if (messages.length > 0) {
       setTimeout(() => {
-        virtuosoRef.current?.scrollToIndex({ 
-          index: messages.length - 1, 
-          align: 'end', 
-          behavior: 'smooth' 
+        virtuosoRef.current?.scrollToIndex({
+          index: messages.length - 1,
+          align: 'end',
+          behavior: 'smooth'
         });
       }, 50); // DOM 업데이트 대기 후 스크롤
     }
   }, [messages.length]);
+
+  useEffect(() => {
+    if (!showModelSelect) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-model-select]')) setShowModelSelect(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showModelSelect]);
 
   const handleShowCode = useCallback((code: string, title?: string, payload?: any) => {
     if (!code) return;
@@ -828,6 +841,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           session_id: sessionIdRef.current,
           context,
           history,
+          force_chat_mode: forceChatMode,
+          ...(forceChatMode && { chat_model: chatModel }),
         }),
         signal: controller.signal,
         cache: "no-store", // [중요] 브라우저 캐시 무시
@@ -1236,6 +1251,76 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
               )}
             </div>
           )}
+
+          {/* Mode Toggle + Model Selector */}
+          <div className="flex items-center gap-2 px-1">
+            {/* Pipeline / Chat 모드 토글 */}
+            <div className="flex items-center rounded-xl bg-white/[0.04] border border-white/[0.06] p-0.5 gap-0.5">
+              <button
+                onClick={() => setForceChatMode(false)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[11px] font-semibold transition-all duration-200 ${
+                  !forceChatMode
+                    ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/30'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <GitBranch size={11} />
+                Pipeline
+              </button>
+              <button
+                onClick={() => setForceChatMode(true)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[11px] font-semibold transition-all duration-200 ${
+                  forceChatMode
+                    ? 'bg-white/10 text-white'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <MessageSquare size={11} />
+                Chat
+              </button>
+            </div>
+
+            {/* 모델 셀렉터 (Chat 모드일 때만 표시) */}
+            {forceChatMode && (
+              <div className="relative" data-model-select>
+                <button
+                  onClick={() => setShowModelSelect(v => !v)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/[0.04] border border-white/[0.06] text-[11px] font-mono text-slate-400 hover:text-slate-200 hover:border-white/[0.12] transition-all duration-200"
+                >
+                  {chatModel}
+                  <ChevronDown size={10} className={`transition-transform duration-200 ${showModelSelect ? 'rotate-180' : ''}`} />
+                </button>
+                {showModelSelect && (
+                  <div className="absolute bottom-full mb-1.5 left-0 z-50 bg-[#0f0f14] border border-white/[0.1] rounded-xl shadow-2xl overflow-hidden min-w-[200px] py-1">
+                    {[
+                      "deepseek-v4-flash",
+                      "deepseek-v4-pro",
+                      "minimax-m2.5",
+                      "deepseek-v3.1-terminus"
+                    ].map(m => (
+                    <button
+                      key={m}
+                      onClick={() => { setChatModel(m); setShowModelSelect(false); }}
+                      className={`w-full text-left px-3 py-2.5 text-[11px] font-mono transition-all duration-200 ${
+                        chatModel === m
+                          ? 'bg-white/[0.08] text-white'
+                          : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="truncate flex-1">{m}</span>
+                        {m === "minimax-m2.5" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-[9px] text-purple-400 font-sans whitespace-nowrap">핵심</span>}
+                        {m === "deepseek-v4-flash" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-green-500/10 text-[9px] text-green-400 font-sans whitespace-nowrap">⭐ 최고속</span>}
+                        {m === "minimax-m2.5" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-[9px] text-purple-400 font-sans whitespace-nowrap">안정</span>}
+                        {m === "deepseek-v3.1-terminus" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-blue-500/10 text-[9px] text-blue-400 font-sans whitespace-nowrap">강력</span>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            )}
+          </div>
 
           {/* Integrated Input Bar */}
           <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${

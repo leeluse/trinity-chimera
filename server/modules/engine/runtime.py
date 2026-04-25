@@ -239,6 +239,7 @@ def _build_db_catalog() -> List[Dict[str, Any]]:
 
         out.append(
             {
+                "id": str(row.get("id")),
                 "key": key,
                 "label": str(strategy_name), # 정제된 이름을 라벨로 사용
                 "description": str(params.get("description") or row.get("rationale") or ""),
@@ -269,8 +270,8 @@ def list_skill_strategies() -> List[Dict[str, Any]]:
     if _STRATEGY_CACHE and now < _STRATEGY_CACHE_EXPIRY:
         return _STRATEGY_CACHE
 
-    # [REMOVED] seed_local_strategies_to_db(force=False)
-    # 더 이상 로컬 레거시 전략을 자동으로 DB에 주입하지 않습니다. (사용자 요청)
+    # [RESTORED] seed_local_strategies_to_db(force=False)
+    seed_local_strategies_to_db(force=False)
 
     db_catalog = _build_db_catalog()
     if db_catalog:

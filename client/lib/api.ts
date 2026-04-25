@@ -197,7 +197,7 @@ export class APIClient {
     });
 
     if (!response.ok) {
-      throw new Error(`루프 실행 실패: ${response.status}`);
+      throw new Error(`Failed to start loop: ${response.status}`);
     }
 
     return response.json();
@@ -216,7 +216,7 @@ export class APIClient {
     });
 
     if (!response.ok) {
-      throw new Error(`API 요청 실패: ${response.status}`);
+      throw new Error(`API request failed: ${response.status}`);
     }
 
     return response.json();
@@ -227,7 +227,7 @@ export class APIClient {
     const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/improvement?_ts=${ts}`);
 
     if (!response.ok) {
-      throw new Error(`대시보드 데이터 조회 실패: ${response.status}`);
+      throw new Error(`Failed to fetch dashboard data: ${response.status}`);
     }
 
     return response.json();
@@ -275,7 +275,7 @@ export class APIClient {
     }
 
     if (!response.ok) {
-      throw new Error(`백테스팅 결과 조회 실패: ${response.status}`);
+      throw new Error(`Failed to fetch backtest results: ${response.status}`);
     }
 
     return response.json();
@@ -285,7 +285,7 @@ export class APIClient {
     const response = await fetchWithBypass(`${API_BASE_URL}/agents/${agentId}/feedback`);
 
     if (!response.ok) {
-      throw new Error(`피드백 이력 조회 실패: ${response.status}`);
+      throw new Error(`Failed to fetch feedback history: ${response.status}`);
     }
 
     return response.json();
@@ -295,7 +295,7 @@ export class APIClient {
     const response = await fetchWithBypass(`${API_BASE_URL}/agents/${agentId}/performance`);
 
     if (!response.ok) {
-      throw new Error(`에이전트 성과 데이터 조회 실패: ${response.status}`);
+      throw new Error(`Failed to fetch performance data: ${response.status}`);
     }
 
     return response.json();
@@ -305,7 +305,7 @@ export class APIClient {
     const response = await fetchWithBypass(`${API_BASE_URL}/agents/${agentId}/timeseries?metric=${metric}`);
 
     if (!response.ok) {
-      throw new Error(`시계열 데이터 조회 실패: ${response.status}`);
+      throw new Error(`Failed to fetch timeseries data: ${response.status}`);
     }
 
     const data = await response.json();
@@ -518,4 +518,103 @@ const shouldRetryFallback = (candidate: string, response: Response): boolean => 
   const htmlResponse = contentType.includes("text/html");
 
   return tunnelUnavailable || retryableStatus || htmlResponse || !!vercelProxyError;
+};
+
+// ─── Bot API ───
+
+export interface BotConfig {
+  name: string;
+  strategy_id: string;
+  leverage?: number;
+  symbol?: string;
+  timeframe?: string;
+  initial_capital?: number;
+  max_position_pct?: number;
+  stop_loss_pct?: number;
+  take_profit_pct?: number;
+  risk_profile?: string;
+}
+
+export const fetchStrategies = async (): Promise<any[]> => {
+  try {
+    const res = await fetchWithBypass(`${API_BASE_URL}/backtest/strategies`);
+    const data = await res.json();
+    return data.success ? data.strategies : [];
+  } catch (error) {
+    console.error("Failed to fetch strategies:", error);
+    return [];
+  }
+};
+
+export const fetchBots = async (): Promise<any[]> => {
+  try {
+    const res = await fetchWithBypass(`${API_BASE_URL}/bots`);
+    const data = await res.json();
+    // 서버가 객체({success, bots})를 반환할 수도 있고 리스트([...])를 직접 반환할 수도 있음
+    if (Array.isArray(data)) return data;
+    return data && data.success && Array.isArray(data.bots) ? data.bots : [];
+  } catch (error) {
+    console.error("Failed to fetch bots:", error);
+    return [];
+  }
+};
+
+export const createBot = async (config: BotConfig): Promise<any> => {
+  const res = await fetchWithBypass(`${API_BASE_URL}/bots`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  return res.json();
+};
+
+export const getBot = async (botId: string): Promise<any> => {
+  const res = await fetchWithBypass(`${API_BASE_URL}/bots/${botId}`);
+  return res.json();
+};
+
+export const updateBot = async (botId: string, updates: Partial<BotConfig>): Promise<any> => {
+  const res = await fetchWithBypass(`${API_BASE_URL}/bots/${botId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  return res.json();
+};
+
+export const deleteBot = async (botId: string): Promise<any> => {
+  const res = await fetchWithBypass(`${API_BASE_URL}/bots/${botId}`, {
+    method: "DELETE",
+  });
+  return res.json();
+};
+
+export const startBot = async (botId: string): Promise<any> => {
+  const res = await fetchWithBypass(`${API_BASE_URL}/bots/${botId}/start`, {
+    method: "POST",
+  });
+  return res.json();
+};
+
+export const stopBot = async (botId: string): Promise<any> => {
+  const res = await fetchWithBypass(`${API_BASE_URL}/bots/${botId}/stop`, {
+    method: "POST",
+  });
+  return res.json();
+};
+
+export const getBotState = async (botId: string): Promise<any> => {
+  const res = await fetchWithBypass(`${API_BASE_URL}/bots/${botId}/state`);
+  return res.json();
+};
+
+export const fetchBotTrades = async (limit = 50): Promise<any[]> => {
+  try {
+    const res = await fetchWithBypass(`${API_BASE_URL}/bots/trades?limit=${limit}`);
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error("Failed to fetch bot trades:", error);
+    return [];
+  }
 };

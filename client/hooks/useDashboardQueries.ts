@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { APIClient } from "@/lib/api";
+import { APIClient, fetchBotTrades, fetchBots } from "@/lib/api";
 import { MetricKey } from "@/types";
 
 interface DashboardQueryOptions {
@@ -60,6 +60,24 @@ export const useDashboardQueries = (options: DashboardQueryOptions = {}) => {
     refetchIntervalInBackground: false,
   });
 
+  // 4. Bot Trades Logs
+  const botTradesQuery = useQuery({
+    queryKey: ["dashboard", "botTrades"],
+    queryFn: () => fetchBotTrades(50),
+    enabled: true, // Always fetch for now
+    refetchInterval: logsIntervalMs,
+    refetchIntervalInBackground: false,
+  });
+
+  // 5. Bot List (for metrics/chart)
+  const botsQuery = useQuery({
+    queryKey: ["dashboard", "bots"],
+    queryFn: () => fetchBots(),
+    enabled: true,
+    refetchInterval: statsIntervalMs,
+    refetchIntervalInBackground: false,
+  });
+
   // 4. Mutations
   const toggleAutomationMutation = useMutation({
     mutationFn: (enabled: boolean) => APIClient.setAutomationStatus(enabled),
@@ -70,9 +88,11 @@ export const useDashboardQueries = (options: DashboardQueryOptions = {}) => {
 
   return {
     stats: statsQuery.data,
-    isLoading: statsQuery.isLoading || evolutionLogsQuery.isLoading || decisionLogsQuery.isLoading,
+    isLoading: statsQuery.isLoading || evolutionLogsQuery.isLoading || decisionLogsQuery.isLoading || botTradesQuery.isLoading,
     evolutionEvents: evolutionLogsQuery.data || [],
     decisionLogs: decisionLogsQuery.data || [],
+    botTrades: botTradesQuery.data || [],
+    bots: botsQuery.data || [],
     automationStatus: statsQuery.data?.auto,
     metricsData: statsQuery.data?.met,
     dashboardProgress: statsQuery.data?.prog,
@@ -91,6 +111,11 @@ export const useAgentTimeseries = (
     queryFn: async () => {
       const results: Record<string, number[]> = {};
       await Promise.all(agentIds.map(async (id) => {
+        // [MOD] Skip UUIDs (Bots) as they don't have agent timeseries API yet
+        if (id.includes("-")) {
+          results[id] = [];
+          return;
+        }
         try {
           results[id] = await APIClient.getAgentTimeseries(id, metric);
         } catch {

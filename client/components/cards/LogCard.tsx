@@ -59,9 +59,7 @@ export default function LogCard({
   return (
     <div 
       onClick={onClick}
-      className={`bg-white/[0.03] backdrop-blur-md border rounded-2xl overflow-hidden shrink-0 shadow-xl group cursor-pointer transition-all ${
-        isActive ? 'border-white/20 bg-white/[0.08]' : 'border-white/[0.05]'
-      }`}
+      className="bg-[#0b0f1a] border border-white/[0.08] rounded-2xl overflow-hidden shrink-0 shadow-2xl group cursor-pointer transition-all hover:border-white/20"
     >
       <div className="flex items-center justify-between px-4 py-3 sm:py-4">
         <div className="flex items-center gap-2">
@@ -79,9 +77,17 @@ export default function LogCard({
       <div className="flex flex-col px-4 pb-4 gap-4">
         {/* 현재 전략 분석 섹션 */}
         <div className="flex flex-col gap-2">
-          <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c] border-b border-white/[0.03] pb-2">현재 전략 분석</div>
+          <div className="flex items-center justify-between border-b border-white/[0.03] pb-2">
+            <div className="text-[10px] font-bold tracking-widest uppercase text-[#5a6b8c]">현재 전략 분석</div>
+            {analysis.includes("LONG_SIGNAL") && (
+              <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 text-[9px] font-black rounded border border-emerald-500/30 animate-pulse">LONG SIGNAL</span>
+            )}
+            {analysis.includes("SHORT_SIGNAL") && (
+              <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 text-[9px] font-black rounded border border-rose-500/30 animate-pulse">SHORT SIGNAL</span>
+            )}
+          </div>
           <p className="text-[12.5px] leading-relaxed text-[#94a3b8] pt-1 whitespace-pre-wrap break-words italic">
-            "{analysis.replace(/^\[.*?\]\s*/, "")}"
+            "{analysis.replace(/^(LONG_SIGNAL|SHORT_SIGNAL)\s*/, "")}"
           </p>
         </div>
 

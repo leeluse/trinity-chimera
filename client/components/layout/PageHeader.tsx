@@ -1,9 +1,13 @@
 "use client";
 
-import { ReactNode } from "react";
-import { Settings2 } from "lucide-react";
+import { ReactNode, useState, useEffect } from "react";
+import Link from "next/link";
+import { Settings2, Bot } from "lucide-react";
 import ModelSettingsModal from "../dashboard/ModelSettingsModal";
+import { BotSettingsModal } from "../bots/BotSettingsModal";
+import BotList from "../bots/BotList";
 import { useModalStore } from "@/store/useModalStore";
+import { fetchStrategies } from "@/lib/api";
 
 interface PageHeaderProps {
   statusText?: string;
@@ -19,6 +23,26 @@ export const PageHeader = ({
   extra
 }: PageHeaderProps) => {
   const openSettings = useModalStore(state => state.open);
+  const [isBotModalOpen, setIsBotModalOpen] = useState(false);
+  const [botRefreshTrigger, setBotRefreshTrigger] = useState(0);
+  const [strategies, setStrategies] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    const loadStrategies = async () => {
+      try {
+        const data = await fetchStrategies();
+        if (Array.isArray(data)) {
+          setStrategies(data.map(s => ({ 
+            id: s.id || s.key, 
+            name: s.label || s.key 
+          })));
+        }
+      } catch (error) {
+        console.error('Failed to load strategies:', error);
+      }
+    };
+    loadStrategies();
+  }, []);
 
   const isGreen = statusColor === "green";
   const isBlue = statusColor === "blue";
@@ -39,7 +63,7 @@ export const PageHeader = ({
     <>
       <header className="flex items-center justify-between px-4 md:px-8 py-3 md:py-4 border-b border-white/[0.05] bg-white/[0.02] backdrop-blur-2xl sticky top-0 z-[100] shadow-2xl">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
             <div className="relative w-9 h-9 flex items-center justify-center">
               <div className="absolute inset-0 bg-gradient-to-tr from-[#6366f1] via-[#8b5cf6] to-[#ec4899] rounded-lg rotate-45 blur-[8px] opacity-40 animate-pulse"></div>
               <div className="relative w-full h-full bg-[#0b0b1a] border border-white/20 rounded-lg rotate-45 flex items-center justify-center overflow-hidden">
@@ -58,7 +82,7 @@ export const PageHeader = ({
                 <div className="h-[1px] w-4 bg-slate-800"></div>
               </div>
             </div>
-          </div>
+          </Link>
         </div>
 
         <div className="flex items-center gap-3">
@@ -71,7 +95,15 @@ export const PageHeader = ({
             </span>
           </div>
 
-          <button 
+          <button
+            onClick={() => setIsBotModalOpen(true)}
+            className="p-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white hover:border-purple-500/50 transition-all group"
+            title="봇 설정"
+          >
+            <Bot size={18} className="group-hover:rotate-12 transition-transform duration-500" />
+          </button>
+
+          <button
             onClick={openSettings}
             className="p-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white hover:border-blue-500/50 transition-all group"
             title="모델 엔진 설정"
@@ -80,6 +112,14 @@ export const PageHeader = ({
           </button>
         </div>
       </header>
+
+      {/* Bot Settings Modal */}
+      <BotSettingsModal
+        isOpen={isBotModalOpen}
+        onClose={() => setIsBotModalOpen(false)}
+        strategies={strategies}
+        onBotCreated={() => setBotRefreshTrigger(prev => prev + 1)}
+      />
 
       {/* Model Settings Modal */}
       <ModelSettingsModal />

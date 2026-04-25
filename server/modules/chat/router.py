@@ -20,6 +20,8 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = "default_session"
     context: Optional[Dict[str, Any]] = None
     history: Optional[List[Dict[str, Any]]] = None
+    force_chat_mode: bool = False   # True → 파이프라인 라우팅 생략, 일반 대화만
+    chat_model: Optional[str] = None  # 일반 채팅 모드에서 사용할 모델 오버라이드
 
 _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
 
@@ -141,7 +143,9 @@ async def chat_run(req: ChatRequest, handler: ChatHandler = Depends()):
                 req.message,
                 req.session_id or "default_session",
                 req.context or {},
-                req.history or []
+                req.history or [],
+                force_chat_mode=req.force_chat_mode,
+                chat_model=req.chat_model,
             )
         ),
         media_type="text/event-stream",

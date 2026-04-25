@@ -681,3 +681,99 @@ class SupabaseManager:
         except Exception as e:
             logger.exception("Error listing chat sessions: %s", e)
             return []
+
+    # ────────────────────────────────────────────────────
+    # Bot Configuration methods
+    # ────────────────────────────────────────────────────
+
+    async def create_bot(self, bot_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """봇 설정 생성"""
+        try:
+            payload = {
+                "name": bot_data.get("name"),
+                "strategy_id": bot_data.get("strategy_id"),
+                "is_active": bot_data.get("is_active", False),
+                "evolution_enabled": bot_data.get("evolution_enabled", False),
+                "leverage": bot_data.get("leverage", 1.0),
+                "symbol": bot_data.get("symbol", "BTCUSDT"),
+                "timeframe": bot_data.get("timeframe", "1h"),
+                "initial_capital": bot_data.get("initial_capital", 10000),
+                "max_position_pct": bot_data.get("max_position_pct", 10),
+                "stop_loss_pct": bot_data.get("stop_loss_pct"),
+                "take_profit_pct": bot_data.get("take_profit_pct"),
+                "risk_profile": bot_data.get("risk_profile", "moderate"),
+                "config": bot_data.get("config", {}),
+                "sim_state": bot_data.get("sim_state", {})
+            }
+            res = await asyncio.to_thread(
+                lambda: self.client.table("bots").insert(payload).execute()
+            )
+            data_out = res.data or []
+            return data_out[0] if data_out else None
+        except Exception as e:
+            logger.exception("Error creating bot: %s", e)
+            return None
+
+    async def list_bots(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """전체 봇 목록 조회 (전략명 포함)"""
+        try:
+            def _query():
+                return (
+                    self.client.table("bots")
+                    .select("*,strategies(name,code)")
+                    .order("created_at", desc=True)
+                    .limit(limit)
+                    .execute()
+                )
+            res = await asyncio.to_thread(_query)
+            return res.data or []
+        except Exception as e:
+            logger.exception("Error listing bots: %s", e)
+            return []
+
+    async def get_bot(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """단건 봇 조회"""
+        try:
+            def _query():
+                return (
+                    self.client.table("bots")
+                    .select("*,strategies(name,code)")
+                    .eq("id", bot_id)
+                    .single()
+                    .execute()
+                )
+            res = await asyncio.to_thread(_query)
+            return res.data
+        except Exception as e:
+            logger.exception("Error getting bot %s: %s", bot_id, e)
+            return None
+
+    async def update_bot(self, bot_id: str, bot_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """봇 설정 수정"""
+        try:
+            payload = {k: v for k, v in bot_data.items() if k in [
+                "name", "strategy_id", "is_active", "evolution_enabled",
+                "leverage", "symbol", "timeframe", "initial_capital",
+                "max_position_pct", "stop_loss_pct", "take_profit_pct",
+                "risk_profile", "config", "sim_state"
+            ]}
+            payload["updated_at"] = datetime.utcnow().isoformat()
+            res = await asyncio.to_thread(
+                lambda: self.client.table("bots").update(payload).eq("id", bot_id).execute()
+            )
+            data_out = res.data or []
+            return data_out[0] if data_out else None
+        except Exception as e:
+            logger.exception("Error updating bot %s: %s", bot_id, e)
+            return None
+
+    async def delete_bot(self, bot_id: str) -> bool:
+        """봇 삭제"""
+        try:
+            await asyncio.to_thread(
+                lambda: self.client.table("bots").delete().eq("id", bot_id).execute()
+            )
+            return True
+        except Exception as e:
+            logger.exception("Error deleting bot %s: %s", bot_id, e)
+            return False

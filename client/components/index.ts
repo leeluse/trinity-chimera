@@ -28,3 +28,7 @@ export { default as PanelContainer } from "./panel/PanelContainer";
 export { default as DashboardRightPanel } from "./panel/DashboardRightPanel";
 export { default as BacktestRightPanel } from "./panel/BacktestRightPanel";
 export { default as RightPanel } from "./panel/PanelContainer";
+
+// Bots
+export { default as BotList } from "./bots/BotList";
+export { default as BotSettingsModal } from "./bots/BotSettingsModal";

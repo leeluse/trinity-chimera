@@ -10,16 +10,19 @@ interface AgentsListProps {
   names?: string[];
   metrics?: {
     [agentId: string]: {
-      current_score: number;
+      current_equity: number;
       current_return: number;
       current_sharpe: number;
       current_mdd: number;
       current_win_rate: number;
     };
   };
+  strategies?: {
+    [agentId: string]: string;
+  };
 }
 
-export const AgentsList = ({ agentIds, names, metrics }: AgentsListProps) => {
+export const AgentsList = ({ agentIds, names, metrics, strategies }: AgentsListProps) => {
   const { chartActiveAgent: activeAgent, setChartActiveAgent: setActiveAgent } = useDashboardStore();
   const getName = (idx: number, fallback: string) => names && names[idx] ? names[idx] : fallback;
   const getAvatar = (idx: number, fallback: string) => names && names[idx] ? names[idx].charAt(0) : fallback;
@@ -34,7 +37,7 @@ export const AgentsList = ({ agentIds, names, metrics }: AgentsListProps) => {
   const visibleIds = agentIds.length > 0 ? agentIds : ["momentum_hunter"];
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-2">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 lg:gap-4 mt-6 mb-2">
       {visibleIds.map((id, idx) => {
         const m = metrics?.[id];
         return (
@@ -43,7 +46,7 @@ export const AgentsList = ({ agentIds, names, metrics }: AgentsListProps) => {
             id={id}
             name={getName(idx, id)}
             avatar={getAvatar(idx, id.charAt(0).toUpperCase())}
-            strategy={strategyLabelMap[id] || "Adaptive Strategy"}
+            strategy={strategies?.[id] || strategyLabelMap[id] || "Adaptive Strategy"}
             sharpe={m ? m.current_sharpe.toFixed(2) : '0.00'}
             mdd={m ? formatPercent(m.current_mdd, 1) : '0.0%'}
             winRate={m ? formatPercent(m.current_win_rate, 1) : '0.0%'}

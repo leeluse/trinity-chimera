@@ -20,9 +20,11 @@ from server.modules.chat.router import router as chat_router
 from server.modules.evolution.router import router as evolution_router, dashboard_router
 from server.modules.engine.router import router as engine_router
 from server.modules.settings.router import router as settings_router
+from server.modules.bots.router import router as bots_router
 from server.modules.evolution.orchestrator import get_evolution_orchestrator
 from server.modules.evolution.constants import AGENT_IDS, ACTIVE_AGENT_IDS
 from server.shared.market.metrics_buffer import get_metrics_buffer
+from server.modules.bots.manager import BotManager
 
 # Logging setup
 from logging.handlers import TimedRotatingFileHandler
@@ -116,6 +118,7 @@ app.include_router(evolution_router, prefix="/api")  # /api/agents ...
 app.include_router(dashboard_router, prefix="/api")  # /api/dashboard ...
 app.include_router(engine_router, prefix="/api/backtest")
 app.include_router(settings_router, prefix="/api/system")
+app.include_router(bots_router, prefix="/api")  # /api/bots ...
 
 # Scheduler setup
 scheduler = AsyncIOScheduler()
@@ -151,9 +154,24 @@ async def startup_event():
     if job:
         job.pause()
         
+    # 3. 봇 매니저 초기화 및 활성 봇 로드
+    bot_manager = BotManager()
+    bot_manager.set_scheduler(scheduler)
+    await bot_manager.load_active_bots()
+
+    # 4. 봇 실시간 시뮬레이션 틱 스케줄 (10초마다)
+    scheduler.add_job(
+        bot_manager.run_active_bots_tick,
+        "interval",
+        seconds=10,
+        id="bot_tick",
+        coalesce=True,
+        max_instances=1,
+    )
+
     scheduler.start()
     logger.info(
-        "APScheduler started: Evolution poll added (PAUSED by default). active_agents=%s",
+        "APScheduler started: Evolution poll added (PAUSED by default), Bot tick added (10s). active_agents=%s",
         ACTIVE_AGENT_IDS,
     )
 

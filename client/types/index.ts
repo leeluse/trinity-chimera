@@ -1,4 +1,4 @@
-export type MetricKey = 'score' | 'return' | 'sharpe' | 'mdd' | 'win';
+export type MetricKey = 'equity' | 'return' | 'sharpe' | 'mdd' | 'win';
 
 export interface PerformanceRow {
   agentId?: string;

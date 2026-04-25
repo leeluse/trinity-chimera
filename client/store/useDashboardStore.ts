@@ -14,7 +14,7 @@ interface DashboardState {
 }
 
 export const useDashboardStore = create<DashboardState>((set) => ({
-  currentMetric: 'score',
+  currentMetric: 'equity',
   activeAgent: 'ALL',
   chartActiveAgent: 'ALL',
   logActiveAgent: 'ALL',

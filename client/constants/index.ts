@@ -13,7 +13,7 @@ export const TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h"] as const;
 export const LEVERAGES = [1, 3, 5, 10, 20];
 
 export const HINT_MAP = {
-  score: '수식: Return×0.4 + Sharpe×25×0.35 + (1+MDD)×100×0.25',
+  equity: '현재 총 평가 자산 (USDT)',
   return: '누적 일별 수익률 (%)',
   sharpe: '롤링 샤프지수 (일간 추정)',
   mdd: '누적 최대 낙폭 (MDD, 매일 갱신)',

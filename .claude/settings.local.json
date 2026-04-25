@@ -34,7 +34,9 @@
       "Bash(python3 -c \"import ast; ast.parse\\(open\\('server/shared/llm/client.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(git add *)",
       "Bash(git commit -m 'fix: pass originalMessage to handleCodeGenModeChoice in button click handler *)",
-      "Bash(curl -s http://192.168.0.3:4000/v1/models -H \"Authorization: Bearer sk-dummy\")"
+      "Bash(curl -s http://192.168.0.3:4000/v1/models -H \"Authorization: Bearer sk-dummy\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('server/modules/chat/handler.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(curl -s http://192.168.0.3:4000/v1/models)"
     ],
     "tools": "dontAsk",
     "commands": "dontAsk",

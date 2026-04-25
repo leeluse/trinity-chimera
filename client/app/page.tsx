@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import Chart from "chart.js/auto";
@@ -13,7 +13,7 @@ import {
   PageLayout,
   PageHeader,
   MetricSelector,
-  AgentsList,
+  BotList,
   ChartLegend,
   PerformanceChart,
   DashboardRightPanel
@@ -27,10 +27,11 @@ import { useDashboardQueries, useAgentTimeseries } from "@/hooks/useDashboardQue
 
 const DAYS = 96; // 96 intervals of 15 minutes = 24 hours
 const labels: string[] = [];
-// Assuming a starting time, e.g., midnight
-const startDate = new Date('2026-04-13T00:00:00');
+const startDateOrigin = new Date();
+startDateOrigin.setHours(startDateOrigin.getHours() - 24);
+
 for (let i = 0; i < DAYS; i++) {
-  const d = new Date(startDate);
+  const d = new Date(startDateOrigin);
   d.setMinutes(d.getMinutes() + i * 15);
   labels.push(d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }));
 }
@@ -52,16 +53,7 @@ const areLabelPositionsEqual = (prev: LabelPosition[], next: LabelPosition[]) =>
   for (let i = 0; i < prev.length; i += 1) {
     const a = prev[i];
     const b = next[i];
-    if (
-      a.x !== b.x ||
-      a.y !== b.y ||
-      a.label !== b.label ||
-      a.color !== b.color ||
-      a.value !== b.value ||
-      a.avatar !== b.avatar
-    ) {
-      return false;
-    }
+    if (Math.abs(a.x - b.x) > 0.5 || Math.abs(a.y - b.y) > 0.5 || a.label !== b.label || a.value !== b.value) return false;
   }
   return true;
 };
@@ -77,11 +69,32 @@ export default function Dashboard() {
   const isEvolutionView = pathname === "/" && view === "evolution";
   const isLogsView = pathname === "/" && (view === "" || view === "logs");
 
-  // TanStack Query Hooks
+  const [btcHistory, setBtcHistory] = useState<number[]>([]);
+
+  // 1. 실제 비트코인 히스토리 (Binance) - 지연 로딩으로 초기 렉 방지
+  useEffect(() => {
+    const fetchBtcData = async () => {
+      try {
+        const response = await fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=96');
+        const klines = await response.json();
+        const prices = klines.map((k: any) => parseFloat(k[4]));
+        // 초기 렌더링 부하를 줄이기 위해 약간의 지연 후 세팅
+        setTimeout(() => setBtcHistory(prices), 300);
+      } catch (err) {
+        console.error("Failed to fetch BTC history:", err);
+      }
+    };
+    fetchBtcData();
+    const interval = setInterval(fetchBtcData, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   const {
     isLoading: isLoadingInitial,
     evolutionEvents,
     decisionLogs,
+    botTrades,
+    bots,
     automationStatus,
     metricsData,
     dashboardProgress,
@@ -91,130 +104,104 @@ export default function Dashboard() {
     enableDecisionLogs: isLogsView,
     statsIntervalMs: 6000,
     logsIntervalMs: 8000,
-    evolutionLogLimit: 120,
-    decisionLogLimit: 140,
   });
 
-  // Runtime Agent IDs derivation
+  // 2. 에이전트 ID 목록 (정렬하여 차트 고정)
   const runtimeAgentIds = useMemo(() => {
-    if (!dashboardProgress && !metricsData) return Array.from(DEFAULT_AGENT_IDS.slice(0, 1));
-    const idsFromProgress = (dashboardProgress?.active_agents && dashboardProgress.active_agents.length > 0)
-      ? dashboardProgress.active_agents
-      : (dashboardProgress?.agents || []);
-    const idsFromMetrics = Object.keys(metricsData?.agents || {});
-    return idsFromProgress.length > 0
-      ? idsFromProgress
-      : (idsFromMetrics.length > 0 ? idsFromMetrics : Array.from(DEFAULT_AGENT_IDS));
-  }, [dashboardProgress, metricsData]);
+    let rawIds: string[] = [];
+    if (bots && bots.length > 0) {
+      rawIds = bots.map((b: any) => b.id);
+    } else if (!dashboardProgress && !metricsData) {
+      rawIds = [DEFAULT_AGENT_IDS[0]];
+    } else {
+      const p = (dashboardProgress?.active_agents?.length || 0) > 0 ? dashboardProgress!.active_agents! : (dashboardProgress?.agents || []);
+      rawIds = p.length > 0 ? p : (Object.keys(metricsData?.agents || {}).length > 0 ? Object.keys(metricsData!.agents) : Array.from(DEFAULT_AGENT_IDS));
+    }
+    return [...new Set(rawIds)].sort();
+  }, [bots, dashboardProgress, metricsData]);
   const runtimeAgentIdsKey = useMemo(() => runtimeAgentIds.join("|"), [runtimeAgentIds]);
 
-  const { data: timeseriesData = {} } = useAgentTimeseries(currentMetric, runtimeAgentIds, {
-    refetchIntervalMs: 7000,
-  });
+  const { data: timeseriesData = {} } = useAgentTimeseries(currentMetric, runtimeAgentIds);
 
   const [labelPositions, setLabelPositions] = useState<LabelPosition[]>([]);
   const labelPositionsRef = useRef<LabelPosition[]>([]);
 
   const agentNames = useMemo(() => {
     return runtimeAgentIds.map((id, idx) => {
-      // 1. DB에서 가져온 실제 이름이 있는지 확인
-      const realName = metricsData?.agents[id]?.name;
-      if (realName && realName !== id) return realName;
-      
-      // 2. ID 자체가 사람이 읽기 좋은 형태인 경우 (예: Momentum Hunter)
-      if (id.includes("_") || id.includes(" ")) {
-        return id.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
-      }
-      
-      // 3. 마지막 폴백: NAMES 배열의 값 (NaN)
-      return NAMES[idx] || "NaN";
+      const bot = bots.find((b: any) => b.id === id);
+      if (bot) return bot.name;
+      const m = metricsData?.agents?.[id]?.name;
+      if (m && m !== id) return m;
+      return NAMES[idx] || "Agent " + (idx + 1);
     });
-  }, [metricsData, runtimeAgentIds]);
+  }, [bots, metricsData, runtimeAgentIds]);
 
-  const chartNames = useMemo(() => {
-    return [...agentNames, "BTC BnH"];
-  }, [agentNames]);
+  const chartNames = useMemo(() => [...agentNames, "BTC BnH"], [agentNames]);
 
-  const handleToggleAutomation = (enabled: boolean) => {
-    toggleAutomation(enabled);
-  };
-
-  const buildDynamicDatasets = useCallback((metric: MetricKey, names: string[]) => {
+  // 3. 차트 데이터셋 생성 로직 (참조 최적화)
+  const buildDatasets = useCallback(() => {
+    const botIds = bots.map((b: any) => b.id);
     const ids = [...runtimeAgentIds, 'BTC BnH'];
-    const metricFieldMap: Record<
-      MetricKey,
-      "current_score" | "current_return" | "current_sharpe" | "current_mdd" | "current_win_rate"
-    > = {
-      score: "current_score",
-      return: "current_return",
-      sharpe: "current_sharpe",
-      mdd: "current_mdd",
-      win: "current_win_rate",
-    };
-
+    
     return ids.map((id, i) => {
       let data: number[] = [];
-      const isBenchmark = id === "BTC BnH";
+      const isBT = id === "BTC BnH";
+      const bot = bots.find((b: any) => b.id === id);
+      const color = isBT ? "#64748b" : COLORS[i % COLORS.length];
 
-      if (isBenchmark) {
-        let base = 50, step = 0.2;
-        if (metric === "return") { base = 0.05; step = 0.001; }
-        else if (metric === "sharpe") { base = 0.5; step = 0.002; }
-        else if (metric === "mdd") { base = -0.15; step = 0; }
-        else if (metric === "win") { base = 0.5; step = 0.001; }
-        data = Array(DAYS).fill(base).map((v, idx) => v + (idx * step));
-      } else if (metricsData?.agents[id]) {
-        // Map API timeseries value
-        const metricField = metricFieldMap[metric];
-        const agentMetrics = metricsData.agents[id as keyof typeof metricsData.agents];
-        const currentVal = agentMetrics?.[metricField] ?? 0;
-
-        if (timeseriesData && timeseriesData[id] && timeseriesData[id].length > 0) {
-          const history = timeseriesData[id];
-          if (history.length >= DAYS) {
-            data = history.slice(-DAYS);
-          } else {
-            // Pad beginning with first value or 0 if shorter than DAYS
-            const padding = Array(DAYS - history.length).fill(history[0] || 0);
-            data = [...padding, ...history];
-          }
-        } else {
-          data = Array(DAYS).fill(currentVal || 0);
-        }
+      if (isBT) {
+        if (currentMetric === "equity") data = btcHistory.length > 0 ? btcHistory : Array(DAYS).fill(77000);
+        else data = btcHistory.length > 0 ? btcHistory.map(p => ((p - btcHistory[0]) / btcHistory[0]) * 100) : Array(DAYS).fill(0);
       } else {
-        data = Array(DAYS).fill(0);
+        const ad = timeseriesData[id] || [];
+        if (ad.length > 0) {
+          data = ad;
+        } else if (bot) {
+          const s = bot.sim_state || {};
+          const b = (currentMetric === "equity") ? (s.equity || 10000) : (s.total_return_pct || 0);
+          data = Array(DAYS).fill(b);
+        } else {
+          data = Array(DAYS).fill(0);
+        }
       }
 
-      const isHidden = chartActiveAgent !== "ALL" && id !== chartActiveAgent && !isBenchmark;
+      const isH = chartActiveAgent !== "ALL" && id !== chartActiveAgent && !isBT;
+      const cColor = color.length > 7 ? color.substring(0, 7) : color;
 
       return {
-        label: names[i] || NAMES[i],
+        label: isBT ? "BTC BnH" : (bot?.name || NAMES[i] || "Bot"),
         data,
-        borderColor: COLORS[i % COLORS.length],
-        backgroundColor: 'transparent',
-        borderWidth: i === 0 ? 1.4 : (isBenchmark ? 0.8 : 1),
+        borderColor: color,
+        borderWidth: isBT ? 2 : 1.5,
         pointRadius: 0,
-        tension: 0.42,
-        fill: false,
-        borderDash: isBenchmark ? [1, 5] : (i === 3 ? [5, 4] : []),
-        hidden: isHidden
+        tension: 0.4,
+        fill: isBT,
+        backgroundColor: (context: any) => {
+          const area = context.chart.chartArea;
+          if (!area) return null;
+          const g = context.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+          if (isBT) { g.addColorStop(0, `${cColor}44`); g.addColorStop(1, `${cColor}00`); }
+          return g;
+        },
+        hidden: isH,
+        yAxisID: isBT ? 'y1' : 'y',
       };
     });
-  }, [runtimeAgentIds, chartActiveAgent, metricsData, timeseriesData]);
+  }, [runtimeAgentIds, currentMetric, btcHistory, bots, timeseriesData, chartActiveAgent]);
 
-  const chartDatasets = useMemo(
-    () => buildDynamicDatasets(currentMetric, chartNames),
-    [buildDynamicDatasets, currentMetric, chartNames]
-  );
-  const chartDatasetsRef = useRef(chartDatasets);
-  useEffect(() => {
-    chartDatasetsRef.current = chartDatasets;
-  }, [chartDatasets]);
+  // [IMPORTANT] 차트 실질 데이터의 핵심 수치만 추출하여 업데이트 트리거로 활용
+  const dataValueKey = useMemo(() => {
+    const botValues = bots.map(b => `${b.id}:${b.sim_state?.equity || 0}:${b.sim_state?.total_return_pct || 0}`).join("|");
+    const btcVal = btcHistory.length > 0 ? btcHistory[btcHistory.length - 1] : 0;
+    return `${currentMetric}|${chartActiveAgent}|${botValues}|${btcVal}`;
+  }, [bots, btcHistory, currentMetric, chartActiveAgent]);
 
+  // 4. 차트 인스턴스 생성 (최초 및 ID 변경 시에만)
   useEffect(() => {
     if (!chartRef.current) return;
     const ctx = chartRef.current.getContext('2d');
-    if (!ctx) return;
+    if (!ctx || chartInstance.current) return;
+
     chartInstance.current = new Chart(ctx, {
       type: 'line',
       plugins: [{
@@ -224,23 +211,11 @@ export default function Dashboard() {
           const metas = chart.data.datasets.map((_, i) => chart.getDatasetMeta(i));
           metas.forEach((meta) => {
             if (meta.hidden || !meta.visible) return;
-            const lastPoint = meta.data[meta.data.length - 1];
-            if (lastPoint) {
-              const dataset = chart.data.datasets[meta.index];
-              const lastValue = dataset.data[dataset.data.length - 1] as number;
-              const avatar = dataset.label?.charAt(0) || "?";
-              const colorValue = Array.isArray(dataset.borderColor)
-                ? String(dataset.borderColor[0] ?? "")
-                : String(dataset.borderColor ?? "");
-
-              positions.push({
-                x: lastPoint.x,
-                y: lastPoint.y,
-                label: String(dataset.label ?? ""),
-                color: colorValue,
-                value: lastValue,
-                avatar,
-              });
+            const ds = chart.data.datasets[meta.index];
+            const lv = (ds.data as number[]).slice(-1)[0];
+            const lp = meta.data[meta.data.length - 1];
+            if (lp && lv !== undefined) {
+              positions.push({ x: lp.x, y: lp.y, label: String(ds.label ?? ""), color: String(ds.borderColor || ""), value: lv, avatar: (ds.label?.charAt(0) || "?") });
             }
           });
           if (!areLabelPositionsEqual(labelPositionsRef.current, positions)) {
@@ -249,37 +224,35 @@ export default function Dashboard() {
           }
         }
       }],
-      data: { labels, datasets: chartDatasetsRef.current },
+      data: { labels, datasets: buildDatasets() },
       options: {
         responsive: true, maintainAspectRatio: false,
-        layout: { padding: { right: 20, left: 10 } },
+        animation: { duration: 600 },
+        layout: { padding: { right: 40, left: 10 } },
         interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: 'rgba(6,9,18,0.95)',
-            padding: 12,
-            callbacks: {
-              title: items => `📅 ${items[0].label}`,
-              label: item => ` ${item.dataset.label}: ${Number(item.raw).toFixed(1)}`
-            }
-          }
-        },
+        plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(6,9,18,0.95)', padding: 12 } },
         scales: {
           x: { grid: { display: false }, ticks: { color: '#475569', font: { size: 10 } }, max: labels.length - 1 },
-          y: { grid: { color: 'rgba(255,255,255,0.02)' }, ticks: { color: '#475569', font: { size: 10 } } }
+          y: { position: 'left', grid: { color: 'rgba(255,255,255,0.02)' }, ticks: { color: '#475569', font: { size: 10 } } },
+          y1: { position: 'right', grid: { display: false }, ticks: { color: '#475569', font: { size: 10 } } }
         }
       }
     });
-    return () => chartInstance.current?.destroy();
-  }, [chartNames, runtimeAgentIdsKey]);
 
+    return () => {
+      chartInstance.current?.destroy();
+      chartInstance.current = null;
+    };
+  }, [runtimeAgentIdsKey]); // IDs가 바뀌면 어쩔 수 없이 재생성
+
+  // 5. 지표 변화 체크를 통한 실질 업데이트 (버벅거림 해결의 핵심)
   useEffect(() => {
     if (chartInstance.current) {
-      chartInstance.current.data.datasets = chartDatasets;
-      chartInstance.current.update('none'); // Update without animation to prevent bounce on tick
+      const newDs = buildDatasets();
+      chartInstance.current.data.datasets = newDs;
+      chartInstance.current.update('default');
     }
-  }, [chartDatasets]);
+  }, [dataValueKey]); // 단순 API 성공이 아니라 '수치'가 바뀌었을 때만 업데이트
 
   return (
     <>
@@ -297,8 +270,9 @@ export default function Dashboard() {
             progress={dashboardProgress ?? undefined}
             evolutionEvents={evolutionEvents}
             decisionLogs={decisionLogs}
+            botTrades={botTrades}
             automationStatus={automationStatus}
-            onToggleAutomation={handleToggleAutomation}
+            onToggleAutomation={toggleAutomation}
           />
         </PageLayout.Side>
 
@@ -313,19 +287,13 @@ export default function Dashboard() {
             <div className="flex flex-col gap-4 relative z-10">
               <MetricSelector />
 
-              <AgentsList
-                agentIds={runtimeAgentIds}
-                names={agentNames}
-                metrics={metricsData?.agents}
-              />
+              <div className="mt-2">
+                <BotList />
+              </div>
 
               <div className="flex flex-col min-h-0 gap-3 mt-2">
                 <ChartLegend names={chartNames} />
-                <PerformanceChart
-                  chartRef={chartRef}
-                  labelPositions={labelPositions}
-                  currentMetric={currentMetric}
-                />
+                <PerformanceChart chartRef={chartRef} labelPositions={labelPositions} currentMetric={currentMetric} />
               </div>
             </div>
           </div>

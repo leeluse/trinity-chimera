@@ -1,4 +1,5 @@
 """채팅 파이프라인 라우터 — INVOKE 감지 + 확인 흐름만 담당"""
+import asyncio
 import json
 import logging
 import os
@@ -6,7 +7,7 @@ import re
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from server.shared.llm.client import generate_chat_reply
+from server.shared.llm.client import generate_chat_reply, stream_chat_reply
 from server.shared.db.supabase import SupabaseManager
 from server.modules.engine.runtime import invalidate_strategy_cache
 from server.modules.chat.prompts import SYSTEM_PROMPT, CLASSIFICATION_SYSTEM, CLASSIFICATION_MESSAGE
@@ -307,6 +308,19 @@ class ChatHandler:
                 self._pending_stage_confirmations.pop(session_id, None)
                 return
 
+    _CONTINUATION_PATTERNS = re.compile(
+        r"^(이어서|계속|이어|이어가|마저|더\s*써|계속\s*써|이어\s*써|이어서\s*써|계속\s*이어|마저\s*써"
+        r"|이어줘|계속해줘|계속\s*해줘|이어\s*해줘|이어서\s*해줘|이어서\s*작성|계속\s*작성"
+        r"|나머지|나머지도|나머지\s*써|나머지\s*작성|계속해|이어가줘"
+        r")"
+        r"[\s\S]{0,30}$",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_continuation_request(cls, message: str) -> bool:
+        return bool(cls._CONTINUATION_PATTERNS.match((message or "").strip()))
+
     @staticmethod
     def _smalltalk_fast_reply(message: str) -> Optional[str]:
         text = (message or "").strip().lower()
@@ -331,6 +345,8 @@ class ChatHandler:
         session_id: str,
         context: Dict[str, Any],
         history: List[Dict[str, Any]],
+        force_chat_mode: bool = False,
+        chat_model: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         logger.info(
             "[chat] request start session=%s msg_len=%d history=%d ctx_keys=%s preview=%r",
@@ -342,6 +358,12 @@ class ChatHandler:
         )
         db = SupabaseManager()
         await db.save_chat_message(session_id, "user", message)
+
+        # ── force_chat_mode: 파이프라인 라우팅 완전 생략 ──────────────
+        if force_chat_mode:
+            async for ev in self._direct_chat_reply(message, session_id, context, history, db, model=chat_model):
+                yield ev
+            return
 
         # ── 스테이지 검토 대기 중 처리 ─────────────────────────────
         pending_stage = self._pending_stage_confirmations.get(session_id)
@@ -482,6 +504,13 @@ class ChatHandler:
             yield format_sse({"type": "done"})
             return
 
+        # ── 2b. 이어쓰기 요청 감지 ────────────────────────────────
+        if self._is_continuation_request(message):
+            logger.info("[chat] continuation request session=%s", session_id)
+            async for ev in self._execute_continuation(session_id, history, db):
+                yield ev
+            return
+
         # ── 3. 일반 대화 (LLM 응답) ─────────────────────────────
         logger.info("[chat] general response session=%s", session_id)
         try:
@@ -489,23 +518,6 @@ class ChatHandler:
                 general_timeout = float(os.getenv("CHAT_GENERAL_TIMEOUT", "120"))
             except Exception:
                 general_timeout = 120.0
-            try:
-                general_max_tokens = int(os.getenv("CHAT_GENERAL_MAX_TOKENS", "768"))
-            except Exception:
-                general_max_tokens = 768
-            general_max_tokens = max(128, general_max_tokens)
-            if self._looks_code_request(message):
-                try:
-                    code_max_tokens = int(os.getenv("CHAT_GENERAL_CODE_MAX_TOKENS", "2200"))
-                except Exception:
-                    code_max_tokens = 2200
-                try:
-                    code_timeout = float(os.getenv("CHAT_GENERAL_CODE_TIMEOUT", "180"))
-                except Exception:
-                    code_timeout = 180.0
-                general_max_tokens = max(general_max_tokens, max(512, code_max_tokens))
-                general_timeout = max(general_timeout, max(60.0, code_timeout))
-
             resp = await generate_chat_reply(
                 user_message=message,
                 context=context,
@@ -513,7 +525,6 @@ class ChatHandler:
                 model=(os.getenv("QUICK_MODEL") or None),
                 temperature=0.2,
                 timeout_sec=general_timeout,
-                max_tokens=general_max_tokens,
             )
             full_response = self._sanitize_chat_text(resp.get("content", "응답을 생성할 수 없습니다."))
 
@@ -593,6 +604,102 @@ class ChatHandler:
             yield format_sse({"type": "analysis", "content": f"응답 생성 중 오류: {e}"})
 
         yield format_sse({"type": "done"})
+
+    # ─────────────────────────────────────────────────────────────────
+    # 이어쓰기 (이전 응답 끝 부분을 기준으로 LLM이 이어서 생성)
+    # ─────────────────────────────────────────────────────────────────
+    async def _execute_continuation(
+        self, session_id: str, history: List[Dict[str, Any]], db
+    ) -> AsyncGenerator[str, None]:
+        # 히스토리에서 마지막 assistant 메시지 찾기
+        last_assistant = ""
+        for msg in reversed(history or []):
+            if msg.get("role") == "assistant" and str(msg.get("content") or "").strip():
+                last_assistant = str(msg["content"]).strip()
+                break
+        if not last_assistant:
+            # DB에서 fallback
+            db_history = await db.get_chat_history(session_id, 10)
+            for msg in reversed(db_history or []):
+                if msg.get("role") == "assistant" and str(msg.get("content") or "").strip():
+                    last_assistant = str(msg["content"]).strip()
+                    break
+
+        tail = last_assistant[-1200:] if len(last_assistant) > 1200 else last_assistant
+        continuation_system = (
+            "너는 직전 응답을 이어서 작성하는 전용 엔진이다.\n"
+            "규칙:\n"
+            "1. 이미 작성된 내용을 절대 반복하지 않는다.\n"
+            "2. 직전 응답의 마지막 문장/항목에서 자연스럽게 바로 이어 작성한다.\n"
+            "3. 설명, 인사, 메타 발화 없이 본문만 출력한다.\n"
+            "4. 형식(마크다운/표/코드 블록)이 있으면 그 형식을 유지한다.\n\n"
+            f"[직전 응답 끝부분]\n{tail}"
+        )
+        continuation_user = "이어서 작성해 주세요. 위 직전 응답에서 마지막으로 다룬 내용 다음부터 바로 시작하세요."
+
+        logger.info("[chat] continuation exec session=%s tail_len=%d", session_id, len(tail))
+        full = ""
+        try:
+            try:
+                max_tokens = int(os.getenv("CHAT_CONTINUATION_MAX_TOKENS", "4000"))
+            except Exception:
+                max_tokens = 4000
+            async for chunk in stream_chat_reply(
+                user_message=continuation_user,
+                context=None,
+                history=[],
+                custom_system_prompt=continuation_system,
+                temperature=0.2,
+                max_tokens=max_tokens,
+            ):
+                thought = chunk.get("thought")
+                content = chunk.get("content")
+                if thought:
+                    yield format_sse({"type": "thought", "content": thought})
+                if content:
+                    full += content
+                    yield format_sse({"type": "analysis", "content": content})
+            yield format_sse({"type": "done"})
+        finally:
+            # CancelledError(새로고침/연결 끊김) 포함 항상 저장
+            if full:
+                try:
+                    await asyncio.shield(db.save_chat_message(session_id, "assistant", full, "text"))
+                except Exception as e:
+                    logger.error("[chat] continuation save failed: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────
+    # 직접 채팅 응답 (파이프라인 라우팅 없음, force_chat_mode 전용)
+    # ─────────────────────────────────────────────────────────────────
+    async def _direct_chat_reply(
+        self, message, session_id, context, history, db, model: Optional[str] = None
+    ) -> AsyncGenerator[str, None]:
+        resolved_model = (model or os.getenv("LITELLM_MODEL") or os.getenv("OLLAMA_MODEL") or None)
+        logger.info("[chat] direct_chat_reply session=%s model=%s", session_id, resolved_model or "default")
+        full = ""
+        try:
+            async for chunk in stream_chat_reply(
+                user_message=message,
+                context=context,
+                history=history,
+                model=resolved_model,
+                temperature=0.3,
+            ):
+                thought = chunk.get("thought")
+                content = chunk.get("content")
+                if thought:
+                    yield format_sse({"type": "thought", "content": thought})
+                if content:
+                    full += content
+                    yield format_sse({"type": "analysis", "content": content})
+            yield format_sse({"type": "done"})
+        finally:
+            # CancelledError(새로고침/연결 끊김) 포함 항상 저장
+            if full:
+                try:
+                    await asyncio.shield(db.save_chat_message(session_id, "assistant", full, "text"))
+                except Exception as e:
+                    logger.error("[chat] direct_chat_reply save failed: %s", e)
 
     # ─────────────────────────────────────────────────────────────────
     # 일반 대화 + INVOKE 감지

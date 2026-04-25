@@ -32,89 +32,83 @@ export default function AgentCard({
   onClick,
 }: AgentCardProps) {
   const isPositiveSharpe = !sharpe.startsWith("-");
+
   const getStatusColor = (status?: string) => {
     switch (status) {
-      case 'active': return 'text-green-400';
-      case 'idle': return 'text-yellow-400';
-      case 'error': return 'text-red-400';
-      default: return 'text-slate-500';
+      case "active":
+        return "bg-[#50fa7b]"; // var(--accent-green)
+      case "idle":
+        return "bg-[#ffb86c]"; // var(--accent-orange)
+      case "error":
+        return "bg-[#ff5555]"; // var(--accent-red)
+      default:
+        return "bg-[#6272a4]"; // var(--text-muted)
     }
   };
 
-  const formatTimeAgo = (timestamp?: string) => {
-    if (!timestamp) return 'N/A';
-    const now = new Date();
-    const then = new Date(timestamp);
-    const diffMs = now.getTime() - then.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    return `${diffHours}h ago`;
-  };
+  const statusLabel =
+    status === "active" ? "Active" :
+      status === "idle" ? "Idle" :
+        status === "error" ? "Error" : "Unknown";
 
   return (
     <div
-      className={`relative overflow-hidden rounded-xl p-[14px] border ${isActive
-        ? "bg-white/[0.08] backdrop-blur-2xl border-white/20"
-        : "bg-white/[0.02] backdrop-blur-md border-white/[0.05]"
+      onClick={onClick}
+      className={`relative overflow-hidden cursor-pointer rounded-xl p-4 border transition-all duration-200 ${isActive
+        ? "bg-[#181835] border-[#bd93f9]/40" // var(--bg-hover) + purple border
+        : "bg-[#12122b]/60 border-[rgba(189,147,249,0.12)] hover:border-[rgba(189,147,249,0.25)]" // var(--bg-card) + var(--border)
         }`}
-      style={{
-        boxShadow: isActive ? `0 15px 35px -5px color-mix(in srgb, ${color}, transparent 80%), 0 20px 40px -15px rgba(0,0,0,0.3)` : 'none'
-      }}
     >
-      {/* Accent Glass Glow */}
-      {isActive && (
-        <div
-          className="absolute inset-x-0 top-0 h-24 opacity-20 pointer-events-none blur-3xl rounded-full"
-          style={{ background: `radial-gradient(circle at 50% 0%, ${color}, transparent 70%)` }}
-        />
-      )}
-
-      <div className="flex items-center gap-2 mb-3">
-        <div className="relative">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold"
-            style={{
-              backgroundColor: `color-mix(in srgb, ${color}, transparent 85%)`,
-              color: color,
-              border: `1px solid color-mix(in srgb, ${color}, transparent 80%)`
-            }}
-          >
-            {avatar}
-          </div>
-          {status && (
-            <div className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ${getStatusColor(status)}`}>
-              <div className={`w-full h-full rounded-full ${getStatusColor(status).replace('text-', 'bg-')} animate-pulse`} />
+      <div className="flex items-center justify-between pb-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="relative shrink-0">
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold"
+              style={{
+                backgroundColor: `color-mix(in srgb, ${color}, transparent 88%)`,
+                color,
+                border: `1px solid color-mix(in srgb, ${color}, transparent 80%)`,
+              }}
+            >
+              {avatar}
             </div>
-          )}
+            {status && (
+              <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#080812] ring-2 ring-[#080812]/90 flex items-center justify-center">
+                <span className={`w-1.5 h-1.5 rounded-full ${getStatusColor(status)}`} />
+              </div>
+            )}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-[#f8f8f2] truncate">{name}</p>
+            <p
+              className="text-[10px] font-medium mt-1 border rounded-sm px-2 py-0.5 leading-normal inline-block"
+              style={{ color, borderColor: `color-mix(in srgb, ${color}, transparent 75%)` }}
+            >
+              {strategy}
+            </p>
+          </div>
         </div>
-        <div className="flex flex-col">
-          <span className="text-[13px] font-bold tracking-tight" style={{ color }}>{name}</span>
-          {lastActive && (
-            <span className="text-[8px] text-slate-500 font-mono">
-              {formatTimeAgo(lastActive)}
-            </span>
-          )}
-        </div>
+        {status && (
+          <span className="text-[9px] font-bold uppercase tracking-widest text-[#6272a4] border border-white/5 rounded-md px-2 py-0.5">
+            {statusLabel}
+          </span>
+        )}
       </div>
 
-      <div className="text-[10px] text-[#4a5a7a] mb-3 font-mono truncate">{strategy}</div>
-
-      <div className="grid grid-cols-3 gap-1 pt-2.5">
+      <div className="grid grid-cols-3 gap-2 pt-3 border-t border-[rgba(189,147,249,0.08)]">
         <div className="flex flex-col">
-          <span className="text-[8px] text-[#4a5a7a] uppercase font-black tracking-tighter">Sharpe</span>
-          <span className={`text-[11px] font-black font-mono leading-none mt-1 ${isPositiveSharpe ? "text-[#4ade80]" : "text-[#fb7185]"}`}>
+          <span className="text-[9px] uppercase tracking-wider text-[#6272a4] font-semibold">Sharpe</span>
+          <span className={`text-[13px] font-bold font-mono leading-none mt-1.5 ${isPositiveSharpe ? "text-[#50fa7b]" : "text-[#ff5555]"}`}>
             {sharpe}
           </span>
         </div>
-        <div className="flex flex-col pl-2">
-          <span className="text-[8px] text-[#4a5a7a] uppercase font-black tracking-tighter">MDD</span>
-          <span className="text-[11px] font-black font-mono text-[#fb7185] leading-none mt-1">{mdd}</span>
+        <div className="flex flex-col">
+          <span className="text-[9px] uppercase tracking-wider text-[#6272a4] font-semibold">MDD</span>
+          <span className="text-[13px] font-bold font-mono text-[#ff5555] leading-none mt-1.5">{mdd}</span>
         </div>
-        <div className="flex flex-col pl-2">
-          <span className="text-[8px] text-[#4a5a7a] uppercase font-black tracking-tighter">Win%</span>
-          <span className="text-[11px] font-black font-mono text-slate-300 leading-none mt-1">{winRate}</span>
+        <div className="flex flex-col">
+          <span className="text-[9px] uppercase tracking-wider text-[#6272a4] font-semibold">Win%</span>
+          <span className="text-[13px] font-bold font-mono text-[#aeb9e1] leading-none mt-1.5">{winRate}</span>
         </div>
       </div>
     </div>
