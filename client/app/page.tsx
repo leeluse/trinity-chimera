@@ -239,7 +239,13 @@ function DashboardContent() {
 
       <PageLayout.Main>
         {isCrimeView ? (
-          <CrimeMainPanel />
+          <>
+            <PageHeader
+              statusText="Crime Hunter V5"
+              statusColor="blue"
+            />
+            <CrimeMainPanel />
+          </>
         ) : (
           <>
             <PageHeader
