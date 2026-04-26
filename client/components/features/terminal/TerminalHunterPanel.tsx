@@ -34,13 +34,28 @@ const INITIAL: HunterRuntimeSnapshot = {
 };
 
 export default function TerminalHunterPanel() {
-  const { setSelectedSymbol } = useTerminalStore();
+  const { setSelectedSymbol, setHunterRows, setHunterRegime, setHunterAlert } = useTerminalStore();
   const [tab, setTab] = useState<HunterTab>("lb");
   const [state, setState] = useState<HunterRuntimeSnapshot>(INITIAL);
   const runtimeRef = useRef<ReturnType<typeof mountHunterRuntime> | null>(null);
+  const prevRowsRef = useRef<import('./hunterRuntime').HunterRow[]>([]);
 
   useEffect(() => {
-    const runtime = mountHunterRuntime((snapshot) => setState(snapshot));
+    const runtime = mountHunterRuntime((snapshot) => {
+      setState(snapshot);
+      setHunterRows(snapshot.rows);
+      setHunterRegime(snapshot.regime);
+
+      // S2+ 신규 진입 감지 → alert
+      const prevMap = new Map(prevRowsRef.current.map((r) => [r.full, r.stage]));
+      for (const row of snapshot.rows) {
+        const prev = prevMap.get(row.full) ?? 0;
+        if (row.stage >= 2 && prev < 2) {
+          setHunterAlert({ sym: row.sym, full: row.full, stage: row.stage, dir: row.latchDir, ts: Date.now() });
+        }
+      }
+      prevRowsRef.current = snapshot.rows;
+    });
     runtimeRef.current = runtime;
 
     return () => {
