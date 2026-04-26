@@ -78,7 +78,10 @@ async def _with_progress_keepalive(events: AsyncGenerator[str, None]) -> AsyncGe
         if payload:
             event_type = str(payload.get("type") or "").strip().lower()
             if event_type == "stage":
-                active_stage = int(payload.get("stage") or 0)
+                try:
+                    active_stage = int(payload.get("stage") or 0)
+                except (ValueError, TypeError):
+                    active_stage = active_stage
                 active_label = str(payload.get("label") or active_label).strip() or active_label
                 active_started_at = time.monotonic()
             elif event_type == "status":

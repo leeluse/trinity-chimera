@@ -1,10 +1,8 @@
-'use client';
+"use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Chart from "chart.js/auto";
-import Head from "next/head";
-import { usePathname, useSearchParams } from "next/navigation";
 import {
   AGENT_IDS as DEFAULT_AGENT_IDS
 } from "../lib/api";
@@ -16,13 +14,12 @@ import {
   MetricSelector,
   BotList,
   ChartLegend,
-  PerformanceChart,
-  DashboardRightPanel
+  PerformanceChart
 } from "@/components";
+import { AppRightPanel } from "@/components/layout/AppRightPanel";
 
 // Externalized Constants/Types/Styles
 import { COLORS, NAMES } from "@/constants";
-import { MetricKey } from "@/types";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import { useDashboardQueries, useAgentTimeseries } from "@/hooks/useDashboardQueries";
 
@@ -65,22 +62,15 @@ function DashboardContent() {
   const chartInstance = useRef<Chart | null>(null);
   const currentMetric = useDashboardStore((state) => state.currentMetric);
   const chartActiveAgent = useDashboardStore((state) => state.chartActiveAgent);
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const view = (searchParams.get("view") || "").toLowerCase();
-  const isEvolutionView = pathname === "/" && view === "evolution";
-  const isLogsView = pathname === "/" && (view === "" || view === "logs");
 
   const [btcHistory, setBtcHistory] = useState<number[]>([]);
 
-  // 1. 실제 비트코인 히스토리 (Binance) - 지연 로딩으로 초기 렉 방지
   useEffect(() => {
     const fetchBtcData = async () => {
       try {
         const response = await fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=96');
         const klines = await response.json();
         const prices = klines.map((k: any) => parseFloat(k[4]));
-        // 초기 렌더링 부하를 줄이기 위해 약간의 지연 후 세팅
         setTimeout(() => setBtcHistory(prices), 300);
       } catch (err) {
         console.error("Failed to fetch BTC history:", err);
@@ -102,13 +92,12 @@ function DashboardContent() {
     dashboardProgress,
     toggleAutomation
   } = useDashboardQueries({
-    enableEvolutionLogs: isEvolutionView,
-    enableDecisionLogs: isLogsView,
+    enableEvolutionLogs: true,
+    enableDecisionLogs: true,
     statsIntervalMs: 6000,
     logsIntervalMs: 8000,
   });
 
-  // 2. 에이전트 ID 목록 (정렬하여 차트 고정)
   const runtimeAgentIds = useMemo(() => {
     let rawIds: string[] = [];
     if (bots && bots.length > 0) {
@@ -140,9 +129,7 @@ function DashboardContent() {
 
   const chartNames = useMemo(() => [...agentNames, "BTC BnH"], [agentNames]);
 
-  // 3. 차트 데이터셋 생성 로직 (참조 최적화)
   const buildDatasets = useCallback(() => {
-    const botIds = bots.map((b: any) => b.id);
     const ids = [...runtimeAgentIds, 'BTC BnH'];
     
     return ids.map((id, i) => {
@@ -191,14 +178,12 @@ function DashboardContent() {
     });
   }, [runtimeAgentIds, currentMetric, btcHistory, bots, timeseriesData, chartActiveAgent]);
 
-  // [IMPORTANT] 차트 실질 데이터의 핵심 수치만 추출하여 업데이트 트리거로 활용
   const dataValueKey = useMemo(() => {
     const botValues = bots.map(b => `${b.id}:${b.sim_state?.equity || 0}:${b.sim_state?.total_return_pct || 0}`).join("|");
     const btcVal = btcHistory.length > 0 ? btcHistory[btcHistory.length - 1] : 0;
     return `${currentMetric}|${chartActiveAgent}|${botValues}|${btcVal}`;
   }, [bots, btcHistory, currentMetric, chartActiveAgent]);
 
-  // 4. 차트 인스턴스 생성 (최초 및 ID 변경 시에만)
   useEffect(() => {
     if (!chartRef.current) return;
     const ctx = chartRef.current.getContext('2d');
@@ -245,79 +230,64 @@ function DashboardContent() {
       chartInstance.current?.destroy();
       chartInstance.current = null;
     };
-  }, [runtimeAgentIdsKey]); // IDs가 바뀌면 어쩔 수 없이 재생성
+  }, [runtimeAgentIdsKey, buildDatasets]);
 
-  // 5. 지표 변화 체크를 통한 실질 업데이트 (버벅거림 해결의 핵심)
   useEffect(() => {
     if (chartInstance.current) {
       const newDs = buildDatasets();
       chartInstance.current.data.datasets = newDs;
       chartInstance.current.update('default');
     }
-  }, [dataValueKey]); // 단순 API 성공이 아니라 '수치'가 바뀌었을 때만 업데이트
+  }, [dataValueKey, buildDatasets]);
 
   return (
-    <>
-      <Head>
-        <title>Trinity AI Trading Dashboard</title>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-      </Head>
+    <PageLayout>
+      <PageLayout.Side>
+        <AppRightPanel
+          agentIds={runtimeAgentIds}
+          names={agentNames}
+          metricsData={metricsData}
+          evolutionEvents={evolutionEvents}
+          decisionLogs={decisionLogs}
+          botTrades={botTrades}
+          automationStatus={automationStatus}
+          onToggleAutomation={toggleAutomation}
+        />
+      </PageLayout.Side>
 
-      <PageLayout>
-        <PageLayout.Side>
-          <DashboardRightPanel
-            agentIds={runtimeAgentIds}
-            names={agentNames}
-            metricsData={metricsData ?? undefined}
-            progress={dashboardProgress ?? undefined}
-            evolutionEvents={evolutionEvents}
-            decisionLogs={decisionLogs}
-            botTrades={botTrades}
-            automationStatus={automationStatus}
-            onToggleAutomation={toggleAutomation}
-          />
-        </PageLayout.Side>
+      <PageLayout.Main>
+        <PageHeader
+          isLoading={isLoadingInitial}
+          statusText={dashboardProgress ? `${dashboardProgress.active_improvements}개 개선 진행` : 'System Live'}
+          statusColor={(dashboardProgress?.active_improvements || 0) > 0 ? "blue" : "green"}
+        />
 
-        <PageLayout.Main>
-          <PageHeader
-            isLoading={isLoadingInitial}
-            statusText={dashboardProgress ? `${dashboardProgress.active_improvements}개 개선 진행` : 'System Live'}
-            statusColor={(dashboardProgress?.active_improvements || 0) > 0 ? "blue" : "green"}
-          />
+        <div className="relative px-6 py-2">
+          <div className="flex flex-col gap-4 relative z-10">
+            <MetricSelector />
 
-          <div className="relative px-6 py-2">
-            <div className="flex flex-col gap-4 relative z-10">
-              <MetricSelector />
+            <div className="mt-2">
+              <BotList 
+                bots={bots} 
+                onRefresh={() => queryClient.invalidateQueries({ queryKey: ["dashboard", "bots"] })} 
+              />
+            </div>
 
-              <div className="mt-2">
-                <BotList 
-                  bots={bots} 
-                  onRefresh={() => queryClient.invalidateQueries({ queryKey: ["dashboard", "bots"] })} 
-                />
-              </div>
-
-              <div className="flex flex-col min-h-0 gap-3 mt-2">
-                <ChartLegend names={chartNames} />
-                <PerformanceChart chartRef={chartRef} labelPositions={labelPositions} currentMetric={currentMetric} />
-              </div>
+            <div className="flex flex-col min-h-0 gap-3 mt-2">
+              <ChartLegend names={chartNames} />
+              <PerformanceChart chartRef={chartRef} labelPositions={labelPositions} currentMetric={currentMetric} />
             </div>
           </div>
-        </PageLayout.Main>
-      </PageLayout>
-    </>
+        </div>
+      </PageLayout.Main>
+    </PageLayout>
   );
 }
 
 export default function Dashboard() {
   return (
-    <>
-      <Head>
-        <title>Trinity AI Trading Dashboard</title>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-      </Head>
-      <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-background text-white">동기화 중...</div>}>
-        <DashboardContent />
-      </Suspense>
-    </>
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-background text-white">동기화 중...</div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }

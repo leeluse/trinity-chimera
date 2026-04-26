@@ -36,7 +36,8 @@
       "Bash(git commit -m 'fix: pass originalMessage to handleCodeGenModeChoice in button click handler *)",
       "Bash(curl -s http://192.168.0.3:4000/v1/models -H \"Authorization: Bearer sk-dummy\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('server/modules/chat/handler.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(curl -s http://192.168.0.3:4000/v1/models)"
+      "Bash(curl -s http://192.168.0.3:4000/v1/models)",
+      "Bash(python -m py_compile server/modules/chat/skills/pipeline_optimize.py)"
     ],
     "tools": "dontAsk",
     "commands": "dontAsk",

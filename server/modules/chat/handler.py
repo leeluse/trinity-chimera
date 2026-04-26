@@ -16,6 +16,7 @@ from server.modules.chat.skills import (
     run_create_pipeline,
     run_modify_pipeline,
     run_backtest,
+    run_optimize_pipeline,
     get_last_strategy,
     format_sse,
     NO_CONFIRM_SKILLS,
@@ -30,20 +31,23 @@ INTENT_CREATE    = "STRATEGY_CREATE"
 INTENT_MODIFY    = "STRATEGY_MODIFY"
 INTENT_EVOLVE    = "STRATEGY_EVOLVE"
 INTENT_BACKTEST  = "STRATEGY_BACKTEST"
+INTENT_OPTIMIZE  = "PARAM_OPTIMIZE"
 
 _INTENT_LABEL = {
     INTENT_CREATE:   "전략 생성 파이프라인",
     INTENT_MODIFY:   "전략 수정 파이프라인",
     INTENT_EVOLVE:   "에볼루션 채굴 파이프라인",
     INTENT_BACKTEST: "백테스트",
+    INTENT_OPTIMIZE: "파라미터 최적화 파이프라인",
 }
 
 # ── INVOKE 마커 매핑 ──────────────────────────────────────────────
 _INVOKE_MAP = {
-    "CREATE_STRATEGY": INTENT_CREATE,
-    "MODIFY_STRATEGY": INTENT_MODIFY,
-    "RUN_BACKTEST":    INTENT_BACKTEST,
-    "RUN_EVOLUTION":   INTENT_EVOLVE,
+    "CREATE_STRATEGY":  INTENT_CREATE,
+    "MODIFY_STRATEGY":  INTENT_MODIFY,
+    "RUN_BACKTEST":     INTENT_BACKTEST,
+    "RUN_EVOLUTION":    INTENT_EVOLVE,
+    "OPTIMIZE_PARAMS":  INTENT_OPTIMIZE,
 }
 _INVOKE_RE = re.compile(r'\[INVOKE:(\w+)\]')
 _THINK_BLOCK_RE = re.compile(r"<(thought|think|think_process|reasoning)>[\s\S]*?</\1>", re.IGNORECASE)
@@ -56,6 +60,12 @@ _CONTINUATION_META_RE = re.compile(
 
 # 빠른 규칙 기반 분류 (LLM 없이 ~95% 커버)
 _KEYWORD_INTENT_MAP = {
+    "OPTIMIZE_PARAMS": [
+        r"파라미터\s*(최적화|튜닝|찾아|탐색)",
+        r"(최적|좋은|나은)\s*파라미터",
+        r"(하이퍼파라미터|hyperparameter)",
+        r"파라미터.{0,10}(개선|바꿔|조정)",
+    ],
     "CREATE_STRATEGY": [
         r"(전략|트레이딩|시스템)\s*(짜|만들|생성|구축|설계|개발|작성|코딩|구현)",
         r"(매매|거래)\s*(로직|지표|조건)\s*(만들|짜)",
@@ -137,6 +147,8 @@ class ChatHandler:
         if not cls._env_enabled("CHAT_PIPELINE_CONFIRM_ENABLED", True):
             return False
         if intent == INTENT_MODIFY and cls._env_enabled("CHAT_MODIFY_AUTO_RUN", True):
+            return False
+        if intent == INTENT_OPTIMIZE:
             return False
         return True
 
@@ -857,6 +869,14 @@ class ChatHandler:
             else:
                 yield format_sse({"type": "analysis", "content": "백테스트할 전략이 없습니다."})
             yield format_sse({"type": "done"})
+        elif intent == INTENT_OPTIMIZE:
+            prev = await get_last_strategy(session_id, db, sm)
+            if prev:
+                async for ev in run_optimize_pipeline(message, context, prev.get("code", ""), sm.get(session_id, {})):
+                    yield ev
+            else:
+                yield format_sse({"type": "error", "content": "❌ 최적화할 전략이 없습니다. 먼저 전략을 생성해주세요."})
+            yield format_sse({"type": "done"})
         logger.info("[chat] pipeline end session=%s intent=%s", session_id, intent)
 
     # ─────────────────────────────────────────────────────────────────
@@ -869,6 +889,7 @@ class ChatHandler:
             INTENT_MODIFY:   f"'{prev.get('title', '이전 전략')}' 수정 파이프라인을 실행할까요?" if prev else "",
             INTENT_EVOLVE:   "에볼루션 채굴 파이프라인(WFO + Monte Carlo)을 실행할까요?\n⚠️ 수 분 소요.",
             INTENT_BACKTEST: "이전에 생성된 전략으로 백테스트를 실행할까요?",
+            INTENT_OPTIMIZE: "현재 전략의 파라미터를 최적화할까요?",
         }
         body = base_msgs.get(intent, "파이프라인을 실행할까요?")
         if intent in {INTENT_CREATE, INTENT_MODIFY, INTENT_EVOLVE}:

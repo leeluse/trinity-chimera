@@ -3698,6 +3698,44 @@
         "sharpe_ratio": -5.654248534317666,
         "trinity_score": 37.373512722522904
       }
+    },
+    {
+      "time": "2026-04-26T01:49:12Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.259 < 0.350; profit_factor 0.395 < 1.050; total_return -0.788 < -0.100; |max_drawdown| 0.810 > 0.350; sharpe_ratio -6.081 < -0.100",
+      "reason_tag": "mdd_exceeded",
+      "fingerprint": "4ca0e971077330a95297c0a7220214787a20ba10c5b4c2642dc1dd1408a80969",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.2593516209476309,
+        "profit_factor": 0.39512857804753376,
+        "total_return": -0.788489207237729,
+        "max_drawdown": -0.8102044938603578,
+        "total_trades": 401,
+        "sharpe_ratio": -6.080979524027987,
+        "trinity_score": 0.0
+      }
+    },
+    {
+      "time": "2026-04-26T01:50:38Z",
+      "agent_id": "chat_global",
+      "status": "rejected_chat_gate",
+      "stage": "chat_backtest",
+      "reason": "win_rate 0.234 < 0.350; profit_factor 0.500 < 1.050; total_return -0.675 < -0.100; |max_drawdown| 0.728 > 0.350; sharpe_ratio -3.193 < -0.100",
+      "reason_tag": "mdd_exceeded",
+      "fingerprint": "38badcf5f89e2238861a547e4cbf1ff0d47160a994ebf0b80e3e2cfce4a65836",
+      "mutation_hint": "entry_quality",
+      "metrics": {
+        "win_rate": 0.2344322344322344,
+        "profit_factor": 0.500261126238238,
+        "total_return": -0.6754255481618641,
+        "max_drawdown": -0.727813940769373,
+        "total_trades": 273,
+        "sharpe_ratio": -3.1930202235380127,
+        "trinity_score": 0.0
+      }
     }
   ],
   "accepted": []

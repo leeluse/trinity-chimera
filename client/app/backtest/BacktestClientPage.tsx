@@ -12,7 +12,6 @@ import {
   StatsGrid,
   AiAnalysisModal,
   BacktestChart,
-  BacktestRightPanel,
   BacktestHeader,
   EquityChart,
   StrategyCodeSection,
@@ -20,12 +19,12 @@ import {
   TradeAnalysis,
   ExecutionLog
 } from "@/components";
-
+import { AppRightPanel } from "@/components/layout/AppRightPanel";
 import { useDashboardQueries } from "@/hooks/useDashboardQueries";
 
 // Externalized
 import { Results, TimeFrame } from "@/types/backtest";
-import { cardClass, ambientGlows } from "@/styles/common";
+import { cardClass } from "@/styles/common";
 
 const parseResults = (payload: any): Results => ({
   netProfitAmt: Number(payload?.results?.total_pnl ?? 0),
@@ -41,7 +40,6 @@ const parseResults = (payload: any): Results => ({
   lossCount: Number(payload?.results?.loss_count ?? 0),
   trades: payload?.trades || [],
   markers: payload?.markers || [],
-  // Extended
   sortinoRatio: Number(payload?.results?.sortino_ratio ?? 0),
   calmarRatio: Number(payload?.results?.calmar_ratio ?? 0),
   alphaReturn: Number(payload?.results?.alpha ?? 0),
@@ -52,7 +50,6 @@ const parseResults = (payload: any): Results => ({
   shortReturn: Number(payload?.results?.short_return ?? 0),
   shortPF: Number(payload?.results?.short_pf ?? 0),
   expectedReturn: Number(payload?.results?.expected_return ?? 0),
-  // Trade Analysis
   avgProfitPct: Number(payload?.results?.avg_profit ?? 0),
   avgLossPct: Number(payload?.results?.avg_loss ?? 0),
   maxConsecutiveWins: Number(payload?.results?.max_consecutive_wins ?? 0),
@@ -64,13 +61,10 @@ const parseResults = (payload: any): Results => ({
 });
 
 export default function BacktestPage() {
-  const today = useMemo(() => new Date(), []);
-  const defaultStart = useMemo(() => { const d = new Date(today); d.setDate(d.getDate() - 90); return d; }, [today]);
-
   const [activeAgent, setActiveAgent] = useState("ALL");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [timeFrame, setTimeFrame] = useState<TimeFrame>("1h");
-  const [strategy, setStrategy] = useState(""); // Start with empty, will be set on load
+  const [strategy, setStrategy] = useState("");
   const [strategies, setStrategies] = useState<any[]>([]);
   const [startDate, setStartDate] = useState("2024-01-01");
   const [endDate, setEndDate] = useState("2024-04-15");
@@ -105,14 +99,7 @@ export default function BacktestPage() {
       }
     };
     void loadStrategies();
-  }, []);
-
-  // Removed automatic code clearing on strategy change to preserve AI-generated code
-  /*
-  useEffect(() => {
-    setStrategyCode("");
   }, [strategy]);
-  */
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -167,7 +154,6 @@ export default function BacktestPage() {
   const handleStartTest = async () => {
     setLoading(true);
     try {
-      // If the strategy name is not in the list, or it's a code-focused tab, we send the code directly
       const isKnown = strategies.some(s => s.key === strategy);
       const params = new URLSearchParams({ 
         symbol, 
@@ -181,7 +167,6 @@ export default function BacktestPage() {
       if (!isKnown && strategyCode) {
         params.append("code", strategyCode);
       } else if (strategyCode) {
-        // Even for known strategies, if there's modified code in editor, we use it
         params.append("code", strategyCode);
       }
 
@@ -214,7 +199,6 @@ export default function BacktestPage() {
       const data = await res.json();
       if (data.success) {
         alert(`✅ 전략이 성공적으로 배포되었습니다!\nID: ${data.strategy_key}`);
-        // Refresh strategy list
         const sRes = await fetchWithBypass("/api/backtest/strategies");
         const sData = await sRes.json();
         if (sData.success) {
@@ -232,21 +216,16 @@ export default function BacktestPage() {
   };
 
   const applyGeneratedCode = (code: string, name?: string, payload?: any) => {
-    // 1. Apply code
     setStrategyCode(code);
     if (name) {
       setStrategy(name); 
     }
-    
-    // 2. Apply backtest results if present
     if (payload) {
       applyBacktestPayload(payload);
-      setActiveTab("지표"); // "지표" 탭으로 자동 전환하여 통계/차트 요약 표시
+      setActiveTab("지표");
     } else {
-      setActiveTab("코드"); // Switch to code if no results yet
+      setActiveTab("코드");
     }
-
-    // 3. Scroll to editor if needed
     setTimeout(() => {
       codeSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 100);
@@ -272,11 +251,9 @@ export default function BacktestPage() {
     }
   };
 
-  // Automatically load code when strategy changes (if it's an official strategy)
   useEffect(() => {
     if (strategy && strategies.length > 0) {
       const isKnown = strategies.some(s => s.key === strategy);
-      // We only auto-load if it's a known official strategy
       if (isKnown) {
         void loadStrategyCode(strategy);
       }
@@ -285,8 +262,6 @@ export default function BacktestPage() {
 
   const handleTabChange = async (tab: string) => {
     setActiveTab(tab);
-    
-    // Fallback in case code didn't load during strategy change
     if (tab === "코드" && (!strategyCode || strategyCode.startsWith("// Error"))) {
       void loadStrategyCode(strategy);
     }
@@ -297,7 +272,6 @@ export default function BacktestPage() {
       alert("복사할 결과가 없습니다.");
       return;
     }
-    // Filter out complex objects like trades, markers, equityCurve for a clean metrics JSON
     const { trades: _, markers: __, equityCurve: ___, ...metrics } = results;
     const json = JSON.stringify(metrics, null, 2);
     navigator.clipboard.writeText(json)
@@ -310,25 +284,40 @@ export default function BacktestPage() {
 
   const fmtMoney = (v: number) => `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  const backtestContext = useMemo(() => ({
+    symbol,
+    timeframe: timeFrame,
+    start_date: startDate,
+    end_date: endDate,
+    netProfitAmt: results?.netProfitAmt,
+    total_return: results?.totalReturnNum,
+    winRate: results?.winRateNum,
+    maxDrawdown: results?.mddPct,
+    sharpe: results?.sharpeRatio,
+    profitFactor: results?.profitFactor,
+    trades: results?.totalTradesCount,
+    strategy: strategy,
+    strategy_title: strategy,
+    editor_code: strategyCode,
+    current_strategy: {
+      title: strategy,
+      code: strategyCode,
+    },
+  }), [symbol, timeFrame, startDate, endDate, results, strategy, strategyCode]);
+
   return (
     <PageLayout rightWidth="lg:w-[400px]">
       <PageLayout.Side>
-        <BacktestRightPanel
-          activeAgent={activeAgent}
-          setActiveAgent={setActiveAgent}
-          symbol={symbol}
-          timeframe={timeFrame}
-          startDate={startDate}
-          endDate={endDate}
-          currentStrategyCode={strategyCode}
-          currentStrategyName={strategy}
-          results={results}
-          onBacktestGenerated={applyBacktestPayload}
-          onApplyCode={applyGeneratedCode}
+        <AppRightPanel
+          agentIds={[]}
+          names={[]}
           evolutionEvents={evolutionEvents}
           decisionLogs={decisionLogs}
           automationStatus={automationStatus}
           onToggleAutomation={toggleAutomation}
+          backtestContext={backtestContext}
+          onBacktestGenerated={applyBacktestPayload}
+          onApplyCode={applyGeneratedCode}
         />
       </PageLayout.Side>
 
@@ -339,7 +328,7 @@ export default function BacktestPage() {
         />
 
         <div className="flex flex-col flex-1 relative p-4 overflow-hidden">
-          <div className="flex flex-col gap-4 relative z-10 overflow-y-auto custom-scrollbar pr-1">
+          <div className="flex flex-col gap-4 relative z-10 overflow-y-auto no-scrollbar pr-1">
             <BacktestChart
               chartContainerRef={chartContainerRef}
               results={results}
@@ -367,7 +356,6 @@ export default function BacktestPage() {
               <>
                 <StatsGrid results={results} fmtMoney={fmtMoney} />
                 <EquityChart results={results} />
-                {/* 1:1 Grid Results Layout */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full max-w-[1600px] mx-auto">
                   <PerformanceDetails results={results} />
                   <TradeAnalysis results={results} />

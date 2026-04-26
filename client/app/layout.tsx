@@ -1,16 +1,18 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
+import { NavigationSidebar } from "@/components/layout/NavigationSidebar";
+import { Toaster } from "@/components/ui/toaster";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
   subsets: ["latin"],
+  variable: "--font-inter",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
+  variable: "--font-mono",
 });
 
 export const metadata: Metadata = {
@@ -21,8 +23,6 @@ export const metadata: Metadata = {
   },
 };
 
-import { Toaster } from "@/components/ui/toaster";
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -31,11 +31,14 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${inter.variable} ${jetbrainsMono.variable} h-full antialiased dark`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex bg-background text-foreground selection:bg-primary/20 selection:text-primary">
         <Providers>
-          {children}
+          <NavigationSidebar />
+          <div className="flex-1 min-w-0">
+            {children}
+          </div>
           <Toaster />
         </Providers>
       </body>
