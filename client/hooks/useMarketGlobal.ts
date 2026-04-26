@@ -4,11 +4,21 @@ import { useState, useEffect, useRef } from "react";
 import { MarketGlobal } from "@/app/scanner/types";
 
 const POLL_MS = 5 * 60 * 1000;
+const PROXY = "https://api.allorigins.win/get?url=";
 
 async function jFetch(url: string): Promise<unknown> {
   const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!r.ok) throw new Error(`API error: ${r.status}`);
   return r.json();
+}
+
+async function pFetch(url: string): Promise<unknown> {
+  const r = await fetch(`${PROXY}${encodeURIComponent(url)}`, {
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!r.ok) throw new Error(`Proxy error: ${r.status}`);
+  const d = await r.json() as { contents: string };
+  return JSON.parse(d.contents);
 }
 
 function fearGreedLabel(v: number): string {
@@ -45,7 +55,7 @@ export function useMarketGlobal() {
         jFetch("https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=krw"),
         jFetch("https://api.blockchain.info/stats"),
         jFetch("https://mempool.space/api/v1/fees/recommended"),
-        jFetch("https://api.bithumb.com/public/ticker/BTC_KRW"),
+        pFetch("https://api.bithumb.com/public/ticker/BTC_KRW"),
         jFetch("https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT"),
       ]);
 
@@ -73,7 +83,7 @@ export function useMarketGlobal() {
       if (bithR.status === "fulfilled" && btcBinancePrice.current > 0) {
         const bithKrw = parseFloat((bithR.value as any)?.data?.closing_price ?? "0");
         if (bithKrw > 0) {
-          next.btcKrwKimchi = ((bithKrw / (btcBinancePrice.current * usdKrwRate)) - 1) * 100;
+          next.btcKrwKimchi = +((bithKrw / (btcBinancePrice.current * usdKrwRate) - 1) * 100).toFixed(2);
         }
       }
 
