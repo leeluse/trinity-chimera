@@ -37,8 +37,8 @@ export default function PageLayout({
   }
 
   return (
-    <div className="min-h-screen transition-colors duration-300">
-      <main className={`ml-[72px] ${fullHeight ? 'h-screen' : 'min-h-screen'} flex flex-col overflow-hidden`}>
+    <div className="w-full min-h-screen transition-colors duration-300">
+      <main className={`${fullHeight ? 'h-screen' : 'min-h-screen'} w-full flex flex-col overflow-hidden`}>
         <div className={`flex flex-col lg:flex-row flex-1 min-h-0 overflow-hidden`}>
           {/* Main Content Area */}
           <div className={`flex-1 min-w-0 overflow-y-auto no-scrollbar`}>

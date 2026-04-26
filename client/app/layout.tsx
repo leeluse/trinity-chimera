@@ -35,10 +35,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex bg-background text-foreground selection:bg-primary/20 selection:text-primary">
         <Providers>
-          <NavigationSidebar />
-          <div className="flex-1 min-w-0">
-            {children}
-          </div>
+          {children}
           <Toaster />
         </Providers>
       </body>

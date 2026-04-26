@@ -82,7 +82,7 @@ export function CandidateRow({
         </td>
         <td className="px-3 py-3">
           <div className="flex gap-1 flex-wrap">
-            {SIGNAL_META.filter(({ key }) => c.signals[key]?.score > 40).map(({ key, emoji }) => (
+            {SIGNAL_META.filter(({ key }: { key: string }) => c.signals[key]?.score > 40).map(({ key, emoji }: { key: string; emoji: string }) => (
               <span
                 key={key}
                 className="inline-flex items-center justify-center w-5 h-5 text-xs bg-white/5 border border-white/10 rounded-sm cursor-help hover:bg-white/10 transition-colors"
@@ -91,7 +91,7 @@ export function CandidateRow({
                 {emoji}
               </span>
             ))}
-            {SIGNAL_META.filter(({ key }) => c.signals[key]?.score > 40).length === 0 && (
+            {SIGNAL_META.filter(({ key }: { key: string }) => c.signals[key]?.score > 40).length === 0 && (
               <span className="text-muted-foreground/30 text-[10px] tracking-[0.1em]">—</span>
             )}
           </div>
@@ -132,7 +132,7 @@ export function CandidateRow({
             <div className="border-t border-white/5 pt-5">
               <div className="font-mono text-[9px] tracking-[0.3em] text-muted-foreground/40 uppercase mb-4 pl-1">Signal Breakdown</div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
-                {SIGNAL_META.map(({ key, emoji, name, color }) => (
+                {SIGNAL_META.map(({ key, emoji, name, color }: { key: string; emoji: string; name: string; color: string }) => (
                   <SignalBar key={key} label={`${emoji} ${name}`} value={c.signals[key].score} note={c.signals[key].note} color={color} />
                 ))}
               </div>

@@ -11,9 +11,9 @@ export const MetricSelector = ({ }: MetricSelectorProps) => {
   return (
     <div className="flex items-center justify-between pt-3">
       <div className="flex gap-1 overflow-x-auto no-scrollbar">
-        {(Object.keys(HINT_MAP) as MetricKey[]).map((m) => (
+        {(Object.keys(HINT_MAP) as MetricKey[]).map((m: MetricKey) => (
           <button
-            key={m}
+            key={String(m)}
             className={`px-3 py-1 text-[11px] font-bold tracking-tight transition-all rounded-lg whitespace-nowrap border ${currentMetric === m
               ? 'bg-indigo-600/20 text-indigo-400 border-indigo-500/30'
               : 'text-slate-500 border-transparent hover:text-slate-300'

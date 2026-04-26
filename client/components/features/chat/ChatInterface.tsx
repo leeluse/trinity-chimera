@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from 'rehype-raw';
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown } from "lucide-react";
+import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown, Copy, Check } from "lucide-react";
 import { fetchWithBypass } from "@/lib/api";
 
 interface ChatMessage {
@@ -52,6 +52,62 @@ const formatChatRunError = (error: unknown): string => {
   return "알 수 없는 오류";
 };
 
+// [UI] 커스텀 마크다운 코드 블록 (복사 버튼 포함)
+interface CodeBlockProps {
+  node?: any;
+  inline?: boolean;
+  className?: string;
+  children: React.ReactNode;
+  [key: string]: any;
+}
+
+const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockProps) => {
+  const [copied, setCopied] = useState(false);
+  const codeValue = String(children).replace(/\n$/, "");
+  // language- 가 없거나 inline인 경우 버튼 제외
+  const isInline = !!(inline || !className?.includes('language-'));
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(codeValue);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  if (isInline) {
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  }
+
+  return (
+    <div className="relative group/code">
+      <button
+        onClick={handleCopy}
+        className="absolute right-3 top-3 p-2 rounded-lg bg-white/10 border border-white/10 text-slate-400 opacity-0 group-hover/code:opacity-100 hover:bg-white/20 hover:text-white transition-all z-20 backdrop-blur-md"
+        title="코드 복사"
+      >
+        {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+      </button>
+      <code className={className} {...props}>
+        {children}
+      </code>
+    </div>
+  );
+};
+
+const MarkdownComponents = {
+  pre: ({ children }: { children: React.ReactNode }) => {
+    return (
+      <pre className="relative mb-4 last:mb-0 overflow-visible">
+        {children}
+      </pre>
+    );
+  },
+  code: CodeBlock
+};
+
 // [PERF] Memoized individual message item to prevent re-rendering of entire list during streaming
 const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoiceSelect, onDesignCodeRequest }: {
   msg: ChatMessage,
@@ -65,26 +121,24 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
   let thinkingContent = "";
   let isThinkingStreaming = false;
 
-  // thought 타입: 스트리밍 중 = 열림, 완료 후 = 자동 접힌
+  // thought 타입: 스트리밍 중 = 열림, 완료 후 = 자동 접힘
   if (msg.role === 'assistant' && msg.type === 'thought') {
     thinkingContent = (msg.content || "").replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '').trim();
     mainContent = "";
-    isThinkingStreaming = !!isStreaming; // 스트리밍 중이면 true
-  } else if (msg.role === 'assistant' && msg.type === 'text') {
-    // text 타입 내 <think> 태그 파싱
-    const closedMatch = mainContent.match(/<(thought|think|think_process|reasoning)>([\/\s\S]*?)<\/\1>/i);
-    const streamingMatch = mainContent.match(/<(thought|think|think_process|reasoning)>([\/\s\S]*)$/i);
-
-    if (closedMatch) {
-      thinkingContent = closedMatch[2].trim();
-      mainContent = mainContent.replace(closedMatch[0], "").trim();
-    } else if (streamingMatch) {
-      thinkingContent = streamingMatch[2].replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '').trim();
-      mainContent = mainContent.replace(streamingMatch[0], "").trim();
-      isThinkingStreaming = true;
+  } else if (msg.role === 'assistant') {
+    // text 타입 내 <think> 태그 파싱 (대소문자 무관, 공백 허용)
+    const thoughtRegex = /<(thought|think|think_process|reasoning)>([\s\S]*?)(?:<\/\1>|$)/gi;
+    const match = thoughtRegex.exec(msg.content || "");
+    
+    if (match) {
+      thinkingContent = match[2].trim();
+      mainContent = (msg.content || "").replace(match[0], "").trim();
+    } else {
+      mainContent = msg.content || "";
     }
-    mainContent = mainContent.replace(/<\/?(thought|think|think_process|reasoning)[^>]*>/gi, '').trim();
   }
+
+  isThinkingStreaming = !!isStreaming && !!thinkingContent;
 
   // 자동 스크롤: thought 컨텐츠 div ref
   const thoughtScrollRef = useRef<HTMLDivElement>(null);
@@ -97,68 +151,49 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
   const displayThinkingContent = thinkingContent;
 
   return (
-    <div className={`flex flex-col py-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+    <div className={`flex flex-col py-3 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
       {msg.role === 'user' ? (
-        <div className="bg-purple-600/20 border border-purple-500/20 rounded-2xl px-4 py-2 max-w-[85%] text-sm text-purple-100 shadow-sm animate-in slide-in-from-right-2 duration-300">
-          {msg.content}
+        <div className="bg-purple-600/20 border border-purple-500/20 rounded-2xl px-4 py-2.5 max-w-[85%] text-[12px] text-purple-100 shadow-sm animate-in slide-in-from-right-2 duration-300 markdown-content">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeRaw]}
+            components={MarkdownComponents}
+          >
+            {msg.content}
+          </ReactMarkdown>
         </div>
       ) : (
         <div className="w-full space-y-4 animate-in fade-in duration-500">
             {msg.type === 'invocation' && (
-              <div className="flex flex-col gap-1.5 mb-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-                  <Zap size={14} className="text-blue-400 fill-blue-400/20" />
-                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">분류됨: {msg.content}</span>
+              <div className="flex flex-col gap-1.5 mb-3">
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl w-fit">
+                  <Zap size={13} className="text-blue-400 fill-blue-400/20" />
+                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">실행: {msg.content}</span>
                 </div>
-                {msg.data?.skill && (
-                  <div className="flex items-center gap-1.5 ml-3">
-                    <div className="w-1 h-1 rounded-full bg-blue-500/40" />
-                    <span className="text-[9px] font-bold text-blue-300/80 tracking-tight">
-                      [SKILL: {msg.data.skill}]
-                    </span>
-                  </div>
-                )}
-                {(msg.data?.router_model || msg.data?.model) && (
-                  <div className="flex items-center gap-1.5 ml-3">
-                    <div className="w-1 h-1 rounded-full bg-blue-500/40" />
-                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">
-                      분류 모델: {msg.data?.router_model || msg.data?.model}
-                    </span>
-                  </div>
-                )}
-                {msg.data?.models && (
-                  <div className="flex items-center gap-1.5 ml-3">
-                    <div className="w-1 h-1 rounded-full bg-blue-500/40" />
-                    <span className="text-[9px] font-bold text-slate-500 tracking-tighter">
-                      파이프라인: 분석 {msg.data.models.analysis} · 코드 {msg.data.models.code} · 요약 {msg.data.models.quick}
-                    </span>
-                  </div>
-                )}
               </div>
             )}
 
             {thinkingContent && (
-              // 스트리밍 중: 열림 + 스피너 / 완료 후: 자동 접힌
-              <details className="group mb-2 max-w-[95%]" open={isThinkingStreaming}>
-                <summary className="flex items-center gap-2 px-3 py-2 bg-amber-500/5 border border-amber-500/10 rounded-xl cursor-pointer hover:bg-amber-500/10 transition-all list-none select-none">
+              <details className="group mb-1 max-w-[95%]" open={isThinkingStreaming}>
+                <summary className="flex items-center gap-2 px-3 py-2 bg-white/[0.03] border border-white/[0.05] rounded-xl cursor-pointer hover:bg-white/[0.06] transition-all list-none select-none">
                   {isThinkingStreaming ? (
                     <Loader2 size={12} className="text-amber-500 animate-spin flex-shrink-0" />
                   ) : (
                     <div className="w-1.5 h-1.5 rounded-full bg-amber-500/40 flex-shrink-0" />
                   )}
-                  <span className="text-[10px] font-bold tracking-widest uppercase text-amber-400/60">
-                    {isThinkingStreaming ? "AI Reasoning (Thinking...)" : "AI Reasoning"}
+                  <span className="text-[10px] font-bold tracking-widest uppercase text-amber-500/60 font-mono">
+                    {isThinkingStreaming ? "AI Reasoning (Streaming...)" : "AI Reasoning"}
                   </span>
-                  <Plus size={10} className="ml-auto text-amber-400/40 group-open:rotate-45 transition-transform flex-shrink-0" />
+                  <Plus size={10} className="ml-auto text-white/20 group-open:rotate-45 transition-transform flex-shrink-0" />
                 </summary>
-                {/* max-h 효 overflow-y-auto: 길어지면 스크롤 / 자동 마지막 줄 스크롤 */}
                 <div
                   ref={thoughtScrollRef}
-                  className="mt-2 px-4 py-3 bg-amber-500/[0.02] border border-amber-500/5 rounded-xl text-[11px] text-slate-400/90 leading-relaxed font-medium italic thought-markdown markdown-content max-h-72 overflow-y-auto custom-scrollbar transition-all"
+                  className="mt-2 px-4 py-3 bg-black/20 border border-white/[0.03] rounded-xl font-medium italic markdown-content max-h-72 overflow-y-auto custom-scrollbar transition-all opacity-80 text-[11px] leading-relaxed pb-8"
                 >
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeRaw]}
+                    components={MarkdownComponents}
                   >
                     {displayThinkingContent + (isThinkingStreaming ? " █" : "")}
                   </ReactMarkdown>
@@ -167,33 +202,24 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
             )}
 
             {mainContent && (
-              <div className="text-[11px] text-slate-300 leading-normal px-1 font-medium markdown-content pt-1 transition-all">
+              <div className={`text-[12px] text-slate-200 leading-relaxed px-1.5 markdown-content animate-in slide-in-from-left-1 duration-300 mb-4 ${
+                mainContent.length < 60 && /^[A-Z][A-Za-z0-9_]+$/.test(mainContent.trim()) ? 'strategy-title-header' : 
+                mainContent.length < 100 && mainContent.includes('|') ? 'metadata-summary-badge' : ''
+              }`}>
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   rehypePlugins={[rehypeRaw]}
+                  components={MarkdownComponents}
                 >
                   {mainContent}
                 </ReactMarkdown>
               </div>
             )}
 
-            {msg.type === 'choice' && msg.data?.choices && (
-              <div className="flex flex-col gap-2 mt-4 max-w-[95%]">
-                {msg.data.choices.map((choice: any) => (
-                  <button
-                    key={choice.value}
-                    onClick={() => onChoiceSelect?.(choice.value, msg.data?.originalMessage, msg.data?.design)}
-                    className="flex flex-col items-start gap-1 px-4 py-3 bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/40 rounded-xl hover:from-purple-600/30 hover:to-blue-600/30 transition-all active:scale-95 cursor-pointer"
-                  >
-                    <span className="text-[10px] font-bold text-purple-300">{choice.label}</span>
-                    <span className="text-[9px] text-slate-400">{choice.description}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* choice 메시지 타입 렌더링 제거 (자동 진행 방식으로 변경됨) */}
 
           {msg.type === 'design' && (
-            <div className="flex flex-col bg-white/[0.03] border border-blue-500/20 rounded-xl p-4 shadow-xl gap-3 backdrop-blur-md mb-4">
+            <div className="flex flex-col bg-white/[0.03] border border-blue-500/20 rounded-xl p-5 shadow-2xl gap-4 backdrop-blur-md mb-8 mx-1">
               <div className="flex items-center gap-2 text-blue-400">
                 <FileCode2 size={14} />
                 <span className="text-[10px] font-bold tracking-tight uppercase">전략 설계도</span>
@@ -215,22 +241,32 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
           )}
 
           {msg.type === 'strategy' && (
-            <div className="flex flex-col bg-white/[0.03] border border-white/[0.08] rounded-xl p-4 shadow-xl gap-3 backdrop-blur-md mb-6">
+            <div className="flex flex-col bg-white/[0.03] border border-white/[0.08] rounded-xl p-4 shadow-2xl gap-3 backdrop-blur-md mb-8 mx-1">
               <div className="flex items-center gap-2 text-[#4ade80]">
                 <CheckCircle2 size={18} />
                 <span className="text-xs font-bold tracking-tight uppercase">전략 생성 완료</span>
               </div>
               <div className="h-px bg-white/[0.05] my-2" />
-              <div className="space-y-1.5">
-                <h3 className="text-[13px] font-bold text-white/90">{msg.data.title}</h3>
-                <p className="text-[11px] text-slate-400 leading-relaxed italic font-medium">
+              <div className="space-y-3 my-2">
+                <h3 className="text-[13px] font-black text-white px-1">{msg.data.title}</h3>
+                <p className="text-[11px] text-slate-400 leading-relaxed italic font-medium px-1">
                   {msg.data.description}
                 </p>
                 
                 {msg.data.code && (
-                  <div className="mt-2 rounded-lg bg-black/40 border border-white/5 p-2 overflow-hidden">
-                    <div className="max-h-[80px] overflow-y-auto overflow-x-hidden custom-scrollbar">
-                      <pre className="text-[11px] text-purple-200/60 font-mono leading-tight break-all whitespace-pre-wrap">
+                  <div className="mt-4 rounded-lg bg-black/40 border border-white/5 p-2 overflow-hidden relative group/stratcode">
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(String(msg.data.code));
+                        // UI 피드백은 생략하거나 버튼 상태 관리를 위해 별도 컴포넌트화 필요하지만, 우선 기본 복사 기능 우선 적용
+                      }}
+                      className="absolute right-2 top-2 p-1.5 rounded-md bg-white/5 border border-white/10 text-slate-400 opacity-0 group-hover/stratcode:opacity-100 hover:bg-white/10 hover:text-white transition-all z-10"
+                      title="코드 복사"
+                    >
+                      <Copy size={12} />
+                    </button>
+                    <div className="max-h-[80px] overflow-y-auto overflow-x-auto custom-scrollbar">
+                      <pre className="text-[10px] text-purple-200/60 font-mono leading-tight break-normal whitespace-pre">
                         {msg.data.code}
                       </pre>
                     </div>
@@ -239,7 +275,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
               </div>
               <button
                 onClick={() => onShowCode(String(msg.data?.code || ""), msg.data?.title, msg.data?.backtest_payload)}
-                className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-purple-600/10 border border-purple-500/30 rounded-xl text-[10px] font-bold text-purple-100 hover:bg-purple-600/20 transition-all active:scale-95"
+                className="flex items-center justify-center gap-2 w-full px-4 py-1.5 bg-purple-600/10 border border-purple-500/30 rounded-xl text-[10px] font-bold text-purple-100 hover:bg-purple-600/20 transition-all active:scale-95"
               >
                 <FileCode2 size={12} />
                 전략 코드 에디터에 적용
@@ -248,7 +284,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
           )}
 
           {msg.type === 'backtest' && (
-            <div className="flex flex-col bg-white/[0.03] border border-white/[0.08] rounded-xl gap-3 p-4 shadow-xl backdrop-blur-md">
+            <div className="flex flex-col bg-white/[0.03] border border-white/[0.08] rounded-xl gap-3 p-4 shadow-2xl backdrop-blur-md mb-8 mx-1">
               <div className="flex items-center gap-2 text-[#4ade80]">
                 <CheckCircle2 size={18} />
                 <span className="text-xs font-bold tracking-tight uppercase">백테스트 완료</span>
@@ -323,8 +359,9 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           }
         }
       );
-      if (!res.ok) return;
-      const data = await res.json();
+      const text = await res.text();
+      if (!text || !res.ok) return;
+      const data = JSON.parse(text);
       if (data.success && Array.isArray(data.messages)) {
         const historyMessages: ChatMessage[] = data.messages
           .map((m: any) => ({
@@ -385,7 +422,9 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     try {
       const res = await fetchWithBypass("/api/chat/sessions?limit=20");
       if (res.ok) {
-        const data = await res.json();
+        const text = await res.text();
+        if (!text) return;
+        const data = JSON.parse(text);
         if (data.success) setSessions(data.sessions || []);
       }
     } catch (e) {
@@ -499,29 +538,6 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     }
   }, [onApplyCode]);
 
-  const handleDesignCodeRequest = useCallback((designContent: string) => {
-    const originalMessage = [...messages]
-      .reverse()
-      .find((m) => m.role === "user" && m.content && m.content.trim())?.content;
-
-    // API 호출 없이 choice UI만 바로 표시
-    appendMessage({
-      id: `${Date.now()}-choice`,
-      role: "assistant",
-      content: "",
-      type: "choice",
-      data: {
-        choices: [
-          { value: "loose",   label: "느슨하게 (코드만 바로 짜기)", description: "검증 기준 무시" },
-          { value: "relaxed", label: "현실적 기준 (권장)",          description: "승률 35%, PF 1.05 등" },
-          { value: "strict",  label: "엄격한 기준",                 description: "승률 45%, PF 1.20 등" },
-        ],
-        originalMessage,
-        design: designContent,  // 설계 내용 직접 저장
-      }
-    });
-  }, [appendMessage, messages]);
-
   const handleCodeGenModeChoice = useCallback(async (mode: string, originalMessage?: string, design?: string) => {
     // design이 있으면 (설계도 카드에서 직접 호출) context에 design 포함
     const newContext = { ...context, code_gen_mode: mode, ...(design ? { design } : {}) };
@@ -597,7 +613,9 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
           try {
             const raw = line.replace("data: ", "").trim();
-            if (!raw) continue;
+            if (!raw || raw === "[DONE]") continue;
+            if (!raw.startsWith("{")) continue; 
+            
             const event = JSON.parse(raw);
 
             switch (event.type) {
@@ -782,7 +800,16 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
       setStageElapsedSeconds(0);
       abortControllerRef.current = null;
     }
-  }, [messages, context, appendMessage, onApplyCode, onBacktestGenerated]);
+  }, [messages, context, appendMessage, onApplyCode, onBacktestGenerated, sessionIdRef, setIsLoading, setStatusText, setCurrentStage, setTotalStages, setShowStageProgress, setStageStartedAt, setStageElapsedSeconds]);
+
+  const handleDesignCodeRequest = useCallback((designContent: string) => {
+    const originalMessage = [...messages]
+      .reverse()
+      .find((m) => m.role === "user" && m.content && m.content.trim())?.content;
+
+    // 선택창 없이 바로 'relaxed' 모드로 코드 생성 시작
+    handleCodeGenModeChoice("relaxed", originalMessage, designContent);
+  }, [handleCodeGenModeChoice, messages]);
 
   const handleSend = async (presetMessage?: string) => {
     const raw = presetMessage ?? input;
@@ -1176,14 +1203,14 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           followOutput="smooth"
           className="custom-scrollbar"
           alignToBottom
-          itemContent={(index, msg) => (
+          itemContent={(index: number, msg: ChatMessage) => (
             <div className="px-4">
               <MessageItem
                 msg={msg}
                 onShowCode={handleShowCode}
                 onSendMessage={handleSend}
                 isStreaming={index === messages.length - 1 && isLoading}
-                onChoiceSelect={(choiceValue, originalMsg, design) => handleCodeGenModeChoice(choiceValue, originalMsg, design)}
+                onChoiceSelect={(choiceValue: string, originalMsg: ChatMessage, design?: any) => handleCodeGenModeChoice(choiceValue, originalMsg, design)}
                 onDesignCodeRequest={handleDesignCodeRequest}
               />
             </div>
@@ -1213,7 +1240,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                   </div>
                 )}
               </div>
-            )
+            ),
+            Footer: () => <div className="h-0 pointer-events-none" />
           }}
         />
       </div>
@@ -1363,9 +1391,9 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
 function StatItem({ label, value, color = "text-white" }: { label: string, value: string, color?: string }) {
   return (
-    <div className="space-y-1">
+    <div className="space-y-0.5">
       <div className="text-[10px] font-bold text-slate-500 uppercase tracking-tight leading-none">{label}</div>
-      <div className={`text-sm font-black tracking-tight ${color}`}>{value}</div>
+      <div className={`text-[12px] font-black tracking-tight ${color}`}>{value}</div>
     </div>
   );
 }

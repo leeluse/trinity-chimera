@@ -22,6 +22,7 @@ import { AppRightPanel } from "@/components/layout/AppRightPanel";
 import { COLORS, NAMES } from "@/constants";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import { useDashboardQueries, useAgentTimeseries } from "@/hooks/useDashboardQueries";
+import { MarketAPI } from "@/api";
 
 const DAYS = 96; // 96 intervals of 15 minutes = 24 hours
 const labels: string[] = [];
@@ -68,8 +69,7 @@ function DashboardContent() {
   useEffect(() => {
     const fetchBtcData = async () => {
       try {
-        const response = await fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=96');
-        const klines = await response.json();
+        const klines = await MarketAPI.getKlines('BTCUSDT', '15m', 96);
         const prices = klines.map((k: any) => parseFloat(k[4]));
         setTimeout(() => setBtcHistory(prices), 300);
       } catch (err) {
@@ -167,9 +167,10 @@ function DashboardContent() {
         fill: isBT,
         backgroundColor: (context: any) => {
           const area = context.chart.chartArea;
-          if (!area) return null;
+          if (!area || !isBT) return undefined;
           const g = context.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
-          if (isBT) { g.addColorStop(0, `${cColor}44`); g.addColorStop(1, `${cColor}00`); }
+          g.addColorStop(0, `${cColor}44`);
+          g.addColorStop(1, `${cColor}00`);
           return g;
         },
         hidden: isH,
@@ -193,7 +194,7 @@ function DashboardContent() {
       type: 'line',
       plugins: [{
         id: 'endLineLabels',
-        afterDraw: (chart) => {
+        afterDraw: (chart: Chart) => {
           const positions: LabelPosition[] = [];
           const metas = chart.data.datasets.map((_, i) => chart.getDatasetMeta(i));
           metas.forEach((meta) => {
@@ -251,7 +252,7 @@ function DashboardContent() {
           decisionLogs={decisionLogs}
           botTrades={botTrades}
           automationStatus={automationStatus}
-          onToggleAutomation={toggleAutomation}
+          onToggleAutomation={() => toggleAutomation(!automationStatus?.enabled)}
         />
       </PageLayout.Side>
 

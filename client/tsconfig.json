@@ -18,7 +18,16 @@
         "name": "next"
       }
     ],
+    "baseUrl": ".",
     "paths": {
+      "@/lib/*": ["lib/*"],
+      "@/components/*": ["components/*"],
+      "@/app/*": ["app/*"],
+      "@/constants/*": ["constants/*"],
+      "@/constants": ["constants/index"],
+      "@/types/*": ["types/*"],
+      "@/types": ["types/index"],
+      "@/store/*": ["store/*"],
       "@/*": ["./*"]
     }
   },

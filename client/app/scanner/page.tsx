@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import {
   PageLayout,
-  PageHeader
+  PageHeader,
+  CandidateRow
 } from "@/components"
 import { AppRightPanel } from "@/components/layout/AppRightPanel"
 import { useDashboardQueries } from "@/hooks/useDashboardQueries"
@@ -14,7 +15,6 @@ import { NAMES } from "@/constants"
 import { AGENT_IDS as DEFAULT_AGENT_IDS } from "@/lib/api"
 
 // Modular Components
-import { CandidateRow } from "@/components/scanner/CandidateRow"
 import { SideStat } from "@/components/shared/SideStat"
 
 // Shared Types & Utils & Constants
@@ -54,11 +54,11 @@ export default function SoloScanner() {
     metricsData,
     dashboardProgress,
     toggleAutomation
-  } = useDashboardQueries({ 
-    enableEvolutionLogs: true, 
-    enableDecisionLogs: true, 
-    statsIntervalMs: 6000, 
-    logsIntervalMs: 8000 
+  } = useDashboardQueries({
+    enableEvolutionLogs: true,
+    enableDecisionLogs: true,
+    statsIntervalMs: 6000,
+    logsIntervalMs: 8000
   })
 
   const runtimeAgentIds = useMemo(() => {
@@ -310,7 +310,7 @@ export default function SoloScanner() {
                   <div className="w-1 h-2.5 bg-accent" /> Sector Rotation
                 </h3>
                 <div className="flex flex-row flex-wrap gap-1.5">
-                  {sectorMomentum?.ranked.map(([name, v]) => (
+                  {sectorMomentum?.ranked.map(([name, v]: [string, SectorData]) => (
                     <div key={name} className="flex-1 min-w-[100px] flex flex-col gap-1 p-2.5 bg-white/5 border border-white/10 rounded-md hover:bg-white/[0.08] transition-colors">
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-[8px] font-bold tracking-wider text-slate-500 uppercase">{name}</span>
@@ -332,7 +332,7 @@ export default function SoloScanner() {
                 <div className="flex flex-col gap-2.5">
                   <label className="font-mono text-[8px] text-slate-500 uppercase tracking-[0.3em] pl-1">점수 필터</label>
                   <div className="flex gap-1.5">
-                    {[0, 30, 50, 70].map(score => (
+                    {[0, 30, 50, 70].map((score: number) => (
                       <button key={score} onClick={() => setMinScore(score)} className={cn("flex-1 py-1 rounded-md border font-mono text-[9px] transition-all", minScore === score ? "bg-primary text-background border-primary font-bold shadow-[0_0_10px_rgba(189,147,249,0.2)]" : "bg-white/5 border-white/10 text-slate-400 hover:text-slate-200")}>
                         {score === 0 ? "ALL" : `${score}+`}
                       </button>
@@ -346,7 +346,7 @@ export default function SoloScanner() {
                   <div className="w-1 h-2.5 bg-red-400" /> Legend
                 </h3>
                 <div className="grid grid-cols-2 gap-y-2 gap-x-3 p-3 bg-white/5 border border-white/10 rounded-lg">
-                  {SIGNAL_META.map(({ key, emoji, name }) => (
+                  {SIGNAL_META.map(({ key, emoji, name }: { key: string; emoji: string; name: string }) => (
                     <div key={key} className="flex items-center gap-2">
                       <span className="text-sm">{emoji}</span>
                       <span className="font-mono text-[8px] text-slate-500 uppercase tracking-widest">{name}</span>
@@ -390,7 +390,7 @@ export default function SoloScanner() {
               </div>
               <div className="flex items-center gap-2">
                 <div className="flex gap-px bg-white/5 border border-white/10 rounded-md overflow-hidden">
-                  {["momentum", "breakout", "reversal", "compression"].map(m => (
+                  {["momentum", "breakout", "reversal", "compression"].map((m: string) => (
                     <button key={m} onClick={() => setMode(m)} className={cn("px-3 py-1.5 font-mono text-[9px] tracking-[0.15em] uppercase transition-all whitespace-nowrap", mode === m ? "bg-primary text-background font-black" : "text-slate-500 hover:bg-white/10 hover:text-slate-300")}>
                       {m === "momentum" ? "모멘텀" : m === "breakout" ? "브레이크아웃" : m === "reversal" ? "반전" : "압축"}
                     </button>
@@ -409,7 +409,7 @@ export default function SoloScanner() {
                 <table className="w-full">
                   <thead className="bg-secondary/50">
                     <tr>
-                      {["#", "심볼", "가격", "24h", "RS", "VOL", "펀딩", "ΔOI", "스코어", "시그널"].map((h, i) => (
+                      {["#", "심볼", "가격", "24h", "RS", "VOL", "펀딩", "ΔOI", "스코어", "시그널"].map((h: string, i: number) => (
                         <th key={h} className={cn("px-3 py-4 text-left font-mono text-[9px] font-medium tracking-[0.2em] text-muted-foreground uppercase", (i >= 2 && i <= 8) && "text-right", (i >= 4 && i <= 7) && "hidden md:table-cell")}>{h}</th>
                       ))}
                       <th className="px-3 py-4"></th><th className="px-3 py-4"></th>
@@ -421,7 +421,7 @@ export default function SoloScanner() {
                     ) : displayCandidates.length === 0 ? (
                       <tr><td colSpan={12} className="py-16 text-center font-mono text-lg italic text-muted-foreground">조건에 맞는 종목 없음</td></tr>
                     ) : (
-                      displayCandidates.map((c, i) => (
+                      displayCandidates.map((c: Candidate, i: number) => (
                         <CandidateRow key={c.symbol} candidate={c} rank={i + 1} btcChange24={btcData?.change24 || 0} expanded={expandedSym === c.symbol} onToggle={() => setExpandedSym(expandedSym === c.symbol ? null : c.symbol)} topSectors={topSectors} botSectors={botSectors} regimeLabel={regimeLabel} regimeAdaptive={regimeAdaptive} />
                       ))
                     )}

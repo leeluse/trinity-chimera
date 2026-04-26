@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { APIClient, fetchBotTrades, fetchBots } from "@/lib/api";
+import { BackendAPI, fetchBotTrades, fetchBots } from "@/api";
 import { MetricKey } from "@/types";
 
 interface DashboardQueryOptions {
@@ -32,9 +32,9 @@ export const useDashboardQueries = (options: DashboardQueryOptions = {}) => {
     queryKey: ["dashboard", "stats"],
     queryFn: async () => {
       const [prog, met, auto] = await Promise.all([
-        APIClient.getDashboardProgress(),
-        APIClient.getDashboardMetrics(),
-        APIClient.getAutomationStatus()
+        BackendAPI.getDashboardProgress(),
+        BackendAPI.getDashboardMetrics(),
+        BackendAPI.getAutomationStatus()
       ]);
       return { prog, met, auto };
     },
@@ -45,7 +45,7 @@ export const useDashboardQueries = (options: DashboardQueryOptions = {}) => {
   // 2. Evolution Logs
   const evolutionLogsQuery = useQuery({
     queryKey: ["dashboard", "evolutionLogs"],
-    queryFn: () => APIClient.getEvolutionLog(evolutionLogLimit),
+    queryFn: () => BackendAPI.getEvolutionLog(evolutionLogLimit),
     enabled: enableEvolutionLogs,
     refetchInterval: logsIntervalMs,
     refetchIntervalInBackground: false,
@@ -54,7 +54,7 @@ export const useDashboardQueries = (options: DashboardQueryOptions = {}) => {
   // 3. Decision/Backtest Logs
   const decisionLogsQuery = useQuery({
     queryKey: ["dashboard", "decisionLogs"],
-    queryFn: () => APIClient.getDecisionLogs(decisionLogLimit),
+    queryFn: () => BackendAPI.getDecisionLogs(decisionLogLimit),
     enabled: enableDecisionLogs,
     refetchInterval: logsIntervalMs,
     refetchIntervalInBackground: false,
@@ -80,7 +80,7 @@ export const useDashboardQueries = (options: DashboardQueryOptions = {}) => {
 
   // 4. Mutations
   const toggleAutomationMutation = useMutation({
-    mutationFn: (enabled: boolean) => APIClient.setAutomationStatus(enabled),
+    mutationFn: (enabled: boolean) => BackendAPI.setAutomationStatus(enabled),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] });
     },
@@ -117,7 +117,7 @@ export const useAgentTimeseries = (
           return;
         }
         try {
-          results[id] = await APIClient.getAgentTimeseries(id, metric);
+          results[id] = await BackendAPI.getAgentTimeseries(id, metric);
         } catch {
           results[id] = [];
         }

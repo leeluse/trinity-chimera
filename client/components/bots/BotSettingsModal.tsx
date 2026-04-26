@@ -427,22 +427,6 @@ export function BotSettingsModal({ isOpen, onClose, strategies, onBotCreated }: 
         </div>
       </div>
       
-      <style dangerouslySetInnerHTML={{__html: `
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 5px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background-color: #334155;
-          border-radius: 20px;
-        }
-        .custom-scrollbar {
-          scrollbar-width: thin;
-          scrollbar-color: #334155 transparent;
-        }
-      `}} />
     </div>
   );
 }

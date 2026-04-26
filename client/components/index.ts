@@ -18,6 +18,9 @@ export { ChartLegend } from "./features/dashboard/ChartLegend";
 export { PerformanceChart } from "./features/dashboard/PerformanceChart";
 export { default as ModelSettingsModal } from "./features/dashboard/ModelSettingsModal";
 
+// Features - Chat
+export { default as ChatInterface } from "./features/chat/ChatInterface";
+
 // Features - Backtest 
 export { StatsGrid } from "./features/backtest/StatsGrid";
 export { AiAnalysisModal } from "./features/backtest/AiAnalysisModal";

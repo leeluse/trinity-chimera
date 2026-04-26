@@ -4,7 +4,7 @@ import { ReactNode, useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Settings2, Bot } from "lucide-react";
-import ModelSettingsModal from "../dashboard/ModelSettingsModal";
+import ModelSettingsModal from "../features/dashboard/ModelSettingsModal";
 import { BotSettingsModal } from "../bots/BotSettingsModal";
 import BotList from "../bots/BotList";
 import { useModalStore } from "@/store/useModalStore";

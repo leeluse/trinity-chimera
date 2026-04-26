@@ -10,6 +10,21 @@ import { useDashboardStore } from "@/store/useDashboardStore";
 import { useMemo } from "react";
 import { FiActivity } from "react-icons/fi";
 
+interface AppRightPanelProps {
+  agentIds?: string[];
+  names?: string[];
+  evolutionEvents?: any[];
+  decisionLogs?: any[];
+  automationStatus?: any;
+  onToggleAutomation?: () => void;
+  backtestContext?: any;
+  onBacktestGenerated?: (data: any) => void;
+  onApplyCode?: (code: string, name?: string, payload?: any) => void;
+  metricsData?: any;
+  botTrades?: any[];
+  scannerContent?: React.ReactNode;
+}
+
 // This is a unified panel that handles all right-side content based on context
 export function AppRightPanel({
   // Shared Props
@@ -31,7 +46,7 @@ export function AppRightPanel({
   
   // Scanner Props
   scannerContent = null,
-}: any) {
+}: AppRightPanelProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const view = (searchParams.get("view") || "").toLowerCase();
@@ -106,11 +121,11 @@ export function AppRightPanel({
       {isLogsView && (
         <div className="flex flex-col gap-4 p-4">
           {filteredLogs.length > 0 ? (
-            filteredLogs.map((log: any, idx: number) => (
+            filteredLogs.map((log: { id: string; agent_id?: string; agent_label?: string; created_at: string; message: string; meta?: any }, idx: number) => (
               <LogCard
                 key={log.id || idx}
                 agentId={log.agent_id || "system"}
-                agentName={log.agent_label || agentNameMap[log.agent_id] || "System"}
+                agentName={log.agent_label || agentNameMap[log.agent_id || ""] || "System"}
                 avatar={(log.agent_label || "S")[0]}
                 time={new Date(log.created_at).toLocaleTimeString()}
                 analysis={log.message}
