@@ -72,6 +72,16 @@ export default function TerminalMigrated() {
     [hunterRows],
   );
 
+  const hunterRegime = useTerminalStore((s) => s.hunterRegime);
+
+  const regimeHint = useMemo((): string | null => {
+    if (!hunterRegime?.ready) return null;
+    if (hunterRegime.btcAltDelta < -0.5 && hunterRegime.longFlowRatio < 45) return "SHORT_SQUEEZE";
+    if (hunterRegime.longFlowRatio > 60 && hunterRegime.oiExpansionRate > 55) return "BREAKOUT_MOMENTUM";
+    if (hunterRegime.avgFunding > 0.03) return "BOTTOM_ABSORPTION";
+    return null;
+  }, [hunterRegime]);
+
   const [scanMode, setScanMode] = useState<"topn" | "custom">("topn");
 
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
@@ -328,13 +338,16 @@ export default function TerminalMigrated() {
                 type="button"
                 onClick={() => setFilter(f.id)}
                 className={cn(
-                  "rounded border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest",
+                  "relative rounded border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest",
                   activeFilter === f.id
                     ? "border-cyan-400 bg-cyan-400/10 text-cyan-300"
                     : "border-white/10 text-slate-400",
                 )}
               >
                 {f.label}
+                {regimeHint === f.id && activeFilter !== f.id && (
+                  <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                )}
               </button>
             ))}
           </div>
