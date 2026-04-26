@@ -1,5 +1,15 @@
 import { create } from 'zustand';
 
+import type { HunterRow, HunterRegime } from './hunterRuntime';
+
+export interface HunterAlert {
+  sym: string;
+  full: string;
+  stage: number;
+  dir: number;
+  ts: number;
+}
+
 export interface TerminalResult {
   symbol: string;
   pricePct: number;
@@ -62,7 +72,7 @@ interface TerminalState {
   filteredResults: TerminalResult[];
   globalMetrics: GlobalMetrics;
   summaryStats: SummaryStats;
-  
+
   // UI State
   isRunning: boolean;
   progress: number;
@@ -72,6 +82,9 @@ interface TerminalState {
   selectedSymbol: string | null;
   sort: { col: keyof TerminalResult | string; dir: number };
   engineApi: any | null;
+  hunterRows: HunterRow[];
+  hunterRegime: HunterRegime | null;
+  hunterAlert: HunterAlert | null;
 
   // Actions
   setResults: (results: TerminalResult[]) => void;
@@ -84,6 +97,9 @@ interface TerminalState {
   setSort: (col: string, dir?: number) => void;
   setSelectedSymbol: (symbol: string | null) => void;
   setEngineApi: (api: any) => void;
+  setHunterRows: (rows: HunterRow[]) => void;
+  setHunterRegime: (regime: HunterRegime) => void;
+  setHunterAlert: (alert: HunterAlert | null) => void;
   
   // Computed
   applyFilters: () => void;
@@ -116,6 +132,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   selectedSymbol: null,
   sort: { col: 'alphaScore', dir: -1 },
   engineApi: null,
+  hunterRows: [],
+  hunterRegime: null,
+  hunterAlert: null,
 
   setResults: (results) => {
     set({ results });
@@ -152,6 +171,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   setSelectedSymbol: (selectedSymbol) => set({ selectedSymbol }),
+
+  setHunterRows: (hunterRows) => set({ hunterRows }),
+  setHunterRegime: (hunterRegime) => set({ hunterRegime }),
+  setHunterAlert: (hunterAlert) => set({ hunterAlert }),
 
   applyFilters: () => {
     const { results, activeFilter, searchQuery, sort } = get();
