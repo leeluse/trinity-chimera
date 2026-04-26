@@ -31,9 +31,9 @@ export interface Candidate extends Ticker {
   pumpFlagged: boolean;
   narrativeMult: number;
   sector: string;
-  contextScore: number;
-  contextMult: number;
-  stage: 0 | 1 | 2 | 3;
+  contextScore?: number;        // optional until Task 5 fills this in
+  contextMult?: number;         // optional until Task 5 fills this in
+  stage?: 0 | 1 | 2 | 3;      // optional until Task 5 fills this in
 }
 
 export interface SectorData {
