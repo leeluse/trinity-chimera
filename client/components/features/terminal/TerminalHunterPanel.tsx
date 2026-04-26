@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { useTerminalStore } from "./terminalStore";
 import {
   mountHunterRuntime,
+  type HunterRow,
   type HunterRuntimeSnapshot,
   type HunterSortMode,
 } from "./hunterRuntime";
@@ -38,7 +39,7 @@ export default function TerminalHunterPanel() {
   const [tab, setTab] = useState<HunterTab>("lb");
   const [state, setState] = useState<HunterRuntimeSnapshot>(INITIAL);
   const runtimeRef = useRef<ReturnType<typeof mountHunterRuntime> | null>(null);
-  const prevRowsRef = useRef<import('./hunterRuntime').HunterRow[]>([]);
+  const prevRowsRef = useRef<HunterRow[]>([]);
 
   useEffect(() => {
     const runtime = mountHunterRuntime((snapshot) => {
