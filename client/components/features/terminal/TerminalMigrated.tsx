@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowDownNarrowWide,
@@ -74,6 +74,8 @@ export default function TerminalMigrated() {
 
   const [scanMode, setScanMode] = useState<"topn" | "custom">("topn");
 
+  const tbodyRef = useRef<HTMLTableSectionElement>(null);
+
   useEffect(() => {
     const engine = mountTerminalV4();
     setEngineApi(engine.api);
@@ -82,6 +84,14 @@ export default function TerminalMigrated() {
       setEngineApi(null);
     };
   }, [setEngineApi]);
+
+  useEffect(() => {
+    if (!selectedSymbol || !tbodyRef.current) return;
+    const row = tbodyRef.current.querySelector<HTMLElement>(
+      `[data-symbol="${selectedSymbol}"]`,
+    );
+    if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedSymbol]);
 
   const selected = useMemo(
     () => results.find((r) => r.symbol === selectedSymbol) ?? null,
@@ -363,7 +373,7 @@ export default function TerminalMigrated() {
                 </tr>
               </thead>
 
-              <tbody>
+              <tbody ref={tbodyRef}>
                 {filteredResults.map((r) => {
                   const wkLabel =
                     r.layers?.wk?.pattern !== "NONE" ? r.layers?.wk?.label || "—" : "—";
@@ -394,6 +404,7 @@ export default function TerminalMigrated() {
                   return (
                     <tr
                       key={r.symbol}
+                      data-symbol={r.symbol}
                       onClick={() => setSelectedSymbol(r.symbol)}
                       className={cn(
                         "cursor-pointer bg-white/[0.02] hover:bg-white/[0.05]",
