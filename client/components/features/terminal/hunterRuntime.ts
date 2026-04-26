@@ -233,8 +233,26 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     emit();
   }
 
-  function playBeep(_f: number) {
+  function playBeep(f: number) {
     if (muted) return;
+    try {
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) return;
+      const c = new Ctx();
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.connect(g);
+      g.connect(c.destination);
+      o.frequency.value = f;
+      g.gain.value = 0.08;
+      o.start();
+      o.stop(c.currentTime + 0.1);
+      o.onended = () => {
+        try {
+          void c.close();
+        } catch (_e) {}
+      };
+    } catch (_e) {}
   }
 
   function clearTimer(refName: 'scanIv' | 'decayIv' | 'fundIv' | 'oiIv' | 'lsrIv' | 'regimeIv') {
@@ -1025,14 +1043,14 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
             d.symbol,
             'fundExt',
             FR[d.symbol] < 0 ? 1 : -1,
-            '펀딩 극단치',
+            '⚡ 펀딩 극단치',
             '과열 ' + (FR[d.symbol] * 100).toFixed(3) + '%',
             0,
           );
         }
 
         if (Math.abs(mi) > C.miExt) {
-          firePreSignal(d.symbol, 'miDiv', mi < 0 ? 1 : -1, 'MI 괴리', '선물괴리 ' + (mi * 100).toFixed(3) + '%', 0);
+          firePreSignal(d.symbol, 'miDiv', mi < 0 ? 1 : -1, '📡 MI 괴리', '선물괴리 ' + (mi * 100).toFixed(3) + '%', 0);
         }
       });
     } catch (_e) {}
@@ -1189,15 +1207,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     });
 
     let sorted = Object.values(cnt);
-    if (sortMode === 'cross') {
-      sorted.sort((a: any, b: any) => (b.tags['크로스'] || 0) - (a.tags['크로스'] || 0) || b.absSum - a.absSum);
-    } else if (sortMode === 'sqz') {
-      sorted.sort((a: any, b: any) => (b.tags['스퀴즈'] || 0) - (a.tags['스퀴즈'] || 0) || b.absSum - a.absSum);
-    } else if (sortMode === 'whale') {
-      sorted.sort((a: any, b: any) => (b.tags['고래'] || 0) - (a.tags['고래'] || 0) || b.absSum - a.absSum);
-    } else {
-      sorted.sort((a: any, b: any) => b.absSum - a.absSum || b.total - a.total);
-    }
+    sorted.sort((a: any, b: any) => b.absSum - a.absSum || b.total - a.total);
 
     const top15 = sorted.slice(0, 15);
     currentTopCoins = new Set<string>();
@@ -1310,7 +1320,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
             s.oiBuild = dir * 30;
             sd.lastOiBuild = now;
             trackSig(sym, 'oiBuild', s.oiBuild);
-            firePreSignal(sym, 'oiBuild', dir, 'OI 빌드업', '포지션 축적 · 가격 횡보', 30);
+            firePreSignal(sym, 'oiBuild', dir, '🔮 OI 빌드업', '포지션 축적 · 가격 횡보', 30);
             playBeep(500);
           }
         }
@@ -1329,7 +1339,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
           s.cvdCons = dir * 25;
           sd.lastCvdCons = now;
           trackSig(sym, 'cvdCons', s.cvdCons);
-          firePreSignal(sym, 'cvdCons', dir, 'CVD 합의', '4거래소 동시 체결 ' + tier.label + '급', 25);
+          firePreSignal(sym, 'cvdCons', dir, '💹 CVD 합의', '4거래소 동시 체결 ' + tier.label + '급', 25);
         }
       }
 
