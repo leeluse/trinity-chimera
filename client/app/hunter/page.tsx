@@ -8,8 +8,8 @@ export default function HunterPage() {
   return (
     <div className="w-screen h-screen bg-[#030508] flex flex-col overflow-hidden">
       <div className="h-10 border-b border-white/10 flex items-center px-4 bg-background z-50">
-        <Link 
-          href="/" 
+        <Link
+          href="/"
           className="flex items-center gap-2 text-[11px] text-slate-400 hover:text-white transition-colors font-mono font-bold"
         >
           <ArrowLeft size={14} />
@@ -23,8 +23,8 @@ export default function HunterPage() {
         </div>
       </div>
       <div className="flex-1 relative">
-        <iframe 
-          src="/hunter.html" 
+        <iframe
+          src="/hunter.html"
           className="w-full h-full border-none"
           title="Alpha Hunter"
         />

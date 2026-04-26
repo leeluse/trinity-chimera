@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import Chart from "chart.js/auto";
 
@@ -15,6 +16,7 @@ import {
   PerformanceChart
 } from "@/components";
 import { AppRightPanel } from "@/components/layout/AppRightPanel";
+import CrimeMainPanel from "@/components/features/crime/CrimeMainPanel";
 
 // Externalized Constants/Types/Styles
 import { COLORS, NAMES } from "@/constants";
@@ -58,6 +60,9 @@ const areLabelPositionsEqual = (prev: LabelPosition[], next: LabelPosition[]) =>
 function DashboardContent() {
   const queryClient = useQueryClient();
   const chartRef = useRef<HTMLCanvasElement | null>(null);
+  const searchParams = useSearchParams();
+  const view = (searchParams.get("view") ?? "").toLowerCase();
+  const isCrimeView = view === "crime";
   const chartInstance = useRef<Chart | null>(null);
   const currentMetric = useDashboardStore((state) => state.currentMetric);
   const chartActiveBot = useDashboardStore((state) => state.chartActiveBot);
@@ -233,29 +238,35 @@ function DashboardContent() {
       </PageLayout.Side>
 
       <PageLayout.Main>
-        <PageHeader
-          isLoading={isLoadingInitial}
-          statusText="System Live"
-          statusColor="green"
-        />
+        {isCrimeView ? (
+          <CrimeMainPanel />
+        ) : (
+          <>
+            <PageHeader
+              isLoading={isLoadingInitial}
+              statusText="System Live"
+              statusColor="green"
+            />
 
-        <div className="relative px-6 py-2">
-          <div className="flex flex-col gap-4 relative z-10">
-            <MetricSelector />
+            <div className="relative px-6 py-2">
+              <div className="flex flex-col gap-4 relative z-10">
+                <MetricSelector />
 
-            <div className="mt-2">
-              <BotList 
-                bots={bots} 
-                onRefresh={() => queryClient.invalidateQueries({ queryKey: ["dashboard", "bots"] })} 
-              />
+                <div className="mt-2">
+                  <BotList
+                    bots={bots}
+                    onRefresh={() => queryClient.invalidateQueries({ queryKey: ["dashboard", "bots"] })}
+                  />
+                </div>
+
+                <div className="flex flex-col min-h-0 gap-3 mt-2">
+                  <ChartLegend names={chartNames} />
+                  <PerformanceChart chartRef={chartRef} labelPositions={labelPositions} currentMetric={currentMetric} />
+                </div>
+              </div>
             </div>
-
-            <div className="flex flex-col min-h-0 gap-3 mt-2">
-              <ChartLegend names={chartNames} />
-              <PerformanceChart chartRef={chartRef} labelPositions={labelPositions} currentMetric={currentMetric} />
-            </div>
-          </div>
-        </div>
+          </>
+        )}
       </PageLayout.Main>
     </PageLayout>
   );

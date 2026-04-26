@@ -6,6 +6,7 @@ import { RightPanelShell } from "@/components/panel/RightPanelShell";
 import ChatInterface from "@/components/features/chat/ChatInterface";
 import AgentFilter from "@/components/panel/sections/AgentFilter";
 import TerminalHunterPanel from "@/components/features/terminal/TerminalHunterPanel";
+import CrimeDashboard from "@/components/features/crime/CrimeDashboard";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import { useMemo } from "react";
 
@@ -13,13 +14,13 @@ interface AppRightPanelProps {
   agentIds?: string[];
   names?: string[];
 
-  automationStatus?: unknown;
+  automationStatus?: any;
   onToggleAutomation?: () => void;
-  backtestContext?: unknown;
-  onBacktestGenerated?: (data: unknown) => void;
-  onApplyCode?: (code: string, name?: string, payload?: unknown) => void;
+  backtestContext?: any;
+  onBacktestGenerated?: (data: any) => void;
+  onApplyCode?: (code: string, name?: string, payload?: any) => void;
 
-  botTrades?: unknown[];
+  botTrades?: any[];
   scannerContent?: React.ReactNode;
 }
 
@@ -31,15 +32,15 @@ export function AppRightPanel({
 
   automationStatus = null,
   onToggleAutomation,
-  
+
   // Backtest Props
   backtestContext = null,
   onBacktestGenerated,
   onApplyCode,
-  
+
 
   botTrades = [],
-  
+
   // Scanner Props
   scannerContent = null,
 }: AppRightPanelProps) {
@@ -58,6 +59,7 @@ export function AppRightPanel({
   const isBacktestView = isBacktestPage && view === "";
   const isScannerView = isScannerPage;
   const isTerminalView = isTerminalPage;
+  const isCrimeView = view === "crime";
 
   // Logic for filtering logs (borrowed from DashboardRightPanel)
   const agentNameMap = useMemo(() => {
@@ -70,7 +72,7 @@ export function AppRightPanel({
 
   const filteredLogs = useMemo(() => {
     const isAll = !activeBot || activeBot === "ALL" || activeBot === "전체";
-    const logs: unknown[] = []; // No logs for bots yet
+    const logs: any[] = []; // No logs for bots yet
     if (isAll) return logs;
     return logs;
   }, [activeBot]);
@@ -88,7 +90,7 @@ export function AppRightPanel({
       )}
 
       {/* 2. Main Content Slots */}
-      
+
 
 
       {/* Chat / Backtest Interface */}
@@ -109,6 +111,9 @@ export function AppRightPanel({
 
       {/* Terminal Hunter Fusion Content */}
       {isTerminalView && <TerminalHunterPanel />}
+
+      {/* Crime Mega Pump Content */}
+      {isCrimeView && <CrimeDashboard />}
 
       {/* Decision Logs (Standard Terminal List) - Hidden for now */}
       {isLogsView && (

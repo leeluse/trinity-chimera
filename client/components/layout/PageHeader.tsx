@@ -35,9 +35,9 @@ export const PageHeader = ({
       try {
         const data = await fetchStrategies();
         if (Array.isArray(data)) {
-          setStrategies(data.map(s => ({ 
-            id: s.id || s.key, 
-            name: s.label || s.key 
+          setStrategies(data.map(s => ({
+            id: s.id || s.key,
+            name: s.label || s.key
           })));
         }
       } catch (error) {
