@@ -238,23 +238,16 @@ function DashboardContent() {
       </PageLayout.Side>
 
       <PageLayout.Main>
-        {isCrimeView ? (
-          <>
-            <PageHeader
-              statusText="Crime Hunter V5"
-              statusColor="blue"
-            />
-            <CrimeMainPanel />
-          </>
-        ) : (
-          <>
-            <PageHeader
-              isLoading={isLoadingInitial}
-              statusText="System Live"
-              statusColor="green"
-            />
+        <PageHeader
+          isLoading={isLoadingInitial}
+          statusText="System Live"
+          statusColor="green"
+        />
 
-            <div className="relative px-6 py-2">
+        {isCrimeView ? (
+          <CrimeMainPanel />
+        ) : (
+          <div className="relative px-6 py-2">
               <div className="flex flex-col gap-4 relative z-10">
                 <MetricSelector />
 
