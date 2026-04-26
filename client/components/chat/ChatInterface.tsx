@@ -1111,9 +1111,9 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
 
   return (
-    <div className="flex flex-col h-full bg-[#060912]/20">
+    <div className="flex flex-col h-full bg-background/20">
       {/* 🆔 헤더 세션 컨트롤 바 */}
-      <div className="px-4 py-3 border-b border-white/[0.05] bg-[#0a0f1d]/40 backdrop-blur-md flex items-center justify-between gap-3">
+      <div className="px-4 py-3 border-b border-white/[0.05] bg-background/40 backdrop-blur-md flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button
             onClick={toggleGlobalMode}
@@ -1291,7 +1291,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                   <ChevronDown size={10} className={`transition-transform duration-200 ${showModelSelect ? 'rotate-180' : ''}`} />
                 </button>
                 {showModelSelect && (
-                  <div className="absolute bottom-full mb-1.5 left-0 z-50 bg-[#0f0f14] border border-white/[0.1] rounded-xl shadow-2xl overflow-hidden min-w-[200px] py-1">
+                  <div className="absolute bottom-full mb-1.5 left-0 z-50 bg-background border border-white/[0.1] rounded-xl shadow-2xl overflow-hidden min-w-[200px] py-1">
                     {[
                       "deepseek-v4-flash",
                       "deepseek-v4-pro",

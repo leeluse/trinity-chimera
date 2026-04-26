@@ -2,6 +2,7 @@
 
 import { ReactNode, useState, useEffect } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Settings2, Bot } from "lucide-react";
 import ModelSettingsModal from "../dashboard/ModelSettingsModal";
 import { BotSettingsModal } from "../bots/BotSettingsModal";
@@ -22,6 +23,8 @@ export const PageHeader = ({
   isLoading = false,
   extra
 }: PageHeaderProps) => {
+  const pathname = usePathname();
+  const isDashboard = pathname === "/";
   const openSettings = useModalStore(state => state.open);
   const [isBotModalOpen, setIsBotModalOpen] = useState(false);
   const [botRefreshTrigger, setBotRefreshTrigger] = useState(0);
@@ -61,12 +64,12 @@ export const PageHeader = ({
 
   return (
     <>
-      <header className="flex items-center justify-between px-4 md:px-8 py-3 md:py-4 border-b border-white/[0.05] bg-white/[0.02] backdrop-blur-2xl sticky top-0 z-[100] shadow-2xl">
+      <header className="flex items-center justify-between px-4 md:px-8 py-3 md:py-4 border-b border-white/[0.05] bg-background backdrop-blur-2xl sticky top-0 z-[100] shadow-2xl">
         <div className="flex items-center gap-4">
           <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
             <div className="relative w-9 h-9 flex items-center justify-center">
               <div className="absolute inset-0 bg-gradient-to-tr from-[#6366f1] via-[#8b5cf6] to-[#ec4899] rounded-lg rotate-45 blur-[8px] opacity-40 animate-pulse"></div>
-              <div className="relative w-full h-full bg-[#0b0b1a] border border-white/20 rounded-lg rotate-45 flex items-center justify-center overflow-hidden">
+              <div className="relative w-full h-full bg-background border border-white/20 rounded-lg rotate-45 flex items-center justify-center overflow-hidden">
                 <div className="rotate-[-45deg] flex items-center justify-center">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M12 2L2 12L12 22L22 12L12 2ZM12 6L18 12L12 18L6 12L12 6Z" fill="white" fillOpacity="0.9" />
@@ -87,13 +90,35 @@ export const PageHeader = ({
 
         <div className="flex items-center gap-3">
           {extra}
-          
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full border transition-all duration-300 ${getStatusStyles()}`}>
-            <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${getDotStyles()}`}></div>
-            <span className="text-[10px] font-bold uppercase tracking-wider">
-              {isLoading ? '로딩 중...' : statusText}
-            </span>
-          </div>
+
+          {isDashboard && (
+            <>
+              <Link
+                href="/scanner"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-cyan-400 hover:border-cyan-500/50 transition-all text-[11px] font-mono font-semibold tracking-wide"
+                title="Solo Scanner"
+              >
+                <span className="text-cyan-500">📡</span>
+                <span>SCANNER</span>
+              </Link>
+
+              <Link
+                href="/liquidation"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-orange-400 hover:border-orange-500/50 transition-all text-[11px] font-mono font-semibold tracking-wide"
+                title="청산 압력 지도"
+              >
+                <span className="text-orange-500">🔥</span>
+                <span>LIQ MAP</span>
+              </Link>
+
+              <div className={`flex items-center gap-2 px-3 py-1 rounded-full border transition-all duration-300 ${getStatusStyles()}`}>
+                <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${getDotStyles()}`}></div>
+                <span className="text-[10px] font-bold uppercase tracking-wider">
+                  {isLoading ? '로딩 중...' : statusText}
+                </span>
+              </div>
+            </>
+          )}
 
           <button
             onClick={() => setIsBotModalOpen(true)}

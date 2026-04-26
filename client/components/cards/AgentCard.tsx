@@ -55,8 +55,8 @@ export default function AgentCard({
     <div
       onClick={onClick}
       className={`relative overflow-hidden cursor-pointer rounded-xl p-4 border transition-all duration-200 ${isActive
-        ? "bg-[#181835] border-[#bd93f9]/40" // var(--bg-hover) + purple border
-        : "bg-[#12122b]/60 border-[rgba(189,147,249,0.12)] hover:border-[rgba(189,147,249,0.25)]" // var(--bg-card) + var(--border)
+        ? "bg-background border-[#bd93f9]/40" // var(--bg-hover) + purple border
+        : "bg-background/60 border-[rgba(189,147,249,0.12)] hover:border-[rgba(189,147,249,0.25)]" // var(--bg-card) + var(--border)
         }`}
     >
       <div className="flex items-center justify-between pb-3">
@@ -73,7 +73,7 @@ export default function AgentCard({
               {avatar}
             </div>
             {status && (
-              <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#080812] ring-2 ring-[#080812]/90 flex items-center justify-center">
+              <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-background ring-2 ring-[#080812]/90 flex items-center justify-center">
                 <span className={`w-1.5 h-1.5 rounded-full ${getStatusColor(status)}`} />
               </div>
             )}

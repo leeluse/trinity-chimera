@@ -100,7 +100,7 @@ export default function ModelSettingsModal() {
       />
       
       {/* Modal Content */}
-      <div className="relative w-full max-w-2xl max-h-[90vh] bg-[#0c1221]/80 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-[0_25px_70px_rgba(0,0,0,0.5)] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden">
+      <div className="relative w-full max-w-2xl max-h-[90vh] bg-background/80 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-[0_25px_70px_rgba(0,0,0,0.5)] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden">
         
         {/* Header */}
         <div className="flex items-center justify-between px-8 py-5 border-b border-white/10 bg-gradient-to-r from-blue-600/20 via-purple-600/15 to-indigo-600/20 shrink-0">

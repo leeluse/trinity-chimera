@@ -21,7 +21,7 @@ export const BacktestChart = ({
   cardClass
 }: BacktestChartProps) => {
   return (
-    <div className="relative overflow-hidden h-[450px] shrink-0 w-full bg-[#060912]/40 backdrop-blur-sm border border-white/[0.05] rounded-xl">
+    <div className="relative overflow-hidden h-[450px] shrink-0 w-full bg-background/40 backdrop-blur-sm border border-white/[0.05] rounded-xl">
       {!results && (
         <div className="absolute inset-0 z-10 h-[450px]">
           <CandlestickChart

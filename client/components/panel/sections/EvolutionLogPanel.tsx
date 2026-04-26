@@ -114,7 +114,7 @@ export default function EvolutionLogPanel({
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative group">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.08] bg-white/[0.02]">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.08] bg-background">
         <div className="flex items-center gap-2.5">
           <div className="relative">
             <FiTerminal className="text-purple-400 w-4 h-4" />
@@ -155,7 +155,7 @@ export default function EvolutionLogPanel({
       </div>
 
       {/* Log Feed */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 no-scrollbar space-y-3 font-mono">
+      <div className="flex-1 overflow-y-auto px-4 py-4 no-scrollbar space-y-3 font-mono bg-background">
         {filtered.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center opacity-20">
             <FiActivity className="w-8 h-8 mb-3 text-purple-400" />
@@ -202,7 +202,7 @@ export default function EvolutionLogPanel({
       </div>
 
       {/* Footer Info */}
-      <div className="px-5 py-2 border-t border-white/[0.05] bg-black/20 flex justify-between items-center shrink-0">
+      <div className="px-5 py-2 border-t border-white/[0.05] bg-background flex justify-between items-center shrink-0">
         <span className="text-[9px] font-bold text-slate-600 tracking-widest flex items-center gap-2">
           <FiCpu className="w-3 h-3" /> TRINITY_ORCH_V1.1
         </span>

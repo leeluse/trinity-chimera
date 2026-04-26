@@ -28,6 +28,7 @@ interface DashboardRightPanelProps {
     next_run_time?: string | null;
   } | null;
   onToggleAutomation?: (enabled: boolean) => void;
+  scannerContent?: React.ReactNode;
 }
 
 const PHASE_LABEL_MAP: Record<string, string> = {
@@ -103,7 +104,7 @@ const MOCK_LOGS = [
 
 export default function DashboardRightPanel(props: DashboardRightPanelProps) {
   return (
-    <Suspense fallback={<div className="flex-1 bg-[#060912]/30 animate-pulse" />}>
+    <Suspense fallback={<div className="flex-1 bg-background/30 animate-pulse" />}>
       <DashboardRightPanelContent {...props} />
     </Suspense>
   );
@@ -118,6 +119,7 @@ export function DashboardRightPanelContent({
   botTrades = [],
   automationStatus,
   onToggleAutomation,
+  scannerContent,
 }: DashboardRightPanelProps) {
   const { logActiveAgent: activeAgent, setLogActiveAgent: setActiveAgent } = useDashboardStore();
   const pathname = usePathname();
@@ -126,6 +128,7 @@ export function DashboardRightPanelContent({
 
   const isEvolutionView = pathname === "/" && view === "evolution";
   const isLogsView = pathname === "/" && (view === "" || view === "logs");
+  const isScannerView = pathname === "/scanner";
 
   const visibleAgentIds = useMemo(
     () => (agentIds.length > 0 ? agentIds : ["momentum_hunter"]),
@@ -268,8 +271,14 @@ export function DashboardRightPanelContent({
       )}
 
 
+      {isScannerView && scannerContent && (
+        <div className="flex-1 overflow-y-auto no-scrollbar">
+          {scannerContent}
+        </div>
+      )}
+
       {isLogsView && (
-        <div className="flex-1 overflow-y-auto min-h-0 bg-[#060912]/30 no-scrollbar flex flex-col">
+        <div className="flex-1 overflow-y-auto min-h-0 bg-transparent no-scrollbar flex flex-col">
           <div className="flex flex-col gap-4 p-4">
             {displayLogs.map((log) => (
               <LogCard

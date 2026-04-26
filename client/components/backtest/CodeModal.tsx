@@ -31,7 +31,7 @@ export default function CodeModal({ isOpen, onClose, strategyName, code }: CodeM
       />
       
       {/* Modal Content */}
-      <div className="relative w-full max-w-5xl h-[80vh] bg-[#0c1221] border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
+      <div className="relative w-full max-w-5xl h-[80vh] bg-background border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
         
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/[0.02]">

@@ -10,7 +10,7 @@ interface PerformanceSummaryProps {
 
 export const PerformanceSummary = ({ performanceData, onAgentClick, activeAgent }: PerformanceSummaryProps) => {
   return (
-    <div className="p-4 border-t border-white/[0.04] bg-[#060912]/90 shrink-0 backdrop-blur-lg">
+    <div className="p-4 border-t border-white/[0.04] bg-background/90 shrink-0 backdrop-blur-lg">
       <div className="text-[10px] font-bold text-[#475569] uppercase tracking-[0.14em] mb-4 flex items-center justify-between">
         <span>성과 요약</span>
         <div className="flex gap-2">

@@ -53,7 +53,7 @@ export default function BacktestHeader({
             onChange={(e) => setStrategy(e.target.value)}
             className="appearance-none bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2 pr-10 text-xs font-bold text-white/90 cursor-pointer focus:ring-1 focus:ring-purple-500/50 outline-none hover:bg-white/10 transition-all"
           >
-            {strategies.map(s => <option key={s.key} value={s.key} className="bg-[#0d0d1a]">{s.label}</option>)}
+            {strategies.map(s => <option key={s.key} value={s.key} className="bg-background">{s.label}</option>)}
           </select>
           <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none flex items-center gap-2">
             <ChevronDown size={14} className="text-slate-500" />
@@ -104,7 +104,7 @@ export default function BacktestHeader({
           <button 
             onClick={onDeploy}
             disabled={loading}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[#90d579ff] text-[#060912] rounded-xl text-xs font-black hover:brightness-110 transition-all shadow-lg shadow-[#90d579ff]/20 active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-2 px-5 py-2.5 bg-[#90d579ff] text-background rounded-xl text-xs font-black hover:brightness-110 transition-all shadow-lg shadow-[#90d579ff]/20 active:scale-95 disabled:opacity-50"
           >
             <Zap size={14} className="fill-current" />
             배포
@@ -152,7 +152,7 @@ function DropdownSelect({ value, options, onChange, width }: any) {
         onChange={(e) => onChange(e.target.value)}
         className="appearance-none w-full bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2 pr-10 text-xs font-bold text-white/90 cursor-pointer focus:ring-1 focus:ring-purple-500/50 outline-none hover:bg-white/10 transition-all"
       >
-        {options.map((opt: string) => <option key={opt} value={opt} className="bg-[#0d0d1a]">{opt}</option>)}
+        {options.map((opt: string) => <option key={opt} value={opt} className="bg-background">{opt}</option>)}
       </select>
       <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none group-hover:text-white" />
     </div>

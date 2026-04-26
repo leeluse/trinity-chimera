@@ -1,0 +1,517 @@
+/* ─── CSS Variables (scoped to wrap) ─────────────────────── */
+.wrap {
+  --liq-bg-0: #0a0a0c;
+  --liq-bg-1: #111114;
+  --liq-bg-2: #17171b;
+  --liq-bg-3: #1e1e24;
+  --liq-border: #25252b;
+  --liq-border-bright: #35353d;
+  --liq-text-0: #e8e8ea;
+  --liq-text-1: #a0a0a8;
+  --liq-text-2: #60606a;
+  --liq-text-3: #40404a;
+  --liq-long: #22c55e;
+  --liq-long-dim: rgba(34, 197, 94, 0.25);
+  --liq-long-faint: rgba(34, 197, 94, 0.08);
+  --liq-short: #ef4444;
+  --liq-short-dim: rgba(239, 68, 68, 0.25);
+  --liq-short-faint: rgba(239, 68, 68, 0.08);
+  --liq-alert: #f59e0b;
+  --liq-alert-dim: rgba(245, 158, 11, 0.25);
+
+  background: var(--liq-bg-0);
+  color: var(--liq-text-0);
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  min-height: 100vh;
+  overflow-x: hidden;
+  background-image:
+    radial-gradient(circle at 20% 10%, rgba(59, 130, 246, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(245, 158, 11, 0.02) 0%, transparent 50%);
+}
+
+/* ─── Header ─────────────────────── */
+.header {
+  border-bottom: 1px solid var(--liq-border);
+  background: var(--liq-bg-1);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: blur(10px);
+}
+
+.brandMark {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, var(--liq-short) 0%, var(--liq-alert) 100%);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 14px;
+  color: #000;
+  flex-shrink: 0;
+}
+
+.statusIndicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--liq-bg-2);
+  border: 1px solid var(--liq-border);
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--liq-text-3);
+  transition: background 0.3s;
+  flex-shrink: 0;
+}
+
+.statusDotLive {
+  background: var(--liq-long);
+  box-shadow: 0 0 6px var(--liq-long);
+  animation: pulse 2s infinite;
+}
+
+.statusDotConnecting {
+  background: var(--liq-alert);
+  animation: pulse 1s infinite;
+}
+
+.statusDotError {
+  background: var(--liq-short);
+}
+
+/* ─── Buttons ─────────────────────── */
+.btn {
+  background: var(--liq-bg-2);
+  color: var(--liq-text-0);
+  border: 1px solid var(--liq-border);
+  padding: 5px 10px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.15s;
+}
+
+.btn:hover {
+  background: var(--liq-bg-3);
+  border-color: var(--liq-border-bright);
+}
+
+.btnActive {
+  background: var(--liq-bg-3);
+  border-color: var(--liq-alert);
+  color: var(--liq-alert);
+}
+
+/* ─── Alerts ─────────────────────── */
+.alertsSection {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--liq-border);
+  background: var(--liq-bg-1);
+}
+
+.sectionTitle {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--liq-text-2);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.count {
+  background: var(--liq-bg-3);
+  color: var(--liq-text-1);
+  padding: 1px 6px;
+  border-radius: 2px;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.countHot {
+  background: var(--liq-alert-dim);
+  color: var(--liq-alert);
+}
+
+.alertCard {
+  background: linear-gradient(90deg, var(--liq-bg-2) 0%, var(--liq-bg-1) 100%);
+  border: 1px solid var(--liq-alert);
+  border-left-width: 3px;
+  padding: 8px 12px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  animation: alertSlide 0.4s ease-out;
+  min-width: 280px;
+}
+
+.alertCardLongLiq {
+  border-color: var(--liq-short);
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.1) 0%, var(--liq-bg-1) 100%);
+}
+
+.alertCardShortLiq {
+  border-color: var(--liq-long);
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.1) 0%, var(--liq-bg-1) 100%);
+}
+
+.alertTypeLong {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: var(--liq-short-dim);
+  color: var(--liq-short);
+}
+
+.alertTypeShort {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: var(--liq-long-dim);
+  color: var(--liq-long);
+}
+
+/* ─── Toolbar ─────────────────────── */
+.toolbar {
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--liq-border);
+  background: var(--liq-bg-1);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.toolLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--liq-text-2);
+}
+
+.toolSelect {
+  background: var(--liq-bg-2);
+  color: var(--liq-text-0);
+  border: 1px solid var(--liq-border);
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 11px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* ─── Symbol Card ─────────────────────── */
+.symbolCard {
+  background: var(--liq-bg-1);
+  border: 1px solid var(--liq-border);
+  border-radius: 4px;
+  padding: 12px;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.symbolCard:hover {
+  border-color: var(--liq-border-bright);
+  background: var(--liq-bg-2);
+}
+
+.symbolCardIgnited {
+  border-color: var(--liq-alert) !important;
+  box-shadow: 0 0 0 1px var(--liq-alert-dim), 0 0 20px rgba(245, 158, 11, 0.15);
+}
+
+.symbolCardIgnited::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--liq-alert);
+  animation: igniteLine 2s infinite;
+}
+
+/* ─── Pressure Bar ─────────────────────── */
+.pressureBar {
+  position: relative;
+  height: 36px;
+  background: var(--liq-bg-0);
+  border: 1px solid var(--liq-border);
+  border-radius: 2px;
+  overflow: hidden;
+  display: flex;
+}
+
+.pressureSideLong {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  background: linear-gradient(90deg, transparent 0%, var(--liq-short-faint) 100%);
+}
+
+.pressureSideShort {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  background: linear-gradient(270deg, transparent 0%, var(--liq-long-faint) 100%);
+}
+
+.pressureCenterLine {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--liq-text-2);
+  z-index: 2;
+}
+
+.pressureTick {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+  padding: 2px;
+  flex: 1;
+}
+
+.pressureFillLong {
+  width: 100%;
+  background: var(--liq-short);
+  opacity: 0.5;
+  min-height: 2px;
+  transition: height 0.4s ease-out;
+}
+
+.pressureFillShort {
+  width: 100%;
+  background: var(--liq-long);
+  opacity: 0.5;
+  min-height: 2px;
+  transition: height 0.4s ease-out;
+}
+
+/* ─── Bias Bar ─────────────────────── */
+.biasBar {
+  height: 4px;
+  background: var(--liq-bg-3);
+  border-radius: 1px;
+  margin-top: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.biasFill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  transition: all 0.3s;
+}
+
+.biasCenter {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--liq-text-2);
+}
+
+/* ─── Metrics ─────────────────────── */
+.metricLabel {
+  font-size: 10px;
+  color: var(--liq-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metricValue {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--liq-text-0);
+}
+
+.metricPos { color: var(--liq-long) !important; }
+.metricNeg { color: var(--liq-short) !important; }
+.metricWarn { color: var(--liq-alert) !important; }
+.metricDim { color: var(--liq-text-2) !important; }
+
+/* ─── Status Bar ─────────────────────── */
+.statusBar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  background: var(--liq-bg-1);
+  border-top: 1px solid var(--liq-border);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  font-size: 10px;
+  color: var(--liq-text-2);
+  z-index: 50;
+}
+
+/* ─── Modal ─────────────────────── */
+.modal {
+  background: var(--liq-bg-1);
+  border: 1px solid var(--liq-border-bright);
+  border-radius: 6px;
+  padding: 24px;
+  max-width: 560px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--liq-text-0);
+}
+
+.modalTitle {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.modalSectionHead {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--liq-text-2);
+  margin-bottom: 8px;
+}
+
+.configRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--liq-border);
+}
+
+.configRow label {
+  color: var(--liq-text-1);
+  font-size: 11px;
+  flex: 1;
+}
+
+.configInput {
+  background: var(--liq-bg-2);
+  color: var(--liq-text-0);
+  border: 1px solid var(--liq-border);
+  padding: 4px 8px;
+  font-family: inherit;
+  border-radius: 3px;
+  width: 80px;
+  font-size: 11px;
+}
+
+.helpText {
+  color: var(--liq-text-1);
+  font-size: 11px;
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+.helpIcon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--liq-bg-3);
+  color: var(--liq-text-2);
+  font-size: 9px;
+  text-align: center;
+  line-height: 12px;
+  cursor: help;
+  margin-left: 4px;
+}
+
+/* ─── Scrollbar ─────────────────────── */
+.wrap ::-webkit-scrollbar { width: 8px; height: 8px; }
+.wrap ::-webkit-scrollbar-track { background: var(--liq-bg-0); }
+.wrap ::-webkit-scrollbar-thumb { background: var(--liq-border); border-radius: 4px; }
+.wrap ::-webkit-scrollbar-thumb:hover { background: var(--liq-border-bright); }
+
+/* ─── Toast ─────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 40px;
+  right: 20px;
+  padding: 10px 16px;
+  background: var(--liq-bg-2);
+  border: 1px solid var(--liq-border-bright);
+  border-radius: 4px;
+  font-size: 12px;
+  z-index: 2000;
+  animation: toastIn 0.3s ease-out;
+  max-width: 360px;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--liq-text-0);
+  pointer-events: none;
+}
+
+.toastError { border-color: var(--liq-short); }
+.toastSuccess { border-color: var(--liq-long); }
+
+/* ─── Spin ─────────────────────── */
+.spin {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--liq-text-3);
+  border-top-color: var(--liq-text-0);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* ─── Keyframes ─────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes igniteLine {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@keyframes alertSlide {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes toastIn {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

@@ -49,7 +49,7 @@ export const PerformanceChart = memo(({ chartRef, labelPositions, currentMetric 
                   </div>
                 </div>
                 {hoveredLabel === pos.label && (
-                  <div className="bg-[#0b0f1a]/98 backdrop-blur-3xl border border-white/20 rounded-[10px] py-2 px-3 shadow-2xl min-w-[100px] flex flex-col gap-1 animate-in fade-in zoom-in-95 duration-200 z-50">
+                  <div className="bg-background/98 backdrop-blur-3xl border border-white/20 rounded-[10px] py-2 px-3 shadow-2xl min-w-[100px] flex flex-col gap-1 animate-in fade-in zoom-in-95 duration-200 z-50">
                     <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{currentMetric.toUpperCase()}</div>
                     <div className="text-[13px] font-bold tracking-tight text-white leading-none tabular-nums">
                       {pos.value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}

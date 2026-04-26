@@ -14,7 +14,7 @@ export default function StrategyCodeSection({ strategyName, code, onChange, load
   if (!code && !loading) return null;
 
   return (
-    <div className="w-full bg-[#0c1221]/50 border border-white/[0.05] rounded-2xl overflow-hidden mt-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="w-full bg-background/50 border border-white/[0.05] rounded-2xl overflow-hidden mt-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Header */}
       <div className="px-6 py-4 border-b border-white/[0.05] bg-white/[0.02] flex items-center justify-between">
         <div className="flex items-center gap-3">

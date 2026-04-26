@@ -39,7 +39,7 @@ export default function BacktestMetricsBar({ results }: BacktestMetricsBarProps)
       {stats.map((stat, i) => (
         <div 
           key={i} 
-          className="bg-[#111622]/40 border border-white/[0.05] rounded-xl p-5 space-y-2 shadow-lg backdrop-blur-sm group hover:border-white/10 hover:bg-[#111622]/60 transition-all duration-300"
+          className="bg-background/40 border border-white/[0.05] rounded-xl p-5 space-y-2 shadow-lg backdrop-blur-sm group hover:border-white/10 hover:bg-background/60 transition-all duration-300"
         >
           <div className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] leading-none mb-1">
             {stat.label}

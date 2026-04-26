@@ -315,7 +315,7 @@ export default function Dashboard() {
         <title>Trinity AI Trading Dashboard</title>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
       </Head>
-      <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-[#060912] text-white">동기화 중...</div>}>
+      <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-background text-white">동기화 중...</div>}>
         <DashboardContent />
       </Suspense>
     </>

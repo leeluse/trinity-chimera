@@ -63,7 +63,7 @@ export default function BacktestRightPanel({
   const automationEnabled = automationStatus?.enabled ?? false;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-[#060912]/50">
+    <div className="flex flex-col h-full overflow-hidden bg-background/50">
       <PanelTabs />
       
       <div className="flex-1 overflow-y-auto min-h-0 flex flex-col no-scrollbar">

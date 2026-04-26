@@ -59,7 +59,7 @@ export default function LogCard({
   return (
     <div 
       onClick={onClick}
-      className="bg-[#0b0f1a] border border-white/[0.08] rounded-2xl overflow-hidden shrink-0 shadow-2xl group cursor-pointer"
+      className="bg-background border border-white/[0.08] rounded-2xl overflow-hidden shrink-0 shadow-2xl group cursor-pointer"
     >
       <div className="flex items-center justify-between px-4 py-3 sm:py-4">
         <div className="flex items-center gap-3">

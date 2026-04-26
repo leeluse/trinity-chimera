@@ -26,7 +26,7 @@ export const PerformanceDetails = ({ results }: PerformanceDetailsProps) => {
   };
 
   return (
-    <div className="bg-[#12122b]/60 border border-[rgba(189,147,249,0.12)] rounded-xl overflow-hidden shadow-xl backdrop-blur-xl h-full flex flex-col">
+    <div className="bg-background/60 border border-[rgba(189,147,249,0.12)] rounded-xl overflow-hidden shadow-xl backdrop-blur-xl h-full flex flex-col">
       <div className="px-6 py-4 border-b border-[rgba(189,147,249,0.12)] bg-[rgba(189,147,249,0.02)] flex items-center gap-3">
         <Activity size={14} className="text-[#bd93f9]" />
         <h3 className="text-[11px] font-black text-[#f8f8f2]/80 uppercase tracking-[0.2em] mb-0">Performance Analysis</h3>
