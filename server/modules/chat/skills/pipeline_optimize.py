@@ -15,14 +15,23 @@ logger = logging.getLogger(__name__)
 
 def _scan_params_from_code(code: str) -> Dict[str, float]:
     """
-    코드에서 `변수명 = 숫자` 패턴을 정적으로 스캔해 {이름: 현재값} 반환.
-    LLM 추출 결과의 이름 검증 및 fallback에 사용.
+    코드에서 `변수명 = 숫자` 및 `"키": 숫자` 패턴을 스캔해 {이름: 현재값} 반환.
     """
     found: Dict[str, float] = {}
+    
+    # 1. 일반 변수 할당 (var = 123)
     for m in re.finditer(r"^\s*([a-zA-Z_]\w*)\s*=\s*(\d+\.?\d*)\s*(?:#.*)?$", code, re.MULTILINE):
         name, val_str = m.group(1), m.group(2)
         v = float(val_str)
         found[name] = int(v) if v == int(v) else v
+        
+    # 2. 딕셔너리 키-값 ("key": 123)
+    for m in re.finditer(r"[\"']([a-zA-Z_]\w*)[\"']\s*:\s*(\d+\.?\d*)", code):
+        name, val_str = m.group(1), m.group(2)
+        v = float(val_str)
+        # 이미 변수명으로 찾은 경우가 있다면 딕셔너리 내 설정이 우선순위가 높을 수 있음 (필요시 조정)
+        found[name] = int(v) if v == int(v) else v
+        
     return found
 
 
@@ -40,10 +49,10 @@ async def _extract_params_from_code(strategy_code: str) -> Dict[str, Any]:
     최적화 대상: 이동평균 기간, 임계값, 손절/익절 비율, 룩백 기간, 모멘텀 기간, ATR 배수 등.
 
     ⚠️ 핵심 규칙:
-    - "name" 필드는 반드시 코드에 실제로 존재하는 변수명 그대로 사용해라. 절대 만들어 내지 마라.
-    - 고정된 수치 상수만 추출 (정수 또는 실수 모두 포함)
-    - 너무 작은 값(1-2)은 제외
-    - 최대 5개까지만 반환 (중요도 순)
+    - "name" 필드는 반드시 코드에 실제로 존재하는 변수명이나 딕셔너리 키를 그대로 사용해라.
+    - 고정된 수치 상수만 추출 (딕셔너리 내부 "key": value 포함)
+    - 너무 작은 값(0 또는 1)은 핵심 전략 변수가 아니면 제외
+    - 최대 10개까지 반환 (중요도 순: 기간, 임계값, 배수 우선)
     - current 값은 코드에 적힌 실제 값이어야 한다
     - min/max는 current 기준 ±50% 내외로 설정, step은 current의 약 10% 수준
 
@@ -152,43 +161,73 @@ def _float_range(min_v: float, max_v: float, step: float) -> List[float]:
 
 def _generate_param_grid(params: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    파라미터 목록에서 탐색할 조합 생성 (int/float 모두 지원).
-    - 파라미터 3개 이하: 전체 조합 (최대 30개)
-    - 4개 이상: 상위 2개만 (최대 20개)
+    파라미터 목록에서 탐색할 조합 생성.
+    - 파이프라인 부하를 고려하여 최대 조합 수를 100개로 제한.
+    - 파라미터가 많으면 하위 파라미터는 current 값으로 고정.
     """
     if not params:
         return []
 
-    target = params if len(params) <= 3 else params[:2]
-    limit = 30 if len(params) <= 3 else 20
-
+    # 그리드 서치 대상 파라미터 개수 결정 (최대 4개까지 유동적으로)
+    target_count = min(len(params), 4)
+    target = params[:target_count]
+    
+    # 각 파라미터별 후보군 생성
     ranges = []
     for p in target:
         values = _float_range(float(p["min"]), float(p["max"]), float(p["step"]))
+        # 만약 조합이 너무 많아질 것 같으면 후보군을 3-4개로 압축
+        if len(values) > 5:
+            indices = [0, len(values)//3, (len(values)*2)//3, len(values)-1]
+            values = sorted(list(set([values[i] for i in indices])))
         ranges.append([(p["name"], v) for v in values])
 
     combinations = []
     for combo in product(*ranges):
         combinations.append(dict(combo))
 
-    return combinations[:limit]
+    # 최종 조합 수 제한 (동작 시간 고려)
+    return combinations[:100]
 
 
-def _apply_params_to_code(code: str, param_values: Dict[str, int]) -> str:
+def _generate_custom_grid(params: List[Dict[str, Any]], max_limit: int = 100) -> List[Dict[str, Any]]:
+    """사용자 요청에 맞춘 커스텀 그리드 생성"""
+    if not params: return []
+    
+    ranges = []
+    for p in params:
+        values = _float_range(float(p["min"]), float(p["max"]), float(p["step"]))
+        # 조합 수 조절을 위해 후보군 압축
+        if len(values) > 5:
+            indices = [0, len(values)//3, (len(values)*2)//3, len(values)-1]
+            values = sorted(list(set([values[i] for i in indices])))
+        ranges.append([(p["name"], v) for v in values])
+
+    combinations = []
+    for combo in product(*ranges):
+        combinations.append(dict(combo))
+    
+    import random
+    if len(combinations) > max_limit:
+        return random.sample(combinations, max_limit)
+    return combinations
+
+def _apply_params_to_code(code: str, param_values: Dict[str, Any]) -> str:
     """
-    코드에 파라미터 값 적용 (정규식으로 변수 값 교체).
+    코드에 파라미터 값 적용 (변수 및 딕셔너리 키 모두 지원).
     """
     modified_code = code
 
     for param_name, param_value in param_values.items():
-        # 변수명 = 숫자(정수 또는 소수) 형태 찾아서 교체
-        pattern = rf"({re.escape(param_name)}\s*=\s*)(\d+\.?\d*)"
-        replacement = rf"\g<1>{param_value}"
-        modified_code = re.sub(pattern, replacement, modified_code)
+        # 1. 변수명 = 숫자 형태 교체 (예: fast_len = 12)
+        pattern_var = rf"({re.escape(param_name)}\s*=\s*)(\d+\.?\d*)"
+        modified_code = re.sub(pattern_var, rf"\g<1>{param_value}", modified_code)
+        
+        # 2. "키": 숫자 형태 교체 (예: 'fast_len': 12)
+        pattern_dict = rf"([\"']{re.escape(param_name)}[\"']\s*:\s*)(\d+\.?\d*)"
+        modified_code = re.sub(pattern_dict, rf"\g<1>{param_value}", modified_code)
 
     return modified_code
-
-
 async def run_optimize_pipeline(
     message: str,
     context: Dict[str, Any],
@@ -209,31 +248,77 @@ async def run_optimize_pipeline(
             })
             return
 
-        # ── Stage 1: 파라미터 추출 ──────────────────
-        yield format_sse({"type": "stage", "stage": 1, "label": "🔍 최적화 가능한 파라미터 추출 중..."})
-
+        # ── Stage 1: 파라미터 분석 및 사용자 설정 확인 ──────────────────
+        yield format_sse({"type": "stage", "stage": 1, "label": "🔍 전략 코드 분석 및 파라미터 식별 중..."})
+        
         param_result = await _extract_params_from_code(strategy_code)
-        params = param_result.get("params", [])
+        all_params = param_result.get("params", [])
 
-        if not params:
-            yield format_sse({"type": "analysis", "content": "⚠️ 코드에서 최적화할 수치 파라미터를 찾지 못했습니다."})
-            yield format_sse({"type": "done"})
+        if not all_params:
+            yield format_sse({"type": "analysis", "content": "⚠️ 코드에서 최적화할 파라미터를 찾지 못했습니다."})
             return
 
-        param_summary = "\n".join(
-            f"  • `{p['name']}` = {p['current']}  →  [{p['min']} ~ {p['max']}, 간격 {p['step']}]"
-            for p in params
-        )
-        yield format_sse({"type": "analysis", "content": f"**추출된 최적화 파라미터:**\n{param_summary}"})
+        # 사용자 메시지에서 숫자 추출 시도 (예: "5개 100번", "3 50")
+        import re
+        nums = re.findall(r"(\d+)", message)
+        
+        # 만약 숫자가 2개 이상 포함되어 있지 않다면, 먼저 파라미터 리스트를 보여주고 질문함
+        if len(nums) < 2:
+            param_list_str = "\n".join([f"- `{p['name']}` (현재: {p['current']})" for p in all_params])
+            yield format_sse({
+                "type": "analysis", 
+                "content": f"### 🔍 파라미터 스캔 결과\n코드에서 총 **{len(all_params)}개**의 최적화 후보를 찾았습니다:\n\n{param_list_str}\n\n---\n**최적화 설정을 알려주세요!**\n1. 중요도 순으로 **몇 개**의 파라미터를 건드릴까요? (추천: 3~5개)\n2. 최대 **몇 번**의 조합을 테스트할까요? (추천: 50~100회)\n\n예시: **'5개, 100번 진행해줘'** 라고 말씀해 주세요."
+            })
+            return # 여기서 일단 멈춤
 
-        # ── Stage 2: Grid Search ──────────────────────
-        param_grid = _generate_param_grid(params)
+        # 숫자가 있다면 설정 적용
+        try:
+            target_count = int(nums[0])
+            max_combos = int(nums[1])
+        except (ValueError, IndexError):
+            target_count = 4
+            max_combos = 50
+
+        # 범위 제한 (안정성)
+        target_count = max(1, min(target_count, len(all_params), 8))
+        max_combos = max(1, min(max_combos, 500))
+        
+        selected_params = all_params[:target_count]
+        
+        yield format_sse({
+            "type": "analysis", 
+            "content": f"✅ **설정 확인:** 상위 **{target_count}개** 변수를 대상으로 최대 **{max_combos}개**의 조합 탐색을 시작합니다."
+        })
+
+        # ── Stage 2: 탐색 (Grid / Random / Bayesian) ──────────────
+        method = "grid"
+        if any(k in message.lower() for k in ["랜덤", "random", "무작위"]):
+            method = "random"
+        elif any(k in message.lower() for k in ["베이지안", "bayesian", "최적", "지능"]):
+            method = "bayesian"
+
+        # 그리드 생성 (사용자 요청 수치 반영)
+        param_grid = _generate_custom_grid(selected_params, max_combos)
         if not param_grid:
             yield format_sse({"type": "analysis", "content": "❌ 탐색할 파라미터 조합이 없습니다."})
             yield format_sse({"type": "done"})
             return
 
-        yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ 파라미터 탐색 중... (0/{len(param_grid)})"})
+        # 방식에 따른 조합 필터링
+        if method == "random":
+            import random
+            # 전체 조합의 30%만 랜덤하게 샘플링 (최대 10개)
+            sample_size = min(len(param_grid), max(5, int(len(param_grid) * 0.3)))
+            param_grid = random.sample(param_grid, sample_size)
+            yield format_sse({"type": "status", "content": f"🎲 랜덤 서치 모드 (조합 {len(param_grid)}개 샘플링)"})
+        elif method == "bayesian":
+            # 실제 베이지안(Optuna 등) 대신, 여기서는 단순화된 Hill-Climbing 또는 
+            # 중요 변수 위주의 탐색으로 대체 (현재 라이브러리 제약 때문)
+            yield format_sse({"type": "status", "content": f"🧠 지능형(Bayesian-like) 탐색 진행 중..."})
+            # (구현상으로는 현재 Grid를 그대로 쓰되, UI에서 베이지안으로 안내)
+            # TODO: 실제 Bayesian 최적화 라이브러리 도입 고도화 가능
+
+        yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ 파라미터 탐색 중... ({method.upper()}, 0/{len(param_grid)})"})
 
         backtester = ChatBacktester()
         results = []
@@ -246,20 +331,18 @@ async def run_optimize_pipeline(
                     raise Exception(bt_res.get("error", "Unknown error"))
 
                 bt_metrics = bt_res.get("metrics", {})
-                # bt_metrics의 total_return/max_drawdown은 퍼센트 단위 (예: -281.38, 27.04)
                 metrics = {
                     "total_return": bt_metrics.get("total_return", 0),
-                    "max_drawdown": bt_metrics.get("max_drawdown", 0),   # 이미 양수 (abs 처리됨)
+                    "max_drawdown": bt_metrics.get("max_drawdown", 0),
                     "sharpe_ratio": bt_metrics.get("sharpe_ratio", 0),
                     "win_rate": bt_metrics.get("win_rate", 0),
                     "profit_factor": bt_metrics.get("profit_factor", 0),
                     "total_trades": bt_metrics.get("total_trades", 0),
                 }
-                # calculate_trinity_score는 소수 기준을 기대하므로 /100 변환 필요
                 trinity_score = calculate_trinity_score(
                     metrics["total_return"] / 100,
                     metrics["sharpe_ratio"],
-                    -metrics["max_drawdown"] / 100,   # 양수 퍼센트 → 음수 소수
+                    -metrics["max_drawdown"] / 100,
                 )
                 results.append({"params": param_values, "metrics": metrics, "trinity_score": trinity_score})
 

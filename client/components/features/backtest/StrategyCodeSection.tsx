@@ -1,8 +1,7 @@
 "use client";
 
+import CodeEditor from "@/components/common/CodeEditor";
 import { Terminal, ShieldCheck, Cpu } from "lucide-react";
-import CodeEditor from "../common/CodeEditor";
-
 interface StrategyCodeSectionProps {
   strategyName: string;
   code: string;
@@ -42,8 +41,8 @@ export default function StrategyCodeSection({ strategyName, code, onChange, load
       {/* Code Editor Area */}
       <div className="relative group">
         <div className="absolute inset-0 bg-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-        <CodeEditor 
-          code={loading ? "// 전략 로직을 불러오는 중..." : code} 
+        <CodeEditor
+          code={loading ? "// 전략 로직을 불러오는 중..." : code}
           onChange={onChange}
         />
       </div>

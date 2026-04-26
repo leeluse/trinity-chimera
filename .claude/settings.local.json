@@ -37,7 +37,14 @@
       "Bash(curl -s http://192.168.0.3:4000/v1/models -H \"Authorization: Bearer sk-dummy\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('server/modules/chat/handler.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(curl -s http://192.168.0.3:4000/v1/models)",
-      "Bash(python -m py_compile server/modules/chat/skills/pipeline_optimize.py)"
+      "Bash(python -m py_compile server/modules/chat/skills/pipeline_optimize.py)",
+      "Bash(npm exec *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(cat)",
+      "Bash(node /tmp/verify.js)",
+      "Read(//tmp/**)",
+      "Bash(git commit *)"
     ],
     "tools": "dontAsk",
     "commands": "dontAsk",

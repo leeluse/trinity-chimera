@@ -3,9 +3,7 @@
 import { useEffect, useRef, useState, useMemo, useCallback, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Chart from "chart.js/auto";
-import {
-  AGENT_IDS as DEFAULT_AGENT_IDS
-} from "../lib/api";
+
 
 // Centralized Components Import
 import {
@@ -21,7 +19,7 @@ import { AppRightPanel } from "@/components/layout/AppRightPanel";
 // Externalized Constants/Types/Styles
 import { COLORS, NAMES } from "@/constants";
 import { useDashboardStore } from "@/store/useDashboardStore";
-import { useDashboardQueries, useAgentTimeseries } from "@/hooks/useDashboardQueries";
+import { useDashboardQueries } from "@/hooks/useDashboardQueries";
 import { MarketAPI } from "@/api";
 
 const DAYS = 96; // 96 intervals of 15 minutes = 24 hours
@@ -62,7 +60,7 @@ function DashboardContent() {
   const chartRef = useRef<HTMLCanvasElement | null>(null);
   const chartInstance = useRef<Chart | null>(null);
   const currentMetric = useDashboardStore((state) => state.currentMetric);
-  const chartActiveAgent = useDashboardStore((state) => state.chartActiveAgent);
+  const chartActiveBot = useDashboardStore((state) => state.chartActiveBot);
 
   const [btcHistory, setBtcHistory] = useState<number[]>([]);
 
@@ -83,36 +81,22 @@ function DashboardContent() {
 
   const {
     isLoading: isLoadingInitial,
-    evolutionEvents,
-    decisionLogs,
     botTrades,
     bots,
     automationStatus,
-    metricsData,
-    dashboardProgress,
     toggleAutomation
   } = useDashboardQueries({
-    enableEvolutionLogs: true,
-    enableDecisionLogs: true,
     statsIntervalMs: 6000,
     logsIntervalMs: 8000,
   });
 
   const runtimeAgentIds = useMemo(() => {
-    let rawIds: string[] = [];
     if (bots && bots.length > 0) {
-      rawIds = bots.map((b: any) => b.id);
-    } else if (!dashboardProgress && !metricsData) {
-      rawIds = [DEFAULT_AGENT_IDS[0]];
-    } else {
-      const p = (dashboardProgress?.active_agents?.length || 0) > 0 ? dashboardProgress!.active_agents! : (dashboardProgress?.agents || []);
-      rawIds = p.length > 0 ? p : (Object.keys(metricsData?.agents || {}).length > 0 ? Object.keys(metricsData!.agents) : Array.from(DEFAULT_AGENT_IDS));
+      return [...new Set(bots.map((b: any) => b.id))].sort();
     }
-    return [...new Set(rawIds)].sort();
-  }, [bots, dashboardProgress, metricsData]);
+    return [];
+  }, [bots]);
   const runtimeAgentIdsKey = useMemo(() => runtimeAgentIds.join("|"), [runtimeAgentIds]);
-
-  const { data: timeseriesData = {} } = useAgentTimeseries(currentMetric, runtimeAgentIds);
 
   const [labelPositions, setLabelPositions] = useState<LabelPosition[]>([]);
   const labelPositionsRef = useRef<LabelPosition[]>([]);
@@ -121,11 +105,9 @@ function DashboardContent() {
     return runtimeAgentIds.map((id, idx) => {
       const bot = bots.find((b: any) => b.id === id);
       if (bot) return bot.name;
-      const m = metricsData?.agents?.[id]?.name;
-      if (m && m !== id) return m;
-      return NAMES[idx] || "Agent " + (idx + 1);
+      return NAMES[idx] || "Bot " + (idx + 1);
     });
-  }, [bots, metricsData, runtimeAgentIds]);
+  }, [bots, runtimeAgentIds]);
 
   const chartNames = useMemo(() => [...agentNames, "BTC BnH"], [agentNames]);
 
@@ -142,10 +124,7 @@ function DashboardContent() {
         if (currentMetric === "equity") data = btcHistory.length > 0 ? btcHistory : Array(DAYS).fill(77000);
         else data = btcHistory.length > 0 ? btcHistory.map(p => ((p - btcHistory[0]) / btcHistory[0]) * 100) : Array(DAYS).fill(0);
       } else {
-        const ad = timeseriesData[id] || [];
-        if (ad.length > 0) {
-          data = ad;
-        } else if (bot) {
+        if (bot) {
           const s = bot.sim_state || {};
           const b = (currentMetric === "equity") ? (s.equity || 10000) : (s.total_return_pct || 0);
           data = Array(DAYS).fill(b);
@@ -154,7 +133,7 @@ function DashboardContent() {
         }
       }
 
-      const isH = chartActiveAgent !== "ALL" && id !== chartActiveAgent && !isBT;
+      const isH = chartActiveBot !== "ALL" && id !== chartActiveBot && !isBT;
       const cColor = color.length > 7 ? color.substring(0, 7) : color;
 
       return {
@@ -177,13 +156,13 @@ function DashboardContent() {
         yAxisID: isBT ? 'y1' : 'y',
       };
     });
-  }, [runtimeAgentIds, currentMetric, btcHistory, bots, timeseriesData, chartActiveAgent]);
+  }, [runtimeAgentIds, currentMetric, btcHistory, bots, chartActiveBot]);
 
   const dataValueKey = useMemo(() => {
     const botValues = bots.map(b => `${b.id}:${b.sim_state?.equity || 0}:${b.sim_state?.total_return_pct || 0}`).join("|");
     const btcVal = btcHistory.length > 0 ? btcHistory[btcHistory.length - 1] : 0;
-    return `${currentMetric}|${chartActiveAgent}|${botValues}|${btcVal}`;
-  }, [bots, btcHistory, currentMetric, chartActiveAgent]);
+    return `${currentMetric}|${chartActiveBot}|${botValues}|${btcVal}`;
+  }, [bots, btcHistory, currentMetric, chartActiveBot]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -237,7 +216,7 @@ function DashboardContent() {
     if (chartInstance.current) {
       const newDs = buildDatasets();
       chartInstance.current.data.datasets = newDs;
-      chartInstance.current.update('default');
+      chartInstance.current.update('none');
     }
   }, [dataValueKey, buildDatasets]);
 
@@ -247,9 +226,6 @@ function DashboardContent() {
         <AppRightPanel
           agentIds={runtimeAgentIds}
           names={agentNames}
-          metricsData={metricsData}
-          evolutionEvents={evolutionEvents}
-          decisionLogs={decisionLogs}
           botTrades={botTrades}
           automationStatus={automationStatus}
           onToggleAutomation={() => toggleAutomation(!automationStatus?.enabled)}
@@ -259,8 +235,8 @@ function DashboardContent() {
       <PageLayout.Main>
         <PageHeader
           isLoading={isLoadingInitial}
-          statusText={dashboardProgress ? `${dashboardProgress.active_improvements}개 개선 진행` : 'System Live'}
-          statusColor={(dashboardProgress?.active_improvements || 0) > 0 ? "blue" : "green"}
+          statusText="System Live"
+          statusColor="green"
         />
 
         <div className="relative px-6 py-2">

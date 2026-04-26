@@ -5,6 +5,13 @@ import { fmt } from "@/app/scanner/utils";
 import { SIGNAL_META } from "@/app/scanner/constants";
 import { DeepDivePanel } from "./DeepDivePanel";
 
+const STAGE_META = {
+  0: { label: "S0", cls: "text-slate-600 border-slate-700/50 bg-slate-900" },
+  1: { label: "S1", cls: "text-purple-400 border-purple-500/30 bg-purple-500/10" },
+  2: { label: "S2", cls: "text-amber-400 border-amber-500/30 bg-amber-500/10" },
+  3: { label: "S3", cls: "text-green-400 border-green-500/30 bg-green-500/10 shadow-[0_0_8px_rgba(34,197,94,0.15)]" },
+} as const;
+
 interface CandidateRowProps {
   candidate: Candidate;
   rank: number;
@@ -14,7 +21,6 @@ interface CandidateRowProps {
   topSectors: Set<string>;
   botSectors: Set<string>;
   regimeLabel: string;
-  regimeAdaptive: boolean;
   shortLiq5m?: number;
   longLiq5m?: number;
 }
@@ -28,11 +34,18 @@ export function CandidateRow({
   topSectors,
   botSectors,
   regimeLabel,
-  regimeAdaptive,
   shortLiq5m,
   longLiq5m,
 }: CandidateRowProps) {
   const rs = c.change24 - btcChange24;
+  const activeSignals = SIGNAL_META
+    .filter(({ key }: { key: string }) => c.signals[key]?.score > 40)
+    .sort(
+      (a: { key: string }, b: { key: string }) =>
+        (c.signals[b.key]?.score ?? 0) - (c.signals[a.key]?.score ?? 0)
+    );
+  const visibleSignals = activeSignals.slice(0, 4);
+  const hiddenSignalCount = Math.max(0, activeSignals.length - visibleSignals.length);
 
   return (
     <>
@@ -43,6 +56,20 @@ export function CandidateRow({
         <td className="px-3 py-3">
           <div className="flex items-center gap-2">
             <span className="font-mono text-[13px] font-bold text-white/90">{c.symbol.replace("USDT", "")}</span>
+            <span
+              className={cn(
+                "font-mono text-[8px] font-black tracking-[0.1em] px-1.5 py-0.5 border rounded-sm",
+                STAGE_META[c.stage].cls
+              )}
+            >
+              {STAGE_META[c.stage].label}
+            </span>
+            {c.contextScore >= 62 && (
+              <span className="text-[9px] text-green-400 font-bold">▲</span>
+            )}
+            {c.contextScore <= 38 && (
+              <span className="text-[9px] text-red-400 font-bold">▼</span>
+            )}
             {c.pumpFlagged && (
               <span className="px-1 py-0.5 text-[8px] font-mono font-black tracking-[0.2em] bg-red-500/15 text-red-500 border border-red-500/20 rounded-sm">PUMP</span>
             )}
@@ -85,7 +112,7 @@ export function CandidateRow({
         </td>
         <td className="px-3 py-3">
           <div className="flex gap-1 flex-wrap">
-            {SIGNAL_META.filter(({ key }: { key: string }) => c.signals[key]?.score > 40).map(({ key, emoji }: { key: string; emoji: string }) => (
+            {visibleSignals.map(({ key, emoji }: { key: string; emoji: string }) => (
               <span
                 key={key}
                 className="inline-flex items-center justify-center w-5 h-5 text-xs bg-white/5 border border-white/10 rounded-sm cursor-help hover:bg-white/10 transition-colors"
@@ -94,7 +121,12 @@ export function CandidateRow({
                 {emoji}
               </span>
             ))}
-            {SIGNAL_META.filter(({ key }: { key: string }) => c.signals[key]?.score > 40).length === 0 && (
+            {hiddenSignalCount > 0 && (
+              <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 text-[9px] font-mono text-slate-400 border border-white/10 rounded-sm">
+                +{hiddenSignalCount}
+              </span>
+            )}
+            {activeSignals.length === 0 && (
               <span className="text-muted-foreground/30 text-[10px] tracking-[0.1em]">—</span>
             )}
           </div>

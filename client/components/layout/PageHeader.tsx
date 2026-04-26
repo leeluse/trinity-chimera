@@ -103,11 +103,29 @@ export const PageHeader = ({
               </Link>
 
               <Link
-                href="/liquidation"
+                href="/hunter"
                 className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-orange-400 hover:border-orange-500/50 transition-all text-[11px] font-mono font-semibold tracking-wide"
+                title="Hunter V16"
+              >
+                <span className="text-orange-500">🎯</span>
+                <span>HUNTER</span>
+              </Link>
+
+              <Link
+                href="/terminal"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-blue-400 hover:border-blue-500/50 transition-all text-[11px] font-mono font-semibold tracking-wide"
+                title="Alpha Terminal"
+              >
+                <span className="text-blue-500">⌨</span>
+                <span>TERMINAL</span>
+              </Link>
+
+              <Link
+                href="/liquidation"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-red-400 hover:border-red-500/50 transition-all text-[11px] font-mono font-semibold tracking-wide"
                 title="청산 압력 지도"
               >
-                <span className="text-orange-500">🔥</span>
+                <span className="text-red-500">🔥</span>
                 <span>LIQ MAP</span>
               </Link>
 

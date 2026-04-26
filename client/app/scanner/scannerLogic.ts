@@ -297,6 +297,28 @@ export function sigVolSurge(candles5m: Array<{ v: number }> | undefined): { scor
   return { score: Math.min(100, Math.max(0, Math.log2(ratio) * 40)), note: `급등 ${ratio.toFixed(2)}x` };
 }
 
+// Context 점수(sigFlow 출력, [0-100])를 Opportunity 배수로 변환
+// 50이 중립. >62 매수 편향, <38 매도 편향
+export function computeContextMult(contextScore: number): number {
+  if (contextScore >= 72) return 1.30;
+  if (contextScore >= 62) return 1.15;
+  if (contextScore >= 45) return 1.00;
+  if (contextScore >= 35) return 0.85;
+  return 0.70;
+}
+
+// REST 스냅샷 기반 pseudo-stage
+// S0: 컨텍스트 없음
+// S1: 컨텍스트 유리 (FR/OI/L-S 편향)
+// S2: 컨텍스트 + 기회 패턴 모두 강함
+// S3: S2 + 타이밍(거래량 급등) 확인
+export function calcStage(contextScore: number, oppScore: number, timingScore: number): 0 | 1 | 2 | 3 {
+  if (contextScore < 55) return 0;
+  if (oppScore < 50) return 1;
+  if (timingScore < 40) return 2;
+  return 3;
+}
+
 export function computeSectorMomentum(tickers: any[]) {
   const bySector: Record<string, any> = {};
   tickers.forEach(t => {

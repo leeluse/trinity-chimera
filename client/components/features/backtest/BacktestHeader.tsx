@@ -15,6 +15,8 @@ interface BacktestHeaderProps {
   strategy: string;
   strategies: any[];
   setStrategy: (s: string) => void;
+  strategyTitle?: string;
+  setStrategyTitle?: (t: string) => void;
   onRun: () => void;
   onDeploy?: () => void;
   onCopy?: () => void;
@@ -31,6 +33,8 @@ export default function BacktestHeader({
   strategy,
   strategies,
   setStrategy,
+  strategyTitle,
+  setStrategyTitle,
   onRun,
   onDeploy,
   onCopy,
@@ -38,25 +42,25 @@ export default function BacktestHeader({
   onTabChange,
   loading
 }: BacktestHeaderProps) {
-  const currentStrategyLabel = strategies.find(s => s.key === strategy)?.label || strategy;
   const TABS = ["코드", "지표", "거래 내역"];
 
   return (
     <div className="flex flex-col gap-3 p-3 border-b border-white/[0.05] relative z-20">
-      {/* ... (rest of the component remains the same for the top row) */}
       {/* Top Row: Parameters & Primary Actions */}
       <div className="flex flex-wrap items-center gap-3">
-        {/* Strategy Selector */}
-        <div className="relative group">
-          <select 
-            value={strategy}
-            onChange={(e) => setStrategy(e.target.value)}
-            className="appearance-none bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2 pr-10 text-xs font-bold text-white/90 cursor-pointer focus:ring-1 focus:ring-purple-500/50 outline-none hover:bg-white/10 transition-all"
-          >
-            {strategies.map(s => <option key={s.key} value={s.key} className="bg-background">{s.label}</option>)}
-          </select>
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none flex items-center gap-2">
-            <ChevronDown size={14} className="text-slate-500" />
+        {/* Strategy Selector & Title Input */}
+        <div className="flex items-center gap-1.5 bg-white/[0.03] border border-white/10 rounded-xl px-1.5 py-1">
+          <div className="relative group">
+            <select 
+              value={strategy}
+              onChange={(e) => setStrategy(e.target.value)}
+              className="appearance-none bg-transparent border-none rounded-lg pl-3 pr-8 py-1.5 text-xs font-bold text-white/90 cursor-pointer focus:ring-0 outline-none hover:bg-white/5 transition-all"
+            >
+              {strategies.map(s => <option key={s.key} value={s.key} className="bg-background">{s.label}</option>)}
+            </select>
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+              <ChevronDown size={14} className="text-slate-500" />
+            </div>
           </div>
         </div>
 

@@ -70,6 +70,7 @@ export default function BacktestPage() {
   const [endDate, setEndDate] = useState("2024-04-15");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
+  const [strategyTitle, setStrategyTitle] = useState("");
 
   const { evolutionEvents, decisionLogs, automationStatus, toggleAutomation } = useDashboardQueries();
 
@@ -96,6 +97,7 @@ export default function BacktestPage() {
       setStrategies(loaded);
       if (loaded.length > 0 && !strategy) {
         setStrategy(loaded[0].key);
+        setStrategyTitle(loaded[0].label);
       }
     };
     void loadStrategies();
@@ -183,7 +185,16 @@ export default function BacktestPage() {
       return;
     }
 
-    const title = strategies.find(s => s.key === strategy)?.label || strategy || "New Strategy";
+    const currentLabel = strategies.find(s => s.key === strategy)?.label;
+    const defaultTitle = strategyTitle || currentLabel || strategy || "";
+    
+    // 배포 시점에 항상 이름을 묻도록 함 (사용자 요청)
+    const customTitle = window.prompt("🚀 배포할 전략의 이름을 입력하세요:", defaultTitle);
+    
+    if (customTitle === null) return; // 취소 버튼 클릭 시 중단
+    
+    const title = customTitle.trim() || `${defaultTitle}_deployed`;
+    setStrategyTitle(title);
     
     setLoading(true);
     try {
@@ -219,6 +230,7 @@ export default function BacktestPage() {
     setStrategyCode(code);
     if (name) {
       setStrategy(name); 
+      setStrategyTitle(name);
     }
     if (payload) {
       applyBacktestPayload(payload);
@@ -249,6 +261,12 @@ export default function BacktestPage() {
     } finally {
       setCodeLoading(false);
     }
+  };
+
+  const handleStrategyChange = (newStrategy: string) => {
+    setStrategy(newStrategy);
+    const label = strategies.find(s => s.key === newStrategy)?.label || newStrategy;
+    setStrategyTitle(label);
   };
 
   useEffect(() => {
@@ -343,7 +361,8 @@ export default function BacktestPage() {
               timeframe={timeFrame} setTimeframe={setTimeFrame}
               startDate={startDate} setStartDate={setStartDate}
               endDate={endDate} setEndDate={setEndDate}
-              strategy={strategy} strategies={strategies} setStrategy={setStrategy}
+              strategy={strategy} strategies={strategies} setStrategy={handleStrategyChange}
+              strategyTitle={strategyTitle} setStrategyTitle={setStrategyTitle}
               onRun={handleStartTest}
               onDeploy={handleDeploy}
               onCopy={handleCopyResults}

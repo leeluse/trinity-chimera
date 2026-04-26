@@ -3,24 +3,24 @@ import { MetricKey } from '@/types';
 
 interface DashboardState {
   currentMetric: MetricKey;
-  activeAgent: string;
-  chartActiveAgent: string;
-  logActiveAgent: string;
+  activeBot: string;
+  chartActiveBot: string;
+  logActiveBot: string;
   
   setCurrentMetric: (metric: MetricKey) => void;
-  setActiveAgent: (id: string) => void;
-  setChartActiveAgent: (id: string) => void;
-  setLogActiveAgent: (id: string) => void;
+  setActiveBot: (id: string) => void;
+  setChartActiveBot: (id: string) => void;
+  setLogActiveBot: (id: string) => void;
 }
 
 export const useDashboardStore = create<DashboardState>((set) => ({
   currentMetric: 'equity',
-  activeAgent: 'ALL',
-  chartActiveAgent: 'ALL',
-  logActiveAgent: 'ALL',
+  activeBot: 'ALL',
+  chartActiveBot: 'ALL',
+  logActiveBot: 'ALL',
 
   setCurrentMetric: (metric) => set({ currentMetric: metric }),
-  setActiveAgent: (id) => set({ activeAgent: id }),
-  setChartActiveAgent: (id) => set({ chartActiveAgent: id }),
-  setLogActiveAgent: (id) => set({ logActiveAgent: id }),
+  setActiveBot: (id) => set({ activeBot: id }),
+  setChartActiveBot: (id) => set({ chartActiveBot: id }),
+  setLogActiveBot: (id) => set({ logActiveBot: id }),
 }));

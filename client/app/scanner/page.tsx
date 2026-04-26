@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { RefreshCw, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -13,6 +13,7 @@ import { AppRightPanel } from "@/components/layout/AppRightPanel"
 import { useDashboardQueries } from "@/hooks/useDashboardQueries"
 import { useMarketGlobal } from "@/hooks/useMarketGlobal"
 import { useLiquidationStream } from "@/hooks/useLiquidationStream"
+import { useRealtimeFunding } from "@/hooks/useRealtimeFunding"
 import { MarketGlobalBar } from "@/components/features/scanner/MarketGlobalBar"
 import { PreSignalPanel } from "@/components/features/scanner/PreSignalPanel"
 import { NAMES } from "@/constants"
@@ -25,7 +26,7 @@ import { SideStat } from "@/components/shared/SideStat"
 import { CONFIG, SIGNAL_META, MODE_WEIGHTS } from "./constants"
 import { Candidate, Ticker, SectorData, Signal } from "./types"
 import { fmt, fetchJson, sleep, getSector } from "./utils"
-import { sigMomentum, sigVolume, sigBreakout, sigCompression, sigFunding, sigOI, sigCapitulation, sigEarly, sigFlow, sigVolSurge } from "./scannerLogic"
+import { sigMomentum, sigVolume, sigBreakout, sigCompression, sigFunding, sigOI, sigCapitulation, sigEarly, sigFlow, sigVolSurge, computeContextMult, calcStage } from "./scannerLogic"
 
 export default function SoloScanner() {
   const [mode, setMode] = useState<string>("momentum")
@@ -33,7 +34,7 @@ export default function SoloScanner() {
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [btcData, setBtcData] = useState<Ticker | null>(null)
   const [ethData, setEthData] = useState<Ticker | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [expandedSym, setExpandedSym] = useState<string | null>(null)
@@ -48,6 +49,7 @@ export default function SoloScanner() {
   const [breadth, setBreadth] = useState({ up: 0, down: 0, pct: 50 })
   const [clock, setClock] = useState<Date | null>(null)
   const [mounted, setMounted] = useState(false)
+  const [started, setStarted] = useState(false)
 
   const {
     evolutionEvents,
@@ -67,6 +69,8 @@ export default function SoloScanner() {
 
   const marketGlobal = useMarketGlobal();
   const liqStream = useLiquidationStream();
+  const realtimeFunding = useRealtimeFunding()
+  const realtimeFundingRef = useRef<Record<string, number>>({})
 
   const runtimeAgentIds = useMemo(() => {
     if (bots && bots.length > 0) return bots.map((b: any) => b.id).sort()
@@ -87,6 +91,10 @@ export default function SoloScanner() {
     const interval = setInterval(() => setClock(new Date()), 1000)
     return () => clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    realtimeFundingRef.current = realtimeFunding
+  }, [realtimeFunding])
 
   const adaptiveWeights = useCallback((modeKey: string, regime: string) => {
     const base = { ...MODE_WEIGHTS[modeKey] }
@@ -115,11 +123,14 @@ export default function SoloScanner() {
   const computeComposite = useCallback((token: Ticker, btc: Ticker, modeKey: string, regime: string, topSecs: Set<string>, botSecs: Set<string>) => {
     const flowSig = sigFlow(
       token.funding ?? null,
-      token.oiChange24 ?? null,
+      token.oiChange1h ?? null,
       token.lsRatio ?? null,
       token.takerRatio ?? null,
-      token.change24
+      token.change1h ?? token.change24
     )
+    const contextScore = flowSig.score
+    const contextMult = computeContextMult(contextScore)
+
     const signals: Record<string, Signal> = {
       momentum: sigMomentum(token, btc),
       volume: sigVolume(token),
@@ -129,7 +140,6 @@ export default function SoloScanner() {
       oi: sigOI(token),
       capitulation: sigCapitulation(token),
       early: sigEarly(token),
-      volSurge: sigVolSurge(token.candles5m),
       flow: flowSig,
     }
 
@@ -144,19 +154,29 @@ export default function SoloScanner() {
     }
 
     const weights = adaptiveWeights(modeKey, regime)
-    let weightedSum = 0, totalWeight = 0
-    for (const k in signals) {
-      weightedSum += (signals[k].score * (weights as any)[k]) || 0
-      totalWeight += (weights as any)[k] * 100
+    const oppKeys = ["momentum", "volume", "breakout", "compression", "funding", "oi", "capitulation", "early"] as const
+    let weightedSum = 0
+    let totalWeight = 0
+    for (const k of oppKeys) {
+      const w = (weights as Record<string, number>)[k] ?? 0
+      weightedSum += signals[k].score * w
+      totalWeight += w * 100
     }
-    let composite = (weightedSum / totalWeight) * 100
+    const rawOpp = totalWeight > 0 ? (weightedSum / totalWeight) * 100 : 0
 
-    const strong = Object.values(signals).filter(s => s.score > 50).length
-    if (strong >= 4) composite *= 1.30
-    else if (strong >= 3) composite *= 1.20
-    else if (strong >= 2) composite *= 1.10
+    const strong = oppKeys.filter(k => signals[k].score > 50).length
+    let oppScore = rawOpp
+    if (strong >= 4) oppScore *= 1.30
+    else if (strong >= 3) oppScore *= 1.20
+    else if (strong >= 2) oppScore *= 1.10
 
-    if (signals.momentum.score > 60 && signals.capitulation.score > 60) composite *= 0.7
+    if (signals.momentum.score > 60 && signals.capitulation.score > 60) oppScore *= 0.7
+
+    const volSurgeSig = sigVolSurge(token.candles5m)
+    signals.volSurge = volSurgeSig
+    const timingBonus = volSurgeSig.score > 40 ? Math.min(20, (volSurgeSig.score - 40) / 3) : 0
+
+    let composite = oppScore * contextMult + timingBonus
 
     const sector = getSector(token.symbol)
     let narrativeMult = 1.0
@@ -166,6 +186,8 @@ export default function SoloScanner() {
     }
     composite *= narrativeMult
 
+    const stage = calcStage(contextScore, oppScore, volSurgeSig.score)
+
     return {
       score: Math.max(0, Math.min(100, composite)),
       signals,
@@ -173,6 +195,9 @@ export default function SoloScanner() {
       pumpFlagged,
       narrativeMult,
       sector,
+      contextScore,
+      contextMult,
+      stage,
     }
   }, [adaptiveWeights])
 
@@ -246,8 +271,8 @@ export default function SoloScanner() {
               fetchJson(`${CONFIG.API_BASE}/fapi/v1/klines?symbol=${t.symbol}&interval=1h&limit=60`).then((k: any) => Array.isArray(k) ? k.map((c: any) => parseFloat(String(c[4]))) : []).catch(() => []),
               fetchJson(`${CONFIG.API_BASE}/futures/data/openInterestHist?symbol=${t.symbol}&period=1h&limit=24`).then((o: any) => Array.isArray(o) ? o.map((x: any) => parseFloat(x.sumOpenInterest)) : []).catch(() => []),
               fetchJson(`${CONFIG.API_BASE}/fapi/v1/klines?symbol=${t.symbol}&interval=5m&limit=35`).catch(() => null),
-              fetchJson(`${CONFIG.API_BASE}/futures/data/globalLongShortAccountRatio?symbol=${t.symbol}&period=5m&limit=1`).catch(() => null),
-              fetchJson(`${CONFIG.API_BASE}/futures/data/takerlongshortRatio?symbol=${t.symbol}&period=5m&limit=6`).catch(() => null),
+              fetchJson(`${CONFIG.API_BASE}/futures/data/globalLongShortAccountRatio?symbol=${t.symbol}&period=5m&limit=4`).catch(() => null),
+              fetchJson(`${CONFIG.API_BASE}/futures/data/takerlongshortRatio?symbol=${t.symbol}&period=5m&limit=12`).catch(() => null),
             ])
             if (cd5mRaw && Array.isArray(cd5mRaw)) {
               t.candles5m = (cd5mRaw as any[]).map((c: any) => ({
@@ -255,7 +280,8 @@ export default function SoloScanner() {
               }));
             }
             if (lsRaw && Array.isArray(lsRaw) && (lsRaw as any[]).length > 0) {
-              t.lsRatio = parseFloat((lsRaw as any[])[0]?.longShortRatio ?? "1");
+              const vals = (lsRaw as any[]).map((x: any) => parseFloat(x.longShortRatio))
+              t.lsRatio = vals.reduce((s, v) => s + v, 0) / vals.length
             }
             if (tkRaw && Array.isArray(tkRaw) && (tkRaw as any[]).length > 0) {
               const vals = (tkRaw as any[]).map((x: any) => parseFloat(x.buySellRatio));
@@ -273,6 +299,11 @@ export default function SoloScanner() {
               t.change4h = (h1Close[h1Close.length - 1] - h1Close[h1Close.length - 5]) / h1Close[h1Close.length - 5] * 100
             }
             if (oiHist && oiHist.length >= 20) t.oiChange24 = (oiHist[oiHist.length - 1] - oiHist[0]) / oiHist[0] * 100
+            if (oiHist && oiHist.length >= 2) {
+              const last = oiHist[oiHist.length - 1]
+              const prev = oiHist[oiHist.length - 2]
+              t.oiChange1h = prev > 0 ? ((last - prev) / prev) * 100 : 0
+            }
           } catch { /* skip */ }
         }))
         setLoadProgress(`Phase 2: ${Math.min(i + CONFIG.BATCH_SIZE, phase2.length)}/${phase2.length} 분석 중…`)
@@ -297,11 +328,28 @@ export default function SoloScanner() {
           return { ...t, ...res } as Candidate
         }).sort((a, b) => b.score - a.score)
 
-      setCandidates(scored); setLastUpdate(new Date())
+      const enriched = scored.map(c => {
+        const liveFr = realtimeFundingRef.current[c.symbol]
+        if (liveFr !== undefined && liveFr !== null) {
+          return { ...c, funding: liveFr }
+        }
+        return c
+      })
+
+      setCandidates(enriched.slice(0, CONFIG.TOP_N_DISPLAY)); setLastUpdate(new Date())
     } catch (e) { setError(`스캔 실패: ${e instanceof Error ? e.message : "오류"}`) } finally { setLoading(false) }
   }, [mode, computeComposite])
 
-  useEffect(() => { runPipeline(); const interval = setInterval(runPipeline, CONFIG.AUTO_REFRESH_MS); return () => clearInterval(interval) }, [runPipeline])
+  useEffect(() => {
+    if (!started) return
+    const interval = setInterval(runPipeline, CONFIG.AUTO_REFRESH_MS)
+    return () => clearInterval(interval)
+  }, [started, runPipeline])
+
+  function handleStart() {
+    setStarted(true)
+    runPipeline()
+  }
 
   const displayCandidates = useMemo(() => candidates.filter(c => c.score >= minScore).slice(0, CONFIG.TOP_N_DISPLAY), [candidates, minScore])
 
@@ -393,16 +441,43 @@ export default function SoloScanner() {
 
       <PageLayout.Main>
         <PageHeader
-          isLoading={loading} statusText={dashboardProgress ? `${dashboardProgress.active_improvements}개 개선 진행` : 'System Live'}
-          statusColor={(dashboardProgress?.active_improvements || 0) > 0 ? "blue" : "green"}
+          isLoading={started && loading} statusText={started ? (dashboardProgress ? `${dashboardProgress.active_improvements}개 개선 진행` : "System Live") : "System Standby"}
+          statusColor={!started || (dashboardProgress?.active_improvements || 0) > 0 ? "blue" : "green"}
           extra={
             <div className="flex items-center gap-5 font-mono text-[11px] text-muted-foreground mr-2">
               <div className="flex items-center gap-2">
-                <span className={cn("w-2 h-2 rounded-full shadow-lg", loading ? "bg-amber-400 shadow-amber-400/50 animate-pulse" : error ? "bg-red-400 shadow-red-400/50" : "bg-green-400 shadow-green-400/50 animate-pulse")} />
-                <span className="hidden sm:inline">{loading ? "스캔 중" : error ? "오류" : "LIVE"}</span>
+                <span className={cn("w-2 h-2 rounded-full shadow-lg", !started ? "bg-slate-500 shadow-slate-500/40" : loading ? "bg-amber-400 shadow-amber-400/50 animate-pulse" : error ? "bg-red-400 shadow-red-400/50" : "bg-green-400 shadow-green-400/50 animate-pulse")} />
+                <span className="hidden sm:inline">{!started ? "STBY" : loading ? "스캔 중" : error ? "오류" : "LIVE"}</span>
               </div>
               <span className="hidden sm:inline">UPD {mounted && (lastUpdate ? fmt.time(lastUpdate) : (clock ? fmt.time(clock) : "--:--:--"))}</span>
-              <Button variant="outline" size="sm" className="h-8 px-3 font-mono text-[10px] tracking-[0.1em] uppercase bg-white/5 border-white/10 hover:border-cyan-500/50 hover:text-cyan-400 transition-all" onClick={runPipeline} disabled={loading}>
+              {!started ? (
+                <Button
+                  onClick={handleStart}
+                  className="h-8 px-4 font-mono text-[10px] tracking-[0.15em] uppercase bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 hover:border-green-400 transition-all"
+                >
+                  ▶ 가동
+                </Button>
+              ) : (
+                <div className="flex items-center gap-2 px-3 h-8 border border-white/10 rounded-md bg-white/5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shadow-[0_0_6px_rgba(74,222,128,0.6)]" />
+                  <span className="font-mono text-[9px] tracking-widest text-green-400 uppercase">감시중</span>
+                </div>
+              )}
+              <div className="flex items-center gap-1.5 px-2 h-8">
+                <span className={cn(
+                  "w-1.5 h-1.5 rounded-full",
+                  liqStream.connected
+                    ? "bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.5)] animate-pulse"
+                    : "bg-slate-600"
+                )} />
+                <span className={cn(
+                  "font-mono text-[8px] tracking-widest uppercase hidden sm:inline",
+                  liqStream.connected ? "text-cyan-400" : "text-slate-600"
+                )}>
+                  {liqStream.connected ? "LIQ LIVE" : "LIQ OFF"}
+                </span>
+              </div>
+              <Button variant="outline" size="sm" className="h-8 px-3 font-mono text-[10px] tracking-[0.1em] uppercase bg-white/5 border-white/10 hover:border-cyan-500/50 hover:text-cyan-400 transition-all" onClick={runPipeline} disabled={loading || !started}>
                 <RefreshCw className={cn("w-3 h-3 mr-1.5", loading && "animate-spin")} /> <span className="hidden md:inline">새로고침</span>
               </Button>
             </div>
@@ -448,13 +523,25 @@ export default function SoloScanner() {
                     </tr>
                   </thead>
                   <tbody>
-                    {loading && candidates.length === 0 ? (
+                    {!started ? (
+                      <tr>
+                        <td colSpan={12} className="py-24 text-center">
+                          <div className="font-mono text-[11px] tracking-[0.3em] text-slate-600 uppercase mb-4">SYSTEM STANDBY</div>
+                          <button
+                            onClick={handleStart}
+                            className="font-mono text-sm font-black tracking-[0.15em] uppercase px-8 py-3 border border-green-500/40 text-green-400 bg-green-500/10 rounded-lg hover:bg-green-500/20 hover:border-green-400 transition-all"
+                          >
+                            ▶ 가동
+                          </button>
+                        </td>
+                      </tr>
+                    ) : loading && candidates.length === 0 ? (
                       <tr><td colSpan={12} className="py-16 text-center"><div className="font-mono text-lg italic text-muted-foreground mb-2">데이터 수집 중…</div><div className="font-mono text-[11px] tracking-[0.15em] text-muted-foreground uppercase">{loadProgress}</div></td></tr>
                     ) : displayCandidates.length === 0 ? (
                       <tr><td colSpan={12} className="py-16 text-center font-mono text-lg italic text-muted-foreground">조건에 맞는 종목 없음</td></tr>
                     ) : (
                       displayCandidates.map((c: Candidate, i: number) => (
-                        <CandidateRow key={c.symbol} candidate={c} rank={i + 1} btcChange24={btcData?.change24 || 0} expanded={expandedSym === c.symbol} onToggle={() => setExpandedSym(expandedSym === c.symbol ? null : c.symbol)} topSectors={topSectors} botSectors={botSectors} regimeLabel={regimeLabel} regimeAdaptive={regimeAdaptive} shortLiq5m={liqStream.bySymbol[c.symbol]?.shortLiq ?? 0} longLiq5m={liqStream.bySymbol[c.symbol]?.longLiq ?? 0} />
+                        <CandidateRow key={c.symbol} candidate={c} rank={i + 1} btcChange24={btcData?.change24 || 0} expanded={expandedSym === c.symbol} onToggle={() => setExpandedSym(expandedSym === c.symbol ? null : c.symbol)} topSectors={topSectors} botSectors={botSectors} regimeLabel={regimeLabel} shortLiq5m={liqStream.bySymbol[c.symbol]?.shortLiq ?? 0} longLiq5m={liqStream.bySymbol[c.symbol]?.longLiq ?? 0} />
                       ))
                     )}
                   </tbody>

@@ -1,8 +1,8 @@
 "use client";
 
+import CodeEditor from "@/components/common/CodeEditor";
 import { X, Copy, Check, Terminal } from "lucide-react";
 import { useState } from "react";
-import CodeEditor from "../common/CodeEditor";
 
 interface CodeModalProps {
   isOpen: boolean;

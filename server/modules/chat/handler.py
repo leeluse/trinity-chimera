@@ -17,6 +17,8 @@ from server.modules.chat.skills import (
     run_modify_pipeline,
     run_backtest,
     run_optimize_pipeline,
+    run_walk_forward_pipeline,
+    run_pnl_analysis,
     get_last_strategy,
     format_sse,
     NO_CONFIRM_SKILLS,
@@ -38,7 +40,8 @@ _INTENT_LABEL = {
     INTENT_MODIFY:   "전략 수정 파이프라인",
     INTENT_EVOLVE:   "에볼루션 채굴 파이프라인",
     INTENT_BACKTEST: "백테스트",
-    INTENT_OPTIMIZE: "파라미터 최적화 파이프라인",
+    INTENT_OPTIMIZE: "파라미터 최적화/서치",
+    "STRATEGY_WFO":  "워크포워드(롤링) 분석",
 }
 
 # ── INVOKE 마커 매핑 ──────────────────────────────────────────────
@@ -47,7 +50,9 @@ _INVOKE_MAP = {
     "MODIFY_STRATEGY":  INTENT_MODIFY,
     "RUN_BACKTEST":     INTENT_BACKTEST,
     "RUN_EVOLUTION":    INTENT_EVOLVE,
-    "OPTIMIZE_PARAMS":  INTENT_OPTIMIZE,
+    "PARAM_SEARCH":     INTENT_OPTIMIZE,
+    "WALK_FORWARD":     "STRATEGY_WFO",
+    "PNL_ANALYSIS":     "PNL_ANALYSIS",
 }
 _INVOKE_RE = re.compile(r'\[INVOKE:(\w+)\]')
 _THINK_BLOCK_RE = re.compile(r"<(thought|think|think_process|reasoning)>[\s\S]*?</\1>", re.IGNORECASE)
@@ -60,11 +65,19 @@ _CONTINUATION_META_RE = re.compile(
 
 # 빠른 규칙 기반 분류 (LLM 없이 ~95% 커버)
 _KEYWORD_INTENT_MAP = {
-    "OPTIMIZE_PARAMS": [
-        r"파라미터\s*(최적화|튜닝|찾아|탐색)",
+    "PARAM_SEARCH": [
+        r"파라미터\s*(서치|최적화|튜닝|찾아|탐색)",
+        r"(그리드|랜덤|베이지안)\s*(서치|검색|최적화)",
         r"(최적|좋은|나은)\s*파라미터",
         r"(하이퍼파라미터|hyperparameter)",
-        r"파라미터.{0,10}(개선|바꿔|조정)",
+    ],
+    "WALK_FORWARD": [
+        r"(워크포워드|워크\s*포워드|walk\s*forward|wfo)",
+        r"(롤링|전진)\s*(테스트|검사|분석)",
+    ],
+    "PNL_ANALYSIS": [
+        r"(pnl|수익|손익)\s*(분석|분해|상세|리포트)",
+        r"(롱|숏|포지션별).{0,5}(수익|손익|비교)",
     ],
     "CREATE_STRATEGY": [
         r"(전략|트레이딩|시스템)\s*(짜|만들|생성|구축|설계|개발|작성|코딩|구현)",
@@ -213,6 +226,10 @@ class ChatHandler:
             return "에볼루션 채굴 요청으로 분류했습니다. 승인하면 후보 생성/검증 루프를 시작합니다."
         if intent == INTENT_BACKTEST:
             return "백테스트 실행 요청으로 분류했습니다. 승인하면 마지막 전략으로 검증을 시작합니다."
+        if intent == INTENT_OPTIMIZE:
+            return "파라미터 서치 요청으로 분류했습니다. Grid/Random/Bayesian 탐색을 시작할까요?"
+        if intent == "STRATEGY_WFO":
+            return "워크포워드(롤링) 분석 요청으로 분류했습니다. 과거 데이터를 여러 구간으로 쪼개서 전진 분석을 수행합니다."
         return ""
 
     @staticmethod
@@ -877,6 +894,22 @@ class ChatHandler:
             else:
                 yield format_sse({"type": "error", "content": "❌ 최적화할 전략이 없습니다. 먼저 전략을 생성해주세요."})
             yield format_sse({"type": "done"})
+        elif intent == "STRATEGY_WFO":
+            prev = await get_last_strategy(session_id, db, sm)
+            if prev:
+                async for ev in run_walk_forward_pipeline(message, context, prev.get("code", ""), sm.get(session_id, {})):
+                    yield ev
+            else:
+                yield format_sse({"type": "error", "content": "❌ 분석할 전략이 없습니다. 먼저 전략을 생성해주세요."})
+            yield format_sse({"type": "done"})
+        elif intent == "PNL_ANALYSIS":
+            prev = await get_last_strategy(session_id, db, sm)
+            if prev:
+                async for ev in run_pnl_analysis(message, context, prev.get("code", ""), sm.get(session_id, {})):
+                    yield ev
+            else:
+                yield format_sse({"type": "error", "content": "❌ 분석할 전략이 없습니다. 먼저 전략을 생성해주세요."})
+            yield format_sse({"type": "done"})
         logger.info("[chat] pipeline end session=%s intent=%s", session_id, intent)
 
     # ─────────────────────────────────────────────────────────────────
@@ -890,6 +923,8 @@ class ChatHandler:
             INTENT_EVOLVE:   "에볼루션 채굴 파이프라인(WFO + Monte Carlo)을 실행할까요?\n⚠️ 수 분 소요.",
             INTENT_BACKTEST: "이전에 생성된 전략으로 백테스트를 실행할까요?",
             INTENT_OPTIMIZE: "현재 전략의 파라미터를 최적화할까요?",
+            "STRATEGY_WFO":  "워크포워드(롤링) 분석을 실행할까요? (수분 소요)",
+            "PNL_ANALYSIS":  "포지션별 PnL 분해 분석을 실행할까요?",
         }
         body = base_msgs.get(intent, "파이프라인을 실행할까요?")
         if intent in {INTENT_CREATE, INTENT_MODIFY, INTENT_EVOLVE}:

@@ -1,71 +1,16 @@
 import { fetchWithBypass, API_BASE_URL } from "./fetcher";
 import * as T from "./types";
 
-export const AGENT_IDS = [
-  'momentum_hunter',
-  'mean_reverter',
-  'macro_trader',
-  'chaos_agent'
-] as const;
+
 
 export class BackendAPI {
-  static async runEvolutionLoop(agentIds?: string[]): Promise<T.RunLoopResponse> {
-    const response = await fetchWithBypass(`${API_BASE_URL}/agents/run-loop`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agent_ids: agentIds && agentIds.length > 0 ? agentIds : undefined,
-      }),
-    });
-    if (!response.ok) throw new Error(`Failed to start loop: ${response.status}`);
-    return response.json();
-  }
 
-  static async getDashboardProgress(): Promise<T.DashboardProgress> {
-    const ts = Date.now();
-    const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/improvement?_ts=${ts}`);
-    if (!response.ok) throw new Error(`Failed to fetch dashboard data: ${response.status}`);
-    return response.json();
-  }
 
-  static async getEvolutionLog(limit = 160, agent_id?: string): Promise<T.EvolutionLogEvent[]> {
-    const params = new URLSearchParams();
-    params.set("limit", String(limit));
-    params.set("_ts", String(Date.now()));
-    if (agent_id && agent_id !== "ALL" && agent_id !== "전체") {
-      params.set("agent_id", agent_id);
-    }
-    const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/evolution-log?${params.toString()}`);
-    if (!response.ok) throw new Error(`Failed to fetch evolution log: ${response.status}`);
-    const payload = await response.json();
-    return Array.isArray(payload?.events) ? payload.events : [];
-  }
 
-  static async getDecisionLogs(limit = 220, agent_id?: string): Promise<T.DecisionLogEvent[]> {
-    const params = new URLSearchParams();
-    params.set("limit", String(limit));
-    params.set("_ts", String(Date.now()));
-    if (agent_id && agent_id !== "ALL" && agent_id !== "전체") {
-      params.set("agent_id", agent_id);
-    }
-    const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/logs?${params.toString()}`);
-    if (!response.ok) throw new Error(`Failed to fetch decision logs: ${response.status}`);
-    const payload = await response.json();
-    return Array.isArray(payload?.events) ? payload.events : [];
-  }
 
-  static async getAgentTimeseries(agentId: string, metric: string): Promise<number[]> {
-    const response = await fetchWithBypass(`${API_BASE_URL}/agents/${agentId}/timeseries?metric=${metric}`);
-    if (!response.ok) throw new Error(`Failed to fetch timeseries data: ${response.status}`);
-    const data = await response.json();
-    return data.data || [];
-  }
 
-  static async getDashboardMetrics(): Promise<T.DashboardMetrics> {
-    const response = await fetchWithBypass(`${API_BASE_URL}/dashboard/metrics`);
-    if (!response.ok) throw new Error(`Failed to fetch dashboard metrics: ${response.status}`);
-    return response.json();
-  }
+
+
 
   static async getAutomationStatus(): Promise<{ enabled: boolean, status: string }> {
     const response = await fetchWithBypass(`${API_BASE_URL}/system/automation`);
