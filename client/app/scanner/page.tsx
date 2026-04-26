@@ -11,8 +11,12 @@ import {
 } from "@/components"
 import { AppRightPanel } from "@/components/layout/AppRightPanel"
 import { useDashboardQueries } from "@/hooks/useDashboardQueries"
+import { useMarketGlobal } from "@/hooks/useMarketGlobal"
+import { useLiquidationStream } from "@/hooks/useLiquidationStream"
+import { MarketGlobalBar } from "@/components/features/scanner/MarketGlobalBar"
+import { PreSignalPanel } from "@/components/features/scanner/PreSignalPanel"
 import { NAMES } from "@/constants"
-import { AGENT_IDS as DEFAULT_AGENT_IDS } from "@/lib/api"
+
 
 // Modular Components
 import { SideStat } from "@/components/shared/SideStat"
@@ -21,7 +25,7 @@ import { SideStat } from "@/components/shared/SideStat"
 import { CONFIG, SIGNAL_META, MODE_WEIGHTS } from "./constants"
 import { Candidate, Ticker, SectorData, Signal } from "./types"
 import { fmt, fetchJson, sleep, getSector } from "./utils"
-import { sigMomentum, sigVolume, sigBreakout, sigCompression, sigFunding, sigOI, sigCapitulation, sigEarly } from "./scannerLogic"
+import { sigMomentum, sigVolume, sigBreakout, sigCompression, sigFunding, sigOI, sigCapitulation, sigEarly, sigFlow, sigVolSurge } from "./scannerLogic"
 
 export default function SoloScanner() {
   const [mode, setMode] = useState<string>("momentum")
@@ -61,9 +65,12 @@ export default function SoloScanner() {
     logsIntervalMs: 8000
   })
 
+  const marketGlobal = useMarketGlobal();
+  const liqStream = useLiquidationStream();
+
   const runtimeAgentIds = useMemo(() => {
     if (bots && bots.length > 0) return bots.map((b: any) => b.id).sort()
-    return [...DEFAULT_AGENT_IDS].sort()
+    return []
   }, [bots])
 
   const agentNames = useMemo(() => {
@@ -106,6 +113,13 @@ export default function SoloScanner() {
   }, [regimeAdaptive])
 
   const computeComposite = useCallback((token: Ticker, btc: Ticker, modeKey: string, regime: string, topSecs: Set<string>, botSecs: Set<string>) => {
+    const flowSig = sigFlow(
+      token.funding ?? null,
+      token.oiChange24 ?? null,
+      token.lsRatio ?? null,
+      token.takerRatio ?? null,
+      token.change24
+    )
     const signals: Record<string, Signal> = {
       momentum: sigMomentum(token, btc),
       volume: sigVolume(token),
@@ -115,6 +129,8 @@ export default function SoloScanner() {
       oi: sigOI(token),
       capitulation: sigCapitulation(token),
       early: sigEarly(token),
+      volSurge: sigVolSurge(token.candles5m),
+      flow: flowSig,
     }
 
     let pumpFlagged = false
@@ -225,16 +241,31 @@ export default function SoloScanner() {
         const slice = phase2.slice(i, i + CONFIG.BATCH_SIZE)
         await Promise.all(slice.map(async (t) => {
           try {
-            const [dailyRaw, h1Close, oiHist] = await Promise.all([
-              fetchJson(`${CONFIG.API_BASE}/fapi/v1/klines?symbol=${t.symbol}&interval=1d&limit=30`) as Promise<any[]>,
-              fetchJson(`${CONFIG.API_BASE}/fapi/v1/klines?symbol=${t.symbol}&interval=1h&limit=60`).then((k: any) => k.map((c: any) => parseFloat(String(c[4])))),
-              fetchJson(`${CONFIG.API_BASE}/futures/data/openInterestHist?symbol=${t.symbol}&period=1h&limit=24`).then((o: any) => o.map((x: any) => parseFloat(x.sumOpenInterest))),
+            const [dailyRaw, h1Close, oiHist, cd5mRaw, lsRaw, tkRaw] = await Promise.all([
+              fetchJson(`${CONFIG.API_BASE}/fapi/v1/klines?symbol=${t.symbol}&interval=1d&limit=30`).catch(() => null),
+              fetchJson(`${CONFIG.API_BASE}/fapi/v1/klines?symbol=${t.symbol}&interval=1h&limit=60`).then((k: any) => Array.isArray(k) ? k.map((c: any) => parseFloat(String(c[4]))) : []).catch(() => []),
+              fetchJson(`${CONFIG.API_BASE}/futures/data/openInterestHist?symbol=${t.symbol}&period=1h&limit=24`).then((o: any) => Array.isArray(o) ? o.map((x: any) => parseFloat(x.sumOpenInterest)) : []).catch(() => []),
+              fetchJson(`${CONFIG.API_BASE}/fapi/v1/klines?symbol=${t.symbol}&interval=5m&limit=35`).catch(() => null),
+              fetchJson(`${CONFIG.API_BASE}/futures/data/globalLongShortAccountRatio?symbol=${t.symbol}&period=5m&limit=1`).catch(() => null),
+              fetchJson(`${CONFIG.API_BASE}/futures/data/takerlongshortRatio?symbol=${t.symbol}&period=5m&limit=6`).catch(() => null),
             ])
-            if (dailyRaw) {
-              t.dailyCloses = dailyRaw.map(c => parseFloat(String(c[4])))
-              const quoteVols = dailyRaw.map(c => parseFloat(String(c[7])))
-              if (quoteVols.length >= 4) t.volRatio = quoteVols[quoteVols.length - 1] / (quoteVols.slice(-8, -1).reduce((a, b) => a + b, 0) / 7)
-              if (t.dailyCloses.length >= 8) t.change7d = (t.dailyCloses[t.dailyCloses.length - 1] - t.dailyCloses[t.dailyCloses.length - 8]) / t.dailyCloses[t.dailyCloses.length - 8] * 100
+            if (cd5mRaw && Array.isArray(cd5mRaw)) {
+              t.candles5m = (cd5mRaw as any[]).map((c: any) => ({
+                o: +c[1], h: +c[2], l: +c[3], c: +c[4], v: +c[5], buyVol: +c[9], quoteVol: +c[7],
+              }));
+            }
+            if (lsRaw && Array.isArray(lsRaw) && (lsRaw as any[]).length > 0) {
+              t.lsRatio = parseFloat((lsRaw as any[])[0]?.longShortRatio ?? "1");
+            }
+            if (tkRaw && Array.isArray(tkRaw) && (tkRaw as any[]).length > 0) {
+              const vals = (tkRaw as any[]).map((x: any) => parseFloat(x.buySellRatio));
+              t.takerRatio = vals.reduce((s, v) => s + v, 0) / vals.length;
+            }
+            if (dailyRaw && Array.isArray(dailyRaw)) {
+              t.dailyCloses = dailyRaw.map((c: any) => parseFloat(String(c[4])))
+              const quoteVols = dailyRaw.map((c: any) => parseFloat(String(c[7])))
+              if (quoteVols.length >= 4) t.volRatio = quoteVols[quoteVols.length - 1] / (quoteVols.slice(-8, -1).reduce((a: any, b: any) => a + b, 0) / 7)
+              if (t.dailyCloses && t.dailyCloses.length >= 8) t.change7d = (t.dailyCloses[t.dailyCloses.length - 1] - t.dailyCloses[t.dailyCloses.length - 8]) / t.dailyCloses[t.dailyCloses.length - 8] * 100
             }
             t.hourlyCloses = h1Close
             if (h1Close && h1Close.length >= 5) {
@@ -288,6 +319,7 @@ export default function SoloScanner() {
           onToggleAutomation={toggleAutomation}
           scannerContent={
             <div className="flex flex-col gap-8 p-6 pb-20">
+              <MarketGlobalBar global={marketGlobal} liq={liqStream} />
               <div className="flex flex-col gap-3">
                 <h3 className="font-mono text-[9px] tracking-[0.3em] text-slate-500 uppercase flex items-center gap-2">
                   <div className="w-1 h-2.5 bg-primary" /> Market Regime
@@ -422,13 +454,15 @@ export default function SoloScanner() {
                       <tr><td colSpan={12} className="py-16 text-center font-mono text-lg italic text-muted-foreground">조건에 맞는 종목 없음</td></tr>
                     ) : (
                       displayCandidates.map((c: Candidate, i: number) => (
-                        <CandidateRow key={c.symbol} candidate={c} rank={i + 1} btcChange24={btcData?.change24 || 0} expanded={expandedSym === c.symbol} onToggle={() => setExpandedSym(expandedSym === c.symbol ? null : c.symbol)} topSectors={topSectors} botSectors={botSectors} regimeLabel={regimeLabel} regimeAdaptive={regimeAdaptive} />
+                        <CandidateRow key={c.symbol} candidate={c} rank={i + 1} btcChange24={btcData?.change24 || 0} expanded={expandedSym === c.symbol} onToggle={() => setExpandedSym(expandedSym === c.symbol ? null : c.symbol)} topSectors={topSectors} botSectors={botSectors} regimeLabel={regimeLabel} regimeAdaptive={regimeAdaptive} shortLiq5m={liqStream.bySymbol[c.symbol]?.shortLiq ?? 0} longLiq5m={liqStream.bySymbol[c.symbol]?.longLiq ?? 0} />
                       ))
                     )}
                   </tbody>
                 </table>
               </div>
             </div>
+
+            {candidates.length > 0 && <PreSignalPanel candidates={displayCandidates} />}
 
             <footer className="mt-7 pt-4 border-t border-border/30 flex flex-wrap justify-between items-center gap-3 font-mono text-[10px] tracking-[0.15em] text-muted-foreground uppercase">
               <div>나혼자 스캐너 · v1.5 · Binance Futures Public API</div>

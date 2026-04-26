@@ -34,10 +34,10 @@ export const SECTORS: Record<string, string> = {
 };
 
 export const MODE_WEIGHTS: Record<string, Record<string, number>> = {
-  momentum: { momentum: 1.5, volume: 1.3, breakout: 1.0, compression: 0.5, funding: 0.7, oi: 0.9, capitulation: 0.3, early: 1.2 },
-  breakout: { momentum: 0.9, volume: 1.2, breakout: 1.5, compression: 1.3, funding: 0.7, oi: 1.0, capitulation: 0.5, early: 1.0 },
-  reversal: { momentum: 0.3, volume: 1.0, breakout: 0.5, compression: 0.7, funding: 1.4, oi: 1.2, capitulation: 1.5, early: 0.4 },
-  compression: { momentum: 0.5, volume: 0.8, breakout: 1.0, compression: 1.7, funding: 0.8, oi: 1.0, capitulation: 0.4, early: 0.9 },
+  momentum:    { momentum: 1.5, volume: 1.3, breakout: 1.0, compression: 0.5, funding: 0.7, oi: 0.9, capitulation: 0.3, early: 1.2, flow: 0.8, volSurge: 1.1 },
+  breakout:    { momentum: 0.9, volume: 1.2, breakout: 1.5, compression: 1.3, funding: 0.7, oi: 1.0, capitulation: 0.5, early: 1.0, flow: 0.7, volSurge: 1.2 },
+  reversal:    { momentum: 0.3, volume: 1.0, breakout: 0.5, compression: 0.7, funding: 1.4, oi: 1.2, capitulation: 1.5, early: 0.4, flow: 1.3, volSurge: 0.6 },
+  compression: { momentum: 0.5, volume: 0.8, breakout: 1.0, compression: 1.7, funding: 0.8, oi: 1.0, capitulation: 0.4, early: 0.9, flow: 0.9, volSurge: 0.8 },
 };
 
 export const SIGNAL_META: { key: string; emoji: string; name: string; color: string }[] = [

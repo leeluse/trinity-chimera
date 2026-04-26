@@ -238,6 +238,65 @@ export function sigEarly(token: any) {
   return { score: Math.max(0, Math.min(100, s)), note: `1h ${h1.toFixed(1)}% / 4h ${h4.toFixed(1)}%` };
 }
 
+export function sigFlow(
+  fr: number | null,
+  oiPct: number | null,
+  lsRatio: number | null,
+  takerRatio: number | null,
+  pricePct: number
+): { score: number; note?: string; flowData: { fundingRate: number; oiPct: number; lsRatio: number | null; takerRatio: number; signals: Array<{ text: string; type: string }> } } {
+  let score = 0;
+  const signals: Array<{ text: string; type: string }> = [];
+
+  const f = fr ?? 0;
+  if (f < -0.07) { score += 24; signals.push({ text: "FR 극단 음수 — 숏스퀴즈 대기", type: "bull" }); }
+  else if (f < -0.025) { score += 15; signals.push({ text: "FR 음수 — 숏 우세", type: "bull" }); }
+  else if (f < -0.005) { score += 6; signals.push({ text: "FR 약한 음수", type: "bull" }); }
+  else if (f < 0.005) { signals.push({ text: "FR 중립", type: "neut" }); }
+  else if (f < 0.04) { score -= 10; signals.push({ text: "FR 양수 — 롱 우세", type: "bear" }); }
+  else if (f < 0.08) { score -= 18; signals.push({ text: "FR 높음 — 롱 과열", type: "bear" }); }
+  else { score -= 24; signals.push({ text: "FR 극단 양수 — 롱청산 위험", type: "bear" }); }
+
+  const oi = oiPct ?? 0;
+  if (oi > 3 && pricePct > 0.5) { score += 15; signals.push({ text: `OI↑${oi.toFixed(1)}%+가격↑ — 롱진입`, type: "bull" }); }
+  else if (oi > 3 && pricePct < -0.5) { score -= 15; signals.push({ text: `OI↑${oi.toFixed(1)}%+가격↓ — 숏진입`, type: "bear" }); }
+  else if (oi < -3 && pricePct < -0.5) { score += 8; signals.push({ text: "OI↓+가격↓ — 롱청산 반등가능", type: "warn" }); }
+  else if (oi < -3 && pricePct > 0.5) { score += 5; signals.push({ text: "OI↓+가격↑ — 숏청산", type: "bull" }); }
+
+  const ls = lsRatio;
+  if (ls !== null) {
+    if (ls > 2.2) { score -= 14; signals.push({ text: `L/S ${ls.toFixed(2)} 극단 롱`, type: "bear" }); }
+    else if (ls > 1.6) { score -= 7; signals.push({ text: `L/S ${ls.toFixed(2)} 롱과다`, type: "bear" }); }
+    else if (ls < 0.6) { score += 13; signals.push({ text: `L/S ${ls.toFixed(2)} 극단 숏(반등)`, type: "bull" }); }
+    else if (ls < 0.9) { score += 6; signals.push({ text: `L/S ${ls.toFixed(2)} 숏 우세`, type: "bull" }); }
+    else { signals.push({ text: `L/S ${ls.toFixed(2)} 균형`, type: "neut" }); }
+  }
+
+  const tk = takerRatio ?? 1;
+  if (tk > 1.25) { score += 10; signals.push({ text: `테이커 ${tk.toFixed(2)}× 공격 매수`, type: "bull" }); }
+  else if (tk > 1.08) { score += 5; signals.push({ text: `테이커 ${tk.toFixed(2)}× 매수우세`, type: "bull" }); }
+  else if (tk < 0.75) { score -= 10; signals.push({ text: `테이커 ${tk.toFixed(2)}× 공격 매도`, type: "bear" }); }
+  else if (tk < 0.92) { score -= 5; signals.push({ text: `테이커 ${tk.toFixed(2)}× 매도우세`, type: "bear" }); }
+
+  const normalized = Math.max(0, Math.min(100, ((Math.max(-55, Math.min(55, score)) + 55) / 110) * 100));
+
+  return {
+    score: normalized,
+    note: `FR:${(f * 100).toFixed(3)}% L/S:${ls?.toFixed(2) ?? "—"} TK:${tk.toFixed(2)}`,
+    flowData: { fundingRate: f, oiPct: oi, lsRatio: ls, takerRatio: tk, signals },
+  };
+}
+
+export function sigVolSurge(candles5m: Array<{ v: number }> | undefined): { score: number; note?: string } {
+  if (!candles5m || candles5m.length < 30) return { score: 0 };
+  const avgVol = candles5m.slice(-30, -5).reduce((s, c) => s + c.v, 0) / 25;
+  if (avgVol <= 0) return { score: 0 };
+  const recVol = candles5m.slice(-5).reduce((s, c) => s + c.v, 0) / 5;
+  const ratio = recVol / avgVol;
+  if (ratio < 1.3) return { score: 0, note: `vs avg ${ratio.toFixed(2)}x` };
+  return { score: Math.min(100, Math.max(0, Math.log2(ratio) * 40)), note: `급등 ${ratio.toFixed(2)}x` };
+}
+
 export function computeSectorMomentum(tickers: any[]) {
   const bySector: Record<string, any> = {};
   tickers.forEach(t => {

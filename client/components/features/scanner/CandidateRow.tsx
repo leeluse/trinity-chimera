@@ -3,8 +3,7 @@ import { ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
 import { Candidate } from "@/app/scanner/types";
 import { fmt } from "@/app/scanner/utils";
 import { SIGNAL_META } from "@/app/scanner/constants";
-import { SignalBar } from "./SignalBar";
-import { DetailBox } from "./DetailBox";
+import { DeepDivePanel } from "./DeepDivePanel";
 
 interface CandidateRowProps {
   candidate: Candidate;
@@ -16,6 +15,8 @@ interface CandidateRowProps {
   botSectors: Set<string>;
   regimeLabel: string;
   regimeAdaptive: boolean;
+  shortLiq5m?: number;
+  longLiq5m?: number;
 }
 
 export function CandidateRow({
@@ -27,7 +28,9 @@ export function CandidateRow({
   topSectors,
   botSectors,
   regimeLabel,
-  regimeAdaptive
+  regimeAdaptive,
+  shortLiq5m,
+  longLiq5m,
 }: CandidateRowProps) {
   const rs = c.change24 - btcChange24;
 
@@ -119,24 +122,14 @@ export function CandidateRow({
       {expanded && (
         <tr className="bg-white/[0.01]">
           <td colSpan={12} className="px-6 py-6 border-b border-white/5">
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
-              <DetailBox label="24h RANGE" value={`${fmt.price(c.low24)} → ${fmt.price(c.high24)}`} />
-              <DetailBox label="24h VOLUME" value={`${(c.quoteVolume / 1_000_000).toFixed(1)}M`} />
-              <DetailBox label="7d CHANGE" value={c.change7d != null ? fmt.pct(c.change7d) : "—"} />
-              <DetailBox label="1h / 4h" value={`${fmt.pct(c.change1h || 0, 2)} / ${fmt.pct(c.change4h || 0, 2)}`} />
-              <DetailBox label="SIGNALS" value={`${c.strongCount} ACTIVE`} />
-              <DetailBox label="NARRATIVE" value={c.narrativeMult > 1 ? `+${((c.narrativeMult - 1) * 100).toFixed(0)}%` : c.narrativeMult < 1 ? `-${((1 - c.narrativeMult) * 100).toFixed(0)}%` : "NEUTRAL"} />
-              <DetailBox label="SECTOR" value={c.sector || "—"} />
-              <DetailBox label="REGIME" value={regimeLabel} />
-            </div>
-            <div className="border-t border-white/5 pt-5">
-              <div className="font-mono text-[9px] tracking-[0.3em] text-muted-foreground/40 uppercase mb-4 pl-1">Signal Breakdown</div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
-                {SIGNAL_META.map(({ key, emoji, name, color }: { key: string; emoji: string; name: string; color: string }) => (
-                  <SignalBar key={key} label={`${emoji} ${name}`} value={c.signals[key].score} note={c.signals[key].note} color={color} />
-                ))}
-              </div>
-            </div>
+            <DeepDivePanel
+              candidate={c}
+              regimeLabel={regimeLabel}
+              topSectors={topSectors}
+              botSectors={botSectors}
+              shortLiq5m={shortLiq5m}
+              longLiq5m={longLiq5m}
+            />
           </td>
         </tr>
       )}
