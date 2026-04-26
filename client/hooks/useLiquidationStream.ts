@@ -17,6 +17,7 @@ const INITIAL: LiqData = {
   globalShortLiq5m: 0,
   globalLongLiq5m: 0,
   bySymbol: {},
+  connected: false,
 };
 
 export function useLiquidationStream() {
@@ -29,6 +30,10 @@ export function useLiquidationStream() {
     function connect() {
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
+
+      ws.onopen = () => {
+        setData(prev => ({ ...prev, connected: true }));
+      };
 
       ws.onmessage = (e) => {
         try {
@@ -62,13 +67,14 @@ export function useLiquidationStream() {
             }
           });
 
-          setData({ globalShortLiq5m: globalShort, globalLongLiq5m: globalLong, bySymbol });
+          setData({ globalShortLiq5m: globalShort, globalLongLiq5m: globalLong, bySymbol, connected: true });
         } catch {
           // ignore parse errors
         }
       };
 
       ws.onclose = () => {
+        setData(prev => ({ ...prev, connected: false }));
         reconnectTimer.current = setTimeout(connect, 3000);
       };
 

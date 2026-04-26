@@ -11,6 +11,7 @@ export interface Ticker {
   funding: number | null;
   volRatio?: number;
   oiChange24?: number;
+  oiChange1h?: number;
   dailyCloses?: number[];
   hourlyCloses?: number[];
   candles5m?: Array<{ o: number; h: number; l: number; c: number; v: number; buyVol: number; quoteVol: number }>;
@@ -30,6 +31,9 @@ export interface Candidate extends Ticker {
   pumpFlagged: boolean;
   narrativeMult: number;
   sector: string;
+  contextScore: number;
+  contextMult: number;
+  stage: 0 | 1 | 2 | 3;
 }
 
 export interface SectorData {
@@ -57,6 +61,7 @@ export interface LiqData {
   globalShortLiq5m: number;
   globalLongLiq5m: number;
   bySymbol: Record<string, { shortLiq: number; longLiq: number }>;
+  connected: boolean;
 }
 
 export interface PreSignal {
