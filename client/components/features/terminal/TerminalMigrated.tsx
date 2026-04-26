@@ -338,10 +338,10 @@ export default function TerminalMigrated() {
                 type="button"
                 onClick={() => setFilter(f.id)}
                 className={cn(
-                  "relative rounded border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest",
+                  "relative rounded border px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors",
                   activeFilter === f.id
                     ? "border-cyan-400 bg-cyan-400/10 text-cyan-300"
-                    : "border-white/10 text-slate-400",
+                    : "border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-300",
                 )}
               >
                 {f.label}
