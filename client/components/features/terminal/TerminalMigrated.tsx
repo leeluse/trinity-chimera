@@ -66,6 +66,12 @@ export default function TerminalMigrated() {
     setSelectedSymbol,
   } = useTerminalStore();
 
+  const hunterRows = useTerminalStore((s) => s.hunterRows);
+  const hunterMap = useMemo(
+    () => new Map(hunterRows.map((r) => [r.full, r])),
+    [hunterRows],
+  );
+
   const [scanMode, setScanMode] = useState<"topn" | "custom">("topn");
 
   useEffect(() => {
@@ -395,7 +401,22 @@ export default function TerminalMigrated() {
                       )}
                     >
                       <td className="rounded-l-md px-3 py-2 font-mono text-[12px] font-black text-white">
-                        {r.symbol.replace("USDT", "")}
+                        <span>{r.symbol.replace("USDT", "")}</span>
+                        {(() => {
+                          const h = hunterMap.get(r.symbol);
+                          if (!h || h.stage < 1) return null;
+                          return (
+                            <span
+                              className={cn(
+                                "ml-1.5 text-[9px] font-bold",
+                                hunterBadgeClass(h.stage, h.latchDir),
+                                h.stage >= 2 && "animate-pulse",
+                              )}
+                            >
+                              {hunterBadgeLabel(h.stage, h.latchDir)}
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       <td className="px-3 py-2 text-[10px] font-bold text-amber-300">
@@ -534,6 +555,18 @@ export default function TerminalMigrated() {
       )}
     </div>
   );
+}
+
+function hunterBadgeLabel(stage: number, dir: number): string {
+  if (stage === 3) return dir >= 0 ? "▲▲S3" : "▼▼S3";
+  if (stage === 2) return dir >= 0 ? "▲S2" : "▼S2";
+  return "S1";
+}
+
+function hunterBadgeClass(stage: number, dir: number): string {
+  if (stage === 3) return dir >= 0 ? "text-cyan-300" : "text-rose-400";
+  if (stage === 2) return dir >= 0 ? "text-blue-300" : "text-orange-400";
+  return "text-amber-400";
 }
 
 function MetricCard({
