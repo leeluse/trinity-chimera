@@ -19,6 +19,7 @@ from server.modules.chat.skills import (
     run_optimize_pipeline,
     run_walk_forward_pipeline,
     run_pnl_analysis,
+    run_regime_pipeline,
     get_last_strategy,
     format_sse,
     NO_CONFIRM_SKILLS,
@@ -36,12 +37,13 @@ INTENT_BACKTEST  = "STRATEGY_BACKTEST"
 INTENT_OPTIMIZE  = "PARAM_OPTIMIZE"
 
 _INTENT_LABEL = {
-    INTENT_CREATE:   "전략 생성 파이프라인",
-    INTENT_MODIFY:   "전략 수정 파이프라인",
-    INTENT_EVOLVE:   "에볼루션 채굴 파이프라인",
-    INTENT_BACKTEST: "백테스트",
-    INTENT_OPTIMIZE: "파라미터 최적화/서치",
-    "STRATEGY_WFO":  "워크포워드(롤링) 분석",
+    INTENT_CREATE:    "전략 생성 파이프라인",
+    INTENT_MODIFY:    "전략 수정 파이프라인",
+    INTENT_EVOLVE:    "에볼루션 채굴 파이프라인",
+    INTENT_BACKTEST:  "백테스트",
+    INTENT_OPTIMIZE:  "파라미터 최적화/서치",
+    "STRATEGY_WFO":   "워크포워드(롤링) 분석",
+    "REGIME_ANALYSIS": "레짐 귀속 분석",
 }
 
 # ── INVOKE 마커 매핑 ──────────────────────────────────────────────
@@ -74,6 +76,13 @@ _KEYWORD_INTENT_MAP = {
     "WALK_FORWARD": [
         r"(워크포워드|워크\s*포워드|walk\s*forward|wfo)",
         r"(롤링|전진)\s*(테스트|검사|분석)",
+    ],
+    "REGIME_ANALYSIS": [
+        r"(레짐|regime)\s*(분석|귀속|찾|탐색)",
+        r"(특정|어떤)\s*구간.{0,10}(조건|파라미터|이유|왜)",
+        r"구간.{0,10}(조건|이유|원인|특성).{0,5}(찾|분석|알)",
+        r"(어떤|언제)\s*(시장|조건|상황).{0,10}(잘|좋|안|나쁨|먹|통)",
+        r"(시장|조건)\s*(필터|레짐|상황)\s*(분석|찾|추출)",
     ],
     "PNL_ANALYSIS": [
         r"(pnl|수익|손익)\s*(분석|분해|상세|리포트)",
@@ -898,6 +907,14 @@ class ChatHandler:
             prev = await get_last_strategy(session_id, db, sm)
             if prev:
                 async for ev in run_walk_forward_pipeline(message, context, prev.get("code", ""), sm.get(session_id, {})):
+                    yield ev
+            else:
+                yield format_sse({"type": "error", "content": "❌ 분석할 전략이 없습니다. 먼저 전략을 생성해주세요."})
+            yield format_sse({"type": "done"})
+        elif intent == "REGIME_ANALYSIS":
+            prev = await get_last_strategy(session_id, db, sm)
+            if prev:
+                async for ev in run_regime_pipeline(message, context, prev.get("code", ""), sm.get(session_id, {})):
                     yield ev
             else:
                 yield format_sse({"type": "error", "content": "❌ 분석할 전략이 없습니다. 먼저 전략을 생성해주세요."})

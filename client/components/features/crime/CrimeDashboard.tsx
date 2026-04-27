@@ -10,13 +10,13 @@ import {
 
 // ─── 시그널 메타 ──────────────────────────────────────────
 const SIGNAL_META: Record<SignalType, { icon: string; color: string; bg: string; glow: string }> = {
-  PRE_IGNITION: { icon: "💥", color: "text-pink-300",    bg: "bg-pink-500/10 border-pink-500/30",     glow: "shadow-[0_0_8px_rgba(244,114,182,0.15)]" },
-  IGNITION:     { icon: "🔥", color: "text-fuchsia-300", bg: "bg-fuchsia-500/10 border-fuchsia-500/30", glow: "shadow-[0_0_8px_rgba(217,70,239,0.15)]" },
-  STAGE_UP:     { icon: "⚡", color: "text-purple-300",  bg: "bg-purple-500/10 border-purple-500/25",  glow: "" },
-  FUEL_MAX:     { icon: "💡", color: "text-violet-300",  bg: "bg-violet-500/10 border-violet-500/25",  glow: "" },
-  SCORE_SPIKE:  { icon: "📈", color: "text-fuchsia-300", bg: "bg-fuchsia-500/10 border-fuchsia-500/20", glow: "" },
-  EXIT_ALERT:   { icon: "⚠️", color: "text-amber-300",   bg: "bg-amber-500/10 border-amber-500/20",    glow: "" },
-  TRAP_ALERT:   { icon: "🚨", color: "text-red-300",     bg: "bg-red-500/10 border-red-500/20",        glow: "" },
+  PRE_IGNITION: { icon: "💥", color: "text-indigo-300", bg: "bg-indigo-500/10 border-indigo-500/30", glow: "shadow-[0_0_8px_rgba(99,102,241,0.15)]" },
+  IGNITION: { icon: "🔥", color: "text-violet-300", bg: "bg-violet-500/10 border-violet-500/30", glow: "shadow-[0_0_8px_rgba(139,92,246,0.15)]" },
+  STAGE_UP: { icon: "⚡", color: "text-indigo-400", bg: "bg-indigo-500/10 border-indigo-500/25", glow: "" },
+  FUEL_MAX: { icon: "💡", color: "text-violet-400", bg: "bg-violet-500/10 border-violet-500/25", glow: "" },
+  SCORE_SPIKE: { icon: "📈", color: "text-violet-300", bg: "bg-violet-500/10 border-violet-500/20", glow: "" },
+  EXIT_ALERT: { icon: "⚠️", color: "text-amber-300", bg: "bg-amber-500/10 border-amber-500/20", glow: "" },
+  TRAP_ALERT: { icon: "🚨", color: "text-red-300", bg: "bg-red-500/10 border-red-500/20", glow: "" },
 };
 
 function fmtAgo(ts: number): string {
@@ -29,10 +29,10 @@ function fmtAgo(ts: number): string {
 function entryVerdict(coin: CoinData): { label: string; cls: string; bg: string; glow: string } {
   const { entry_score, dump_trap_risk } = coin.risk;
   if (dump_trap_risk.includes("CRITICAL") || dump_trap_risk.includes("HIGH") || entry_score < 50)
-    return { label: "ABORT", cls: "text-red-400",     bg: "bg-red-500/10 border-red-500/25",       glow: "" };
+    return { label: "ABORT", cls: "text-red-400", bg: "bg-red-500/10 border-red-500/25", glow: "" };
   if (entry_score >= 70 && (dump_trap_risk.includes("LOW") || (dump_trap_risk.includes("MEDIUM") && entry_score >= 75)))
-    return { label: "GO",    cls: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/25", glow: "shadow-[0_0_8px_rgba(52,211,153,0.15)]" };
-  return { label: "WAIT",   cls: "text-amber-400",   bg: "bg-amber-500/10 border-amber-500/25",    glow: "" };
+    return { label: "GO", cls: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/25", glow: "shadow-[0_0_8px_rgba(52,211,153,0.15)]" };
+  return { label: "WAIT", cls: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/25", glow: "" };
 }
 
 // ─── 섹션 헤더 라벨 ───────────────────────────────────────
@@ -76,18 +76,18 @@ function TopEntryCard({ coin, rank, selected, onSelect }: {
 }) {
   const verdict = entryVerdict(coin);
   const sc = stageColor(coin.pump_stage);
-  const d  = scoreDanger(coin.score);
+  const d = scoreDanger(coin.score);
 
   const rankCls =
-    rank === 1 ? "text-pink-400"
-    : rank === 2 ? "text-fuchsia-400"
-    : "text-purple-400";
+    rank === 1 ? "text-indigo-400"
+      : rank === 2 ? "text-violet-400"
+        : "text-indigo-500";
 
   return (
     <div
       className={`flex items-center gap-2 px-3 py-2 border-b cursor-pointer transition-all
         ${selected
-          ? "border-pink-500/25 bg-gradient-to-r from-pink-500/[0.05] to-purple-500/[0.03] shadow-[inset_2px_0_0_rgba(244,114,182,0.5)]"
+          ? "border-indigo-500/25 bg-gradient-to-r from-indigo-500/[0.05] to-indigo-500/[0.03] shadow-[inset_2px_0_0_rgba(99,102,241,0.5)]"
           : "border-white/[0.03] hover:bg-white/[0.02]"
         }`}
       onClick={onSelect}
@@ -125,7 +125,7 @@ function CoinDetail({ coin }: { coin: CoinData }) {
   const t3Pct = (coin.risk.target_3 / coin.price - 1) * 100;
 
   return (
-    <div className="border-t border-pink-500/15 bg-gradient-to-b from-pink-500/[0.03] to-purple-500/[0.02]">
+    <div className="border-t border-indigo-500/15 bg-gradient-to-b from-indigo-500/[0.03] to-indigo-500/[0.02]">
       {/* 헤더 */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.05]">
         <div className="flex-1">
@@ -171,10 +171,10 @@ function CoinDetail({ coin }: { coin: CoinData }) {
             </div>
             {[
               { l: "진입구간", v: `${fmtPrice(coin.risk.entry_zone_low)} ~ ${fmtPrice(coin.risk.entry_zone_high)}`, cls: "text-white/60", bg: "bg-white/[0.03]" },
-              { l: "손절",     v: `${fmtPrice(coin.risk.stop_loss)}  (${slPct.toFixed(1)}%)`,          cls: "text-red-400",     bg: "bg-red-500/[0.06]" },
-              { l: "목표1 1R", v: `${fmtPrice(coin.risk.target_1)}  (+${t1Pct.toFixed(1)}%)`,          cls: "text-emerald-400", bg: "bg-emerald-500/[0.05]" },
-              { l: "목표2 2R", v: `${fmtPrice(coin.risk.target_2)}  (+${t2Pct.toFixed(1)}%)`,          cls: "text-emerald-400", bg: "bg-emerald-500/[0.05]" },
-              { l: "목표3 3.5R", v: `${fmtPrice(coin.risk.target_3)}  (+${t3Pct.toFixed(1)}%)`,        cls: "text-emerald-300", bg: "bg-emerald-500/[0.07]" },
+              { l: "손절", v: `${fmtPrice(coin.risk.stop_loss)}  (${slPct.toFixed(1)}%)`, cls: "text-red-400", bg: "bg-red-500/[0.06]" },
+              { l: "목표1 1R", v: `${fmtPrice(coin.risk.target_1)}  (+${t1Pct.toFixed(1)}%)`, cls: "text-emerald-400", bg: "bg-emerald-500/[0.05]" },
+              { l: "목표2 2R", v: `${fmtPrice(coin.risk.target_2)}  (+${t2Pct.toFixed(1)}%)`, cls: "text-emerald-400", bg: "bg-emerald-500/[0.05]" },
+              { l: "목표3 3.5R", v: `${fmtPrice(coin.risk.target_3)}  (+${t3Pct.toFixed(1)}%)`, cls: "text-emerald-300", bg: "bg-emerald-500/[0.07]" },
             ].map(({ l, v, cls, bg }) => (
               <div key={l} className={`flex items-center justify-between ${bg} rounded-[5px] px-2 py-1 border border-white/[0.04]`}>
                 <span className="text-[7px] text-white/25 font-bold">{l}</span>
@@ -205,9 +205,9 @@ function CoinDetail({ coin }: { coin: CoinData }) {
                 <div key={i} className="flex items-center gap-2">
                   <span className="text-[7px] text-white/20 font-mono w-2">{i + 1}</span>
                   <div className="flex-1 h-[2px] bg-white/[0.05] rounded overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-pink-500/60 to-purple-500/60" style={{ width: `${step.size_pct}%` }} />
+                    <div className="h-full bg-gradient-to-r from-indigo-500/60 to-indigo-600/60" style={{ width: `${step.size_pct}%` }} />
                   </div>
-                  <span className="text-[7px] text-pink-400/70 font-bold w-5 text-right">{step.size_pct}%</span>
+                  <span className="text-[7px] text-indigo-400/70 font-bold w-5 text-right">{step.size_pct}%</span>
                   <span className="text-[8px] font-mono text-white/50 w-20">{fmtPrice(step.entry)}</span>
                   <span className="text-[7px] text-white/25 flex-1">{step.note}</span>
                 </div>
@@ -218,16 +218,16 @@ function CoinDetail({ coin }: { coin: CoinData }) {
           {/* 핵심 지표 그리드 */}
           <div className="px-3 pb-2 grid grid-cols-3 gap-1">
             {[
-              { l: "펀딩",    v: `${coin.funding_rate > 0 ? "+" : ""}${coin.funding_rate.toFixed(3)}%`, hot: coin.funding_rate < -0.3 },
-              { l: "OI 24h", v: `+${coin.oi_change_pct_24h.toFixed(0)}%`,                               hot: coin.oi_change_pct_24h >= 40 },
-              { l: "숏%",    v: `${coin.short_ratio.toFixed(1)}%`,                                      hot: coin.short_ratio >= 62 },
-              { l: "테이커B", v: `${coin.taker_buy_ratio.toFixed(0)}%`,                                 hot: coin.taker_buy_ratio >= 60 },
-              { l: "북인밸", v: `x${coin.book_imbalance.toFixed(2)}`,                                   hot: coin.book_imbalance >= 3 },
-              { l: "스퀴즈", v: `${coin.squeeze_fuel}`,                                                  hot: coin.squeeze_fuel >= 80 },
+              { l: "펀딩", v: `${coin.funding_rate > 0 ? "+" : ""}${coin.funding_rate.toFixed(3)}%`, hot: coin.funding_rate < -0.3 },
+              { l: "OI 24h", v: `+${coin.oi_change_pct_24h.toFixed(0)}%`, hot: coin.oi_change_pct_24h >= 40 },
+              { l: "숏%", v: `${coin.short_ratio.toFixed(1)}%`, hot: coin.short_ratio >= 62 },
+              { l: "테이커B", v: `${coin.taker_buy_ratio.toFixed(0)}%`, hot: coin.taker_buy_ratio >= 60 },
+              { l: "북인밸", v: `x${coin.book_imbalance.toFixed(2)}`, hot: coin.book_imbalance >= 3 },
+              { l: "스퀴즈", v: `${coin.squeeze_fuel}`, hot: coin.squeeze_fuel >= 80 },
             ].map(({ l, v, hot }) => (
               <div key={l} className="bg-white/[0.025] rounded-[5px] border border-white/[0.04] px-2 py-1.5">
                 <div className="text-[7px] text-white/25 uppercase font-bold">{l}</div>
-                <div className={`text-[10px] font-mono font-bold mt-0.5 ${hot ? "text-pink-400" : "text-white/60"}`}>{v}</div>
+                <div className={`text-[10px] font-mono font-bold mt-0.5 ${hot ? "text-indigo-400" : "text-white/60"}`}>{v}</div>
               </div>
             ))}
           </div>
@@ -254,15 +254,15 @@ function CoinDetail({ coin }: { coin: CoinData }) {
 // ─── P0 배너 ─────────────────────────────────────────────
 function P0Banner({ signal, onDismiss }: { signal: CrimeSignal; onDismiss: () => void }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-pink-500/15 to-fuchsia-500/10 border-b border-pink-500/30 shrink-0 animate-pulse backdrop-blur-md shadow-[0_0_20px_rgba(244,114,182,0.1)]">
+    <div className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-indigo-500/15 to-violet-500/10 border-b border-indigo-500/30 shrink-0 animate-pulse backdrop-blur-md shadow-[0_0_20px_rgba(99,102,241,0.1)]">
       <span className="text-[10px]">{SIGNAL_META[signal.type].icon}</span>
       <div className="flex-1 min-w-0">
-        <span className="text-[9px] font-black text-pink-300 uppercase tracking-wide">
+        <span className="text-[9px] font-black text-indigo-300 uppercase tracking-wide">
           {signal.symbol.replace("USDT", "")} {signal.type}
         </span>
-        <span className="text-[8px] text-pink-400/60 ml-2">{signal.message}</span>
+        <span className="text-[8px] text-indigo-400/60 ml-2">{signal.message}</span>
       </div>
-      <button onClick={onDismiss} className="text-pink-500/50 hover:text-pink-400 transition-colors shrink-0">
+      <button onClick={onDismiss} className="text-indigo-500/50 hover:text-indigo-400 transition-colors shrink-0">
         <X size={11} />
       </button>
     </div>
@@ -282,18 +282,7 @@ export default function CrimeDashboard() {
       {/* P0 배너 */}
       {p0Banner && <P0Banner signal={p0Banner} onDismiss={dismissBanner} />}
 
-      {/* 패널 헤더 */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.05] bg-gradient-to-r from-purple-500/[0.04] to-pink-500/[0.03] backdrop-blur-md shrink-0">
-        <Skull size={11} className="text-pink-500/60" />
-        <span className="text-[9px] font-black tracking-[0.1em] uppercase bg-gradient-to-r from-pink-400/80 to-purple-400/80 bg-clip-text text-transparent">
-          Crime Panel
-        </span>
-        {signals.length > 0 && (
-          <span className="ml-auto px-1.5 py-0.5 rounded-[3px] bg-pink-500/15 border border-pink-500/25 text-[8px] font-bold text-pink-400">
-            {signals.length}
-          </span>
-        )}
-      </div>
+
 
       {/* 상단 50%: 시그널 피드 */}
       <div className="flex flex-col" style={{ flex: "0 0 50%" }}>

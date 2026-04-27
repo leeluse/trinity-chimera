@@ -587,28 +587,28 @@ export function fmtVol(n: number): string {
 
 export function stageColor(stage: string) {
   if (stage.includes("PRE_IGNITION"))
-    return { dot: "bg-pink-400", text: "text-pink-300", border: "border-pink-500/35", bg: "bg-pink-500/10", glow: "shadow-[0_0_8px_rgba(244,114,182,0.2)]" };
+    return { dot: "bg-indigo-400", text: "text-indigo-300", border: "border-indigo-500/35", bg: "bg-indigo-500/10", glow: "shadow-[0_0_8px_rgba(99,102,241,0.2)]" };
   if (stage.includes("IGNITION"))
-    return { dot: "bg-fuchsia-400", text: "text-fuchsia-300", border: "border-fuchsia-500/35", bg: "bg-fuchsia-500/10", glow: "shadow-[0_0_8px_rgba(217,70,239,0.2)]" };
+    return { dot: "bg-violet-400", text: "text-violet-300", border: "border-violet-500/35", bg: "bg-violet-500/10", glow: "shadow-[0_0_8px_rgba(139,92,246,0.2)]" };
   if (stage.includes("SPRING"))
-    return { dot: "bg-violet-400", text: "text-violet-300", border: "border-violet-500/30", bg: "bg-violet-500/10", glow: "" };
+    return { dot: "bg-indigo-500", text: "text-indigo-400", border: "border-indigo-600/30", bg: "bg-indigo-600/10", glow: "" };
   if (stage.includes("ACCUMULATE"))
-    return { dot: "bg-purple-400", text: "text-purple-300", border: "border-purple-500/30", bg: "bg-purple-500/10", glow: "" };
+    return { dot: "bg-violet-500", text: "text-violet-400", border: "border-violet-600/30", bg: "bg-violet-600/10", glow: "" };
   if (stage.includes("DISTRIBUTE"))
     return { dot: "bg-white/20", text: "text-white/35", border: "border-white/10", bg: "bg-white/[0.03]", glow: "" };
   return { dot: "bg-white/15", text: "text-white/25", border: "border-white/[0.07]", bg: "bg-white/[0.02]", glow: "" };
 }
 
 export function trapColor(risk: string) {
-  if (risk.includes("CRITICAL")) return "text-pink-400";
-  if (risk.includes("HIGH"))     return "text-fuchsia-400";
-  if (risk.includes("MEDIUM"))   return "text-purple-400";
+  if (risk.includes("CRITICAL")) return "text-indigo-400";
+  if (risk.includes("HIGH"))     return "text-violet-400";
+  if (risk.includes("MEDIUM"))   return "text-indigo-500";
   return "text-white/40";
 }
 
 export function scoreDanger(score: number) {
-  if (score >= 150) return { label: "☠️ CRITICAL", cls: "text-pink-400",    barCls: "from-pink-500 to-fuchsia-400" };
-  if (score >= 100) return { label: "🔴 DANGER",   cls: "text-fuchsia-400", barCls: "from-fuchsia-600 to-purple-400" };
-  if (score >= 70)  return { label: "🟠 HIGH",     cls: "text-purple-400",  barCls: "from-purple-600 to-violet-400" };
-  return                   { label: "🟡 WATCH",    cls: "text-violet-400",  barCls: "from-violet-700 to-purple-500" };
+  if (score >= 150) return { label: "☠️ CRITICAL", cls: "text-indigo-400",    barCls: "from-indigo-500 to-violet-400" };
+  if (score >= 100) return { label: "🔴 DANGER",   cls: "text-violet-400", barCls: "from-violet-600 to-indigo-400" };
+  if (score >= 70)  return { label: "🟠 HIGH",     cls: "text-indigo-500",  barCls: "from-indigo-600 to-violet-400" };
+  return                   { label: "🟡 WATCH",    cls: "text-violet-400",  barCls: "from-violet-700 to-indigo-500" };
 }

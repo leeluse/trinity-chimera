@@ -56,12 +56,12 @@ const PanelTabsContent = () => {
 
       <Link
         href="/?view=crime"
-        className={`flex-1 flex items-center justify-center gap-1.5 group transition-all relative uppercase cursor-pointer ${isCrimeActive ? 'text-rose-400 bg-rose-500/5' : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.02]'
+        className={`flex-1 flex items-center justify-center gap-1.5 group transition-all relative uppercase cursor-pointer ${isCrimeActive ? 'text-indigo-400 bg-indigo-500/5' : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.02]'
           }`}
       >
-        <Skull size={12} className={isCrimeActive ? "text-rose-400" : "text-slate-600 transition-colors group-hover:text-slate-400"} />
+        <Skull size={12} className={isCrimeActive ? "text-indigo-400" : "text-slate-600 transition-colors group-hover:text-slate-400"} />
         <span className="text-[9px] font-bold tracking-wider leading-none">CRIME</span>
-        {isCrimeActive && <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-rose-500 shadow-[0_-4px_10px_rgba(244,63,94,0.3)]" />}
+        {isCrimeActive && <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-indigo-500 shadow-[0_-4px_10px_rgba(99,102,241,0.3)]" />}
       </Link>
 
       <Link

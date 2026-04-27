@@ -1,13 +1,28 @@
 const FAPI = "https://fapi.binance.com/fapi/v1";
 
+// 스캔 abort 신호 — crimeEngine이 스캔 시작/종료 시 설정
+let _scanSignal: AbortSignal | null = null;
+export function setScanSignal(signal: AbortSignal | null) {
+  _scanSignal = signal;
+}
+
 async function fetchJSON(url: string): Promise<any> {
+  if (_scanSignal?.aborted) return null;
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
+  // 스캔이 중단되면 이 요청도 즉시 취소
+  _scanSignal?.addEventListener("abort", () => controller.abort(), { once: true });
+
   try {
     const res = await fetch(url, { signal: controller.signal });
+    if (res.status === 418) throw new Error("BINANCE_IP_BANNED");
+    if (res.status === 429) throw new Error("BINANCE_RATE_LIMIT");
     if (!res.ok) return null;
     return await res.json();
-  } catch {
+  } catch (e: any) {
+    // IP 차단/레이트리밋은 상위로 전파 (나머지는 null 처리)
+    if (e?.message === "BINANCE_IP_BANNED" || e?.message === "BINANCE_RATE_LIMIT") throw e;
     return null;
   } finally {
     clearTimeout(timer);

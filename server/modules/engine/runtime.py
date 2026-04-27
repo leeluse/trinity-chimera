@@ -518,10 +518,23 @@ def run_skill_backtest(
     try:
         start_ms = parse_date_to_ms(start_date, end_of_day=False)
         end_ms = parse_date_to_ms(end_date, end_of_day=True)
+        interval_ms_map = {
+            "1m": 60_000,
+            "5m": 300_000,
+            "15m": 900_000,
+            "1h": 3_600_000,
+            "4h": 14_400_000,
+        }
+        interval_ms = interval_ms_map.get(interval, 3_600_000)
+        if start_ms is not None and end_ms is not None and end_ms > start_ms:
+            expected_bars = int((end_ms - start_ms) / interval_ms) + 2
+            fetch_limit = max(10_000, expected_bars)
+        else:
+            fetch_limit = 10_000
         market_df = fetch_ohlcv_dataframe(
             symbol=symbol,
             interval=interval,
-            limit=10000,
+            limit=fetch_limit,
             start_ms=start_ms,
             end_ms=end_ms,
         )

@@ -5,15 +5,17 @@ import {
   getBybitSymbols, getBybitTicker, getBybitOI,
   getBybitLSRatio, getBybitFundingHistory,
   getBybitOrderbook, getBybitTakerFlow, getBybitKlines,
+  setScanSignal as setBybitScanSignal,
 } from "./bybitApi";
 import {
   getBinanceSymbols, getBinanceTicker, getBinanceOI,
   getBinanceLSRatio, getBinanceFundingHistory,
   getBinanceOrderbook, getBinanceTakerFlow, getBinanceKlines,
+  setScanSignal as setBinanceScanSignal,
 } from "./binanceApi";
 import { scoreCoin, calculateAtr } from "./scoring";
 
-const CONCURRENCY = 8;
+const CONCURRENCY = 4;
 
 async function pLimit<T>(
   tasks: (() => Promise<T>)[],
@@ -191,6 +193,21 @@ export interface ScanOptions {
 export async function runFullScan(opts: ScanOptions): Promise<CoinData[]> {
   const { bybit, binance, onProgress, signal } = opts;
 
+  // fetchJSON 레벨까지 abort 신호 전달 (Stop 버튼 → 즉시 요청 취소)
+  setBinanceScanSignal(signal ?? null);
+  setBybitScanSignal(signal ?? null);
+
+  try {
+    return await _runFullScanInner(opts);
+  } finally {
+    setBinanceScanSignal(null);
+    setBybitScanSignal(null);
+  }
+}
+
+async function _runFullScanInner(opts: ScanOptions): Promise<CoinData[]> {
+  const { bybit, binance, onProgress, signal } = opts;
+
   // 1. Fetch symbol lists in parallel
   const [bybitSymbols, binanceSymbols] = await Promise.all([
     bybit   ? getBybitSymbols()   : Promise.resolve([] as string[]),
@@ -222,6 +239,9 @@ export async function runFullScan(opts: ScanOptions): Promise<CoinData[]> {
 
   const total = tasks.length;
   let doneCount = 0;
+
+  // Report initial total immediately
+  onProgress?.(0, total);
 
   const results = await pLimit(tasks, CONCURRENCY, (done) => {
     doneCount = done;

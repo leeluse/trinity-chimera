@@ -93,42 +93,6 @@ export const PageHeader = ({
 
           {isDashboard && (
             <>
-              <Link
-                href="/scanner"
-                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-cyan-400 hover:border-cyan-500/50 transition-all text-[11px] font-mono font-semibold tracking-wide"
-                title="Solo Scanner"
-              >
-                <span className="text-cyan-500">📡</span>
-                <span>SCANNER</span>
-              </Link>
-
-              <Link
-                href="/hunter"
-                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-orange-400 hover:border-orange-500/50 transition-all text-[11px] font-mono font-semibold tracking-wide"
-                title="Hunter V16"
-              >
-                <span className="text-orange-500">🎯</span>
-                <span>HUNTER</span>
-              </Link>
-
-              <Link
-                href="/terminal"
-                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-blue-400 hover:border-blue-500/50 transition-all text-[11px] font-mono font-semibold tracking-wide"
-                title="Alpha Terminal"
-              >
-                <span className="text-blue-500">⌨</span>
-                <span>TERMINAL</span>
-              </Link>
-
-              <Link
-                href="/liquidation"
-                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-red-400 hover:border-red-500/50 transition-all text-[11px] font-mono font-semibold tracking-wide"
-                title="청산 압력 지도"
-              >
-                <span className="text-red-500">🔥</span>
-                <span>LIQ MAP</span>
-              </Link>
-
               <div className={`flex items-center gap-2 px-3 py-1 rounded-full border transition-all duration-300 ${getStatusStyles()}`}>
                 <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${getDotStyles()}`}></div>
                 <span className="text-[10px] font-bold uppercase tracking-wider">

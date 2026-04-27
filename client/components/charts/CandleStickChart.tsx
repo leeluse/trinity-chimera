@@ -33,6 +33,43 @@ interface CandleData {
     volume: number;
 }
 
+interface BybitKlineRow {
+    start: number | string;
+    open: number | string;
+    high: number | string;
+    low: number | string;
+    close: number | string;
+    volume?: number | string;
+}
+
+interface BybitKlineResponse {
+    retCode?: number;
+    retMsg?: string;
+    result?: {
+        list?: Array<Array<string>>;
+    };
+}
+
+interface BybitWsPayload {
+    topic?: string;
+    data?: Array<{
+        start: number;
+        end: number;
+        interval: string;
+        open: string;
+        close: string;
+        high: string;
+        low: string;
+        volume: string;
+        turnover: string;
+        confirm: boolean;
+        timestamp: number;
+    }>;
+    success?: boolean;
+    op?: string;
+    ret_msg?: string;
+}
+
 function isSameCandle(a: CandleData | undefined, b: CandleData | undefined): boolean {
     if (!a || !b) return false;
     return (
@@ -71,9 +108,34 @@ function formatClock(seconds: number, compact: boolean): string {
     return date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Seoul" });
 }
 
-function normalizePair(pair: string): string {
+function normalizeBybitSymbol(pair: string): string {
     const normalized = pair.toUpperCase().replace("/", "").replace(".P", "").replace(/\s+/g, "");
     return normalized.endsWith("USDT") ? normalized : `${normalized}USDT`;
+}
+
+function parseBybitKlineRows(source: BybitKlineRow[]): CandleData[] {
+    return source
+        .map((row) => ({
+            time: Math.floor(Number(row.start) / 1000),
+            open: Number(row.open),
+            high: Number(row.high),
+            low: Number(row.low),
+            close: Number(row.close),
+            volume: Number(row.volume || 0),
+        }))
+        .filter((row) => row.time > 0 && row.open > 0 && row.high > 0 && row.low > 0 && row.close > 0)
+        .sort((a, b) => a.time - b.time);
+}
+
+function tfToBybitInterval(timeFrame: ChartTimeFrame): string {
+    const map: Record<ChartTimeFrame, number> = {
+        "1m": 1,
+        "5m": 5,
+        "15m": 15,
+        "1h": 60,
+        "4h": 240,
+    };
+    return String(map[timeFrame] ?? 1);
 }
 
 function toSeriesData(rows: CandleData[]): CandlestickData<Time>[] {
@@ -88,7 +150,10 @@ function toSeriesData(rows: CandleData[]): CandlestickData<Time>[] {
 
 function mergeSnapshot(prev: CandleData[], nextRows: CandleData[]): CandleData[] {
     if (nextRows.length === 0) return prev;
-    if (prev.length === 0) return nextRows.slice(-320);
+    if (prev.length === 0) {
+        const sorted = [...nextRows].sort((a, b) => a.time - b.time);
+        return sorted.slice(-320);
+    }
 
     const byTime = new Map<number, CandleData>();
     for (const row of prev) byTime.set(row.time, row);
@@ -128,11 +193,13 @@ export default function CandlestickChart({
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimerRef = useRef<number | null>(null);
+    const pingTimerRef = useRef<number | null>(null);
     const hasFittedRef = useRef(false);
     const prevDataRef = useRef<CandleData[]>([]);
     const lastWsMessageAtRef = useRef(0);
 
-    const symbol = useMemo(() => normalizePair(pair), [pair]);
+    const bybitSymbol = useMemo(() => normalizeBybitSymbol(pair), [pair]);
+    const bybitInterval = useMemo(() => tfToBybitInterval(timeFrame), [timeFrame]);
 
     const refreshMs = useMemo(() => {
         const map: Record<ChartTimeFrame, number> = {
@@ -146,34 +213,35 @@ export default function CandlestickChart({
     }, [timeFrame]);
 
     const loadHistorical = useCallback(async () => {
-        const parseRows = (source: Array<Array<string | number>>): CandleData[] => {
-            return source
-                .map((row) => ({
-                    time: Math.floor(Number(row[0]) / 1000),
-                    open: Number(row[1]),
-                    high: Number(row[2]),
-                    low: Number(row[3]),
-                    close: Number(row[4]),
-                    volume: Number(row[5] || 0),
-                }))
-                .filter((row) => row.time > 0 && row.open > 0 && row.high > 0 && row.low > 0 && row.close > 0);
-        };
-
         try {
-            const binanceRes = await fetch(
-                `https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(timeFrame)}&limit=240`,
-            );
-            if (binanceRes.ok) {
-                const payload = (await binanceRes.json()) as Array<Array<string | number>>;
-                if (Array.isArray(payload) && payload.length > 0) {
-                    const parsed = parseRows(payload);
+            const params = new URLSearchParams({
+                category: "linear",
+                symbol: bybitSymbol,
+                interval: bybitInterval,
+                limit: "240",
+            });
+            const bybitRes = await fetch(`https://api.bybit.com/v5/market/kline?${params.toString()}`);
+
+            if (bybitRes.ok) {
+                const payload = (await bybitRes.json()) as BybitKlineResponse;
+                if (payload?.retCode === 0 && Array.isArray(payload?.result?.list) && payload.result.list.length > 0) {
+                    const parsed = parseBybitKlineRows(
+                        payload.result.list.map((row) => ({
+                            start: row[0],
+                            open: row[1],
+                            high: row[2],
+                            low: row[3],
+                            close: row[4],
+                            volume: row[5],
+                        })),
+                    );
                     setData((prev) => mergeSnapshot(prev, parsed));
                     setError("");
                     return;
                 }
             }
         } catch {
-            // Fall through to backend fallback.
+            // Fall through to backend fallback when direct call fails.
         }
 
         try {
@@ -206,12 +274,14 @@ export default function CandlestickChart({
         } catch (e) {
             setError(e instanceof Error ? e.message : "Failed to load chart data");
         }
-    }, [pair, symbol, timeFrame]);
+    }, [bybitInterval, bybitSymbol, pair, timeFrame]);
 
     useEffect(() => {
         hasFittedRef.current = false;
         lastWsMessageAtRef.current = 0;
-        void loadHistorical();
+        const initialLoadId = window.setTimeout(() => {
+            void loadHistorical();
+        }, 0);
         const id = window.setInterval(() => {
             const now = Date.now();
             const wsQuietForMs = now - lastWsMessageAtRef.current;
@@ -220,6 +290,7 @@ export default function CandlestickChart({
             void loadHistorical();
         }, refreshMs);
         return () => {
+            window.clearTimeout(initialLoadId);
             window.clearInterval(id);
         };
     }, [loadHistorical, refreshMs]);
@@ -367,26 +438,43 @@ export default function CandlestickChart({
         let unmounted = false;
 
         const connect = () => {
-            const ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol.toLowerCase()}@kline_${timeFrame}`);
+            const ws = new WebSocket("wss://stream.bybit.com/v5/public/linear");
             wsRef.current = ws;
+
+            ws.onopen = () => {
+                const topic = `kline.${bybitInterval}.${bybitSymbol}`;
+                ws.send(
+                    JSON.stringify({
+                        op: "subscribe",
+                        args: [topic],
+                    }),
+                );
+                pingTimerRef.current = window.setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ op: "ping" }));
+                    }
+                }, 25_000);
+            };
 
             ws.onmessage = (event) => {
                 if (unmounted) return;
                 try {
-                    const payload = JSON.parse(event.data) as { k?: Record<string, string | number> };
-                    const kline = payload.k;
-                    if (!kline) return;
+                    const payload = JSON.parse(event.data) as BybitWsPayload;
+                    if (!payload.topic?.startsWith("kline.") || !Array.isArray(payload.data)) return;
                     lastWsMessageAtRef.current = Date.now();
 
-                    const next: CandleData = {
-                        time: Math.floor(Number(kline.t) / 1000),
-                        open: Number(kline.o),
-                        high: Number(kline.h),
-                        low: Number(kline.l),
-                        close: Number(kline.c),
-                        volume: Number(kline.v || 0),
-                    };
-                    if (!next.time || next.open <= 0 || next.high <= 0 || next.low <= 0 || next.close <= 0) return;
+                    const parsed = parseBybitKlineRows(
+                        payload.data.map((row) => ({
+                            start: row.start,
+                            open: row.open,
+                            high: row.high,
+                            low: row.low,
+                            close: row.close,
+                            volume: row.volume,
+                        })),
+                    );
+                    if (parsed.length === 0) return;
+                    const next = parsed[parsed.length - 1];
 
                     setData((prev) => upsertCandle(prev, next));
                 } catch {
@@ -404,6 +492,10 @@ export default function CandlestickChart({
 
             ws.onclose = () => {
                 if (unmounted) return;
+                if (pingTimerRef.current) {
+                    window.clearInterval(pingTimerRef.current);
+                    pingTimerRef.current = null;
+                }
                 void loadHistorical();
                 reconnectTimerRef.current = window.setTimeout(connect, 3000);
             };
@@ -417,10 +509,14 @@ export default function CandlestickChart({
                 window.clearTimeout(reconnectTimerRef.current);
                 reconnectTimerRef.current = null;
             }
+            if (pingTimerRef.current) {
+                window.clearInterval(pingTimerRef.current);
+                pingTimerRef.current = null;
+            }
             wsRef.current?.close();
             wsRef.current = null;
         };
-    }, [loadHistorical, symbol, timeFrame]);
+    }, [bybitInterval, bybitSymbol, loadHistorical]);
 
     const currentPrice = data.at(-1)?.close ?? 0;
     const openPrice = data.at(0)?.open ?? currentPrice;

@@ -1,6 +1,7 @@
 """파라미터 최적화 파이프라인 (코드에서 파라미터 추출 → Grid Search → 최적값 선택)"""
 import json
 import logging
+import random
 import re
 from itertools import product
 from typing import Any, AsyncGenerator, Dict, List
@@ -159,58 +160,42 @@ def _float_range(min_v: float, max_v: float, step: float) -> List[float]:
     return values
 
 
-def _generate_param_grid(params: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    파라미터 목록에서 탐색할 조합 생성.
-    - 파이프라인 부하를 고려하여 최대 조합 수를 100개로 제한.
-    - 파라미터가 많으면 하위 파라미터는 current 값으로 고정.
-    """
+
+def _generate_custom_grid(params: List[Dict[str, Any]], max_limit: int = 100) -> List[Dict[str, Any]]:
+    """사용자 요청에 맞춘 커스텀 그리드 생성 (메모리 효율적인 랜덤 샘플링)."""
     if not params:
         return []
 
-    # 그리드 서치 대상 파라미터 개수 결정 (최대 4개까지 유동적으로)
-    target_count = min(len(params), 4)
-    target = params[:target_count]
-    
-    # 각 파라미터별 후보군 생성
-    ranges = []
-    for p in target:
-        values = _float_range(float(p["min"]), float(p["max"]), float(p["step"]))
-        # 만약 조합이 너무 많아질 것 같으면 후보군을 3-4개로 압축
-        if len(values) > 5:
-            indices = [0, len(values)//3, (len(values)*2)//3, len(values)-1]
-            values = sorted(list(set([values[i] for i in indices])))
-        ranges.append([(p["name"], v) for v in values])
-
-    combinations = []
-    for combo in product(*ranges):
-        combinations.append(dict(combo))
-
-    # 최종 조합 수 제한 (동작 시간 고려)
-    return combinations[:100]
-
-
-def _generate_custom_grid(params: List[Dict[str, Any]], max_limit: int = 100) -> List[Dict[str, Any]]:
-    """사용자 요청에 맞춘 커스텀 그리드 생성"""
-    if not params: return []
-    
-    ranges = []
+    param_names: List[str] = []
+    param_vals: List[List[float]] = []
     for p in params:
         values = _float_range(float(p["min"]), float(p["max"]), float(p["step"]))
-        # 조합 수 조절을 위해 후보군 압축
         if len(values) > 5:
-            indices = [0, len(values)//3, (len(values)*2)//3, len(values)-1]
-            values = sorted(list(set([values[i] for i in indices])))
-        ranges.append([(p["name"], v) for v in values])
+            indices = [0, len(values) // 3, (len(values) * 2) // 3, len(values) - 1]
+            values = sorted(set(values[i] for i in indices))
+        param_names.append(p["name"])
+        param_vals.append(values)
 
-    combinations = []
-    for combo in product(*ranges):
-        combinations.append(dict(combo))
-    
-    import random
-    if len(combinations) > max_limit:
-        return random.sample(combinations, max_limit)
-    return combinations
+    total = 1
+    for vals in param_vals:
+        total *= len(vals)
+
+    # 전체 조합이 한계 이하면 전부 반환
+    if total <= max_limit:
+        return [dict(zip(param_names, combo)) for combo in product(*param_vals)]
+
+    # 전체 목록을 만들지 않고 랜덤 인덱스로 직접 샘플링
+    sizes = [len(v) for v in param_vals]
+    seen: set = set()
+    result: List[Dict[str, Any]] = []
+    for _ in range(max_limit * 20):
+        if len(result) >= max_limit:
+            break
+        idx = tuple(random.randrange(n) for n in sizes)
+        if idx not in seen:
+            seen.add(idx)
+            result.append(dict(zip(param_names, [param_vals[i][j] for i, j in enumerate(idx)])))
+    return result
 
 def _apply_params_to_code(code: str, param_values: Dict[str, Any]) -> str:
     """
@@ -220,9 +205,10 @@ def _apply_params_to_code(code: str, param_values: Dict[str, Any]) -> str:
 
     for param_name, param_value in param_values.items():
         # 1. 변수명 = 숫자 형태 교체 (예: fast_len = 12)
-        pattern_var = rf"({re.escape(param_name)}\s*=\s*)(\d+\.?\d*)"
+        # lookbehind로 더 긴 변수명 일부를 잘못 치환하는 버그 방지 (예: period → fast_period 오치환 차단)
+        pattern_var = rf"(?<![a-zA-Z0-9_])({re.escape(param_name)}\s*=\s*)(\d+\.?\d*)"
         modified_code = re.sub(pattern_var, rf"\g<1>{param_value}", modified_code)
-        
+
         # 2. "키": 숫자 형태 교체 (예: 'fast_len': 12)
         pattern_dict = rf"([\"']{re.escape(param_name)}[\"']\s*:\s*)(\d+\.?\d*)"
         modified_code = re.sub(pattern_dict, rf"\g<1>{param_value}", modified_code)
@@ -248,9 +234,9 @@ async def run_optimize_pipeline(
             })
             return
 
-        # ── Stage 1: 파라미터 분석 및 사용자 설정 확인 ──────────────────
+        # ── Stage 1: 파라미터 분석 ────────────────────────────────────
         yield format_sse({"type": "stage", "stage": 1, "label": "🔍 전략 코드 분석 및 파라미터 식별 중..."})
-        
+
         param_result = await _extract_params_from_code(strategy_code)
         all_params = param_result.get("params", [])
 
@@ -258,70 +244,70 @@ async def run_optimize_pipeline(
             yield format_sse({"type": "analysis", "content": "⚠️ 코드에서 최적화할 파라미터를 찾지 못했습니다."})
             return
 
-        # 사용자 메시지에서 숫자 추출 시도 (예: "5개 100번", "3 50")
-        import re
+        # 사용자 메시지에서 설정 추출 (없으면 기본값: 4개, 50번)
         nums = re.findall(r"(\d+)", message)
-        
-        # 만약 숫자가 2개 이상 포함되어 있지 않다면, 먼저 파라미터 리스트를 보여주고 질문함
-        if len(nums) < 2:
-            param_list_str = "\n".join([f"- `{p['name']}` (현재: {p['current']})" for p in all_params])
-            yield format_sse({
-                "type": "analysis", 
-                "content": f"### 🔍 파라미터 스캔 결과\n코드에서 총 **{len(all_params)}개**의 최적화 후보를 찾았습니다:\n\n{param_list_str}\n\n---\n**최적화 설정을 알려주세요!**\n1. 중요도 순으로 **몇 개**의 파라미터를 건드릴까요? (추천: 3~5개)\n2. 최대 **몇 번**의 조합을 테스트할까요? (추천: 50~100회)\n\n예시: **'5개, 100번 진행해줘'** 라고 말씀해 주세요."
-            })
-            return # 여기서 일단 멈춤
-
-        # 숫자가 있다면 설정 적용
         try:
-            target_count = int(nums[0])
-            max_combos = int(nums[1])
+            requested_count = int(nums[0]) if nums else 4
+            max_combos = int(nums[1]) if len(nums) >= 2 else 50
         except (ValueError, IndexError):
-            target_count = 4
+            requested_count = 4
             max_combos = 50
 
-        # 범위 제한 (안정성)
-        target_count = max(1, min(target_count, len(all_params), 8))
+        # target_count: 코드에서 찾은 파라미터 수 이하로만 클램핑
+        target_count = max(1, min(requested_count, len(all_params)))
         max_combos = max(1, min(max_combos, 500))
-        
         selected_params = all_params[:target_count]
-        
+
+        # 파라미터 목록 + 설정 확인 표시 (질문 없이 바로 진행)
+        param_list_str = "\n".join(
+            f"- `{p['name']}` (현재: {p['current']})" for p in all_params
+        )
+        clamp_note = (
+            f"\n> ⚠️ 요청하신 {requested_count}개는 발견된 파라미터 수({len(all_params)}개)를 초과해 "
+            f"**{target_count}개**로 조정했습니다."
+            if requested_count > len(all_params) else ""
+        )
         yield format_sse({
-            "type": "analysis", 
-            "content": f"✅ **설정 확인:** 상위 **{target_count}개** 변수를 대상으로 최대 **{max_combos}개**의 조합 탐색을 시작합니다."
+            "type": "analysis",
+            "content": (
+                f"### 🔍 파라미터 스캔 결과\n총 **{len(all_params)}개** 후보 발견:\n\n"
+                f"{param_list_str}{clamp_note}\n\n"
+                f"✅ **상위 {target_count}개** 변수 × 최대 **{max_combos}개** 조합으로 탐색합니다."
+            ),
         })
 
-        # ── Stage 2: 탐색 (Grid / Random / Bayesian) ──────────────
-        method = "grid"
-        if any(k in message.lower() for k in ["랜덤", "random", "무작위"]):
-            method = "random"
-        elif any(k in message.lower() for k in ["베이지안", "bayesian", "최적", "지능"]):
-            method = "bayesian"
+        # ── Stage 2: 탐색 (Grid / Random) ────────────────────────
+        method = "random" if any(k in message.lower() for k in ["랜덤", "random", "무작위"]) else "grid"
 
-        # 그리드 생성 (사용자 요청 수치 반영)
         param_grid = _generate_custom_grid(selected_params, max_combos)
         if not param_grid:
             yield format_sse({"type": "analysis", "content": "❌ 탐색할 파라미터 조합이 없습니다."})
             yield format_sse({"type": "done"})
             return
 
-        # 방식에 따른 조합 필터링
-        if method == "random":
-            import random
-            # 전체 조합의 30%만 랜덤하게 샘플링 (최대 10개)
-            sample_size = min(len(param_grid), max(5, int(len(param_grid) * 0.3)))
-            param_grid = random.sample(param_grid, sample_size)
-            yield format_sse({"type": "status", "content": f"🎲 랜덤 서치 모드 (조합 {len(param_grid)}개 샘플링)"})
-        elif method == "bayesian":
-            # 실제 베이지안(Optuna 등) 대신, 여기서는 단순화된 Hill-Climbing 또는 
-            # 중요 변수 위주의 탐색으로 대체 (현재 라이브러리 제약 때문)
-            yield format_sse({"type": "status", "content": f"🧠 지능형(Bayesian-like) 탐색 진행 중..."})
-            # (구현상으로는 현재 Grid를 그대로 쓰되, UI에서 베이지안으로 안내)
-            # TODO: 실제 Bayesian 최적화 라이브러리 도입 고도화 가능
-
-        yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ 파라미터 탐색 중... ({method.upper()}, 0/{len(param_grid)})"})
+        method_label = "🎲 랜덤 서치" if method == "random" else "📐 그리드 서치"
+        yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ {method_label} 탐색 중... (0/{len(param_grid)})"})
 
         backtester = ChatBacktester()
         results = []
+
+        # 원본 파라미터 기준 baseline 백테스트 (비교표의 "원본" 칸에 사용)
+        yield format_sse({"type": "status", "content": "📊 원본 파라미터 기준선 측정 중..."})
+        baseline_metrics: Dict[str, Any] = {}
+        try:
+            bt_base = await backtester.run(strategy_code, message, context)
+            if bt_base.get("success"):
+                bm = bt_base.get("metrics", {})
+                baseline_metrics = {
+                    "total_return": bm.get("total_return", 0),
+                    "max_drawdown": bm.get("max_drawdown", 0),
+                    "sharpe_ratio": bm.get("sharpe_ratio", 0),
+                    "win_rate": bm.get("win_rate", 0),
+                    "profit_factor": bm.get("profit_factor", 0),
+                    "total_trades": bm.get("total_trades", 0),
+                }
+        except Exception as _e:
+            logger.warning(f"Baseline backtest failed: {_e}")
 
         for idx, param_values in enumerate(param_grid):
             modified_code = _apply_params_to_code(strategy_code, param_values)
@@ -369,24 +355,26 @@ async def run_optimize_pipeline(
 
         results.sort(key=lambda x: x["trinity_score"], reverse=True)
         best = results[0]
-        worst = results[-1]
         best_m = best["metrics"]
-        worst_m = worst["metrics"]
+
+        # 비교 기준: 원본 파라미터 baseline 우선, 실패 시 탐색 결과 중 최저 사용
+        ref_m = baseline_metrics if baseline_metrics else results[-1]["metrics"]
+        ref_label = "원본" if baseline_metrics else "최저 조합"
 
         # 최적 파라미터 요약 텍스트
         best_params_str = ", ".join(f"`{k}` = **{v}**" for k, v in best["params"].items())
-        improvement = best_m["total_return"] - worst_m["total_return"]
+        improvement = best_m["total_return"] - ref_m["total_return"]
         summary_lines = [
             f"## 🏆 최적 파라미터",
             f"{best_params_str}",
             f"",
-            f"| 지표 | 기존 | 최적 | 개선 |",
+            f"| 지표 | {ref_label} | 최적 | 개선 |",
             f"|------|------|------|------|",
-            f"| 수익률 | {worst_m['total_return']:+.2f}% | {best_m['total_return']:+.2f}% | {improvement:+.2f}% |",
-            f"| Sharpe | {worst_m['sharpe_ratio']:.2f} | {best_m['sharpe_ratio']:.2f} | {best_m['sharpe_ratio']-worst_m['sharpe_ratio']:+.2f} |",
-            f"| Win Rate | {worst_m['win_rate']:.1f}% | {best_m['win_rate']:.1f}% | — |",
-            f"| MDD | {worst_m['max_drawdown']:.2f}% | {best_m['max_drawdown']:.2f}% | — |",
-            f"| 거래 수 | {int(worst_m['total_trades'])} | {int(best_m['total_trades'])} | — |",
+            f"| 수익률 | {ref_m['total_return']:+.2f}% | {best_m['total_return']:+.2f}% | {improvement:+.2f}% |",
+            f"| Sharpe | {ref_m['sharpe_ratio']:.2f} | {best_m['sharpe_ratio']:.2f} | {best_m['sharpe_ratio']-ref_m['sharpe_ratio']:+.2f} |",
+            f"| Win Rate | {ref_m['win_rate']:.1f}% | {best_m['win_rate']:.1f}% | — |",
+            f"| MDD | {ref_m['max_drawdown']:.2f}% | {best_m['max_drawdown']:.2f}% | — |",
+            f"| 거래 수 | {int(ref_m['total_trades'])} | {int(best_m['total_trades'])} | — |",
         ]
         yield format_sse({"type": "analysis", "content": "\n".join(summary_lines)})
 

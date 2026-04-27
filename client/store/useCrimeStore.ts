@@ -1,85 +1,128 @@
 import { create } from "zustand";
 import { CoinData, CrimeSignal, ScanStatus, ScanProgress, CRIME_TARGETS } from "@/components/features/crime/crimeData";
 import { detectSignals } from "@/components/features/crime/signalEngine";
-import { runFullScan } from "@/components/features/crime/engine/crimeEngine";
+import { CrimeWsEngine, WsStatus } from "@/components/features/crime/engine/crimeWsEngine";
 
-// AbortController reference kept outside store to cancel in-flight scans
-let scanAbortController: AbortController | null = null;
+// WS 엔진 인스턴스 — 스토어 외부에서 관리 (리렌더 방지)
+let _engine: CrimeWsEngine | null = null;
 
 interface CrimeState {
-  // scan
-  status: ScanStatus;
-  progress: ScanProgress;
-  bybitEnabled: boolean;
-  binanceEnabled: boolean;
-  results: CoinData[];          // ranked by score desc
-  previousResults: CoinData[] | null;
-  nextScanIn: number;           // seconds until next auto scan
-  lastScanAt: string;           // "04:28 UTC"
+  // 스캔 상태
+  status:            ScanStatus;
+  wsStatus:          WsStatus;       // WS 연결 세부 상태
+  wsSymbolCount:     number;         // WS로 수신된 심볼 수
+  errorMessage:      string;
+  scanCooldownUntil: number;
+  progress:          ScanProgress;
+  binanceEnabled:    boolean;
+  bybitEnabled:      boolean;
+  results:           CoinData[];
+  previousResults:   CoinData[] | null;
+  nextScanIn:        number;
+  lastScanAt:        string;
 
-  // signals
-  signals: CrimeSignal[];       // most recent first, max 50
-  p0Banner: CrimeSignal | null; // latest P0 signal (null = dismissed)
+  // 시그널
+  signals:  CrimeSignal[];
+  p0Banner: CrimeSignal | null;
 
-  // selection (from left table)
+  // 선택
   selectedSymbol: string | null;
 
-  // actions
-  toggleBybit: () => void;
+  // 액션
+  toggleBybit:   () => void;
   toggleBinance: () => void;
-  startScan: () => void;
-  stopScan: () => void;
-  setProgress: (p: ScanProgress) => void;
-  setResults: (coins: CoinData[]) => void;
+  startEngine:   () => void;
+  stopEngine:    () => void;
+  setProgress:   (p: ScanProgress) => void;
+  setResults:    (coins: CoinData[]) => void;
   dismissBanner: () => void;
-  selectSymbol: (symbol: string | null) => void;
+  selectSymbol:  (symbol: string | null) => void;
   tickCountdown: () => void;
-  runScan: () => Promise<void>;
-  // kept for fallback / testing
+
+  // 하위 호환 (UI에서 runScan / stopScan 호출)
+  runScan:     () => void;
+  stopScan:    () => void;
   runMockScan: () => Promise<void>;
 }
 
-const SCAN_INTERVAL_SEC = 300; // 5 minutes
+const SCAN_INTERVAL_SEC = 300;
 
 export const useCrimeStore = create<CrimeState>((set, get) => ({
-  status: "idle",
-  progress: { current: 0, total: 0, estimatedSecondsLeft: 0 },
-  bybitEnabled: true,
-  binanceEnabled: true,
-  results: CRIME_TARGETS,       // start with mock data
-  previousResults: null,
-  nextScanIn: 0,
-  lastScanAt: "",
-  signals: [],
-  p0Banner: null,
-  selectedSymbol: null,
+  status:            "idle",
+  wsStatus:          "idle",
+  wsSymbolCount:     0,
+  errorMessage:      "",
+  scanCooldownUntil: 0,
+  progress:          { current: 0, total: 0, estimatedSecondsLeft: 0 },
+  binanceEnabled:    true,
+  bybitEnabled:      true,
+  results:           [],
+  previousResults:   null,
+  nextScanIn:        0,
+  lastScanAt:        "",
+  signals:           [],
+  p0Banner:          null,
+  selectedSymbol:    null,
 
-  toggleBybit: () => set((s) => ({ bybitEnabled: !s.bybitEnabled })),
+  toggleBybit:   () => set((s) => ({ bybitEnabled: !s.bybitEnabled })),
   toggleBinance: () => set((s) => ({ binanceEnabled: !s.binanceEnabled })),
 
-  startScan: () =>
-    set({
-      status: "scanning",
-      progress: { current: 0, total: 0, estimatedSecondsLeft: 0 },
-    }),
+  // ── WS 엔진 시작 ─────────────────────────────────────────
+  startEngine: () => {
+    if (_engine) {
+      _engine.stop();
+      _engine = null;
+    }
 
-  stopScan: () => {
-    scanAbortController?.abort();
-    scanAbortController = null;
-    set({ status: "idle", nextScanIn: 0 });
+    _engine = new CrimeWsEngine({
+      onStatus: (ws, msg) => {
+        const scanStatus: ScanStatus =
+          ws === "scanning"    ? "scanning"
+          : ws === "error"     ? "error"
+          : ws === "live"      ? "complete"
+          : ws === "connecting" ? "scanning"
+          : "idle";
+
+        set({
+          wsStatus:     ws,
+          errorMessage: msg ?? "",
+          status:       scanStatus,
+          ...(ws === "live" && { nextScanIn: SCAN_INTERVAL_SEC }),
+        });
+      },
+      onProgress: (done, total) => {
+        const remaining = Math.round(((total - done) / Math.max(total, 1)) * 90);
+        set({ progress: { current: done, total, estimatedSecondsLeft: remaining } });
+      },
+      onResults: (coins) => {
+        get().setResults(coins);
+      },
+    });
+
+    set({
+      status:       "scanning",
+      wsStatus:     "connecting",
+      errorMessage: "",
+      progress:     { current: 0, total: 0, estimatedSecondsLeft: 0 },
+    });
+    _engine.start();
   },
 
-  setProgress: (p) => set({ progress: p }),
+  // ── WS 엔진 정지 ─────────────────────────────────────────
+  stopEngine: () => {
+    _engine?.stop();
+    _engine = null;
+    set({ status: "idle", wsStatus: "idle", nextScanIn: 0, wsSymbolCount: 0 });
+  },
 
+  // ── 결과 처리 (시그널 감지 포함) ──────────────────────────
   setResults: (coins) => {
     const { previousResults, signals: prevSignals } = get();
     const ranked = [...coins].sort((a, b) => b.score - a.score);
 
-    // detect signals vs previous scan
     const newSignals = detectSignals(ranked, previousResults);
-    const latestP0 = newSignals.find((s) => s.priority === "P0") ?? null;
+    const latestP0   = newSignals.find((s) => s.priority === "P0") ?? null;
 
-    // update tab title for P0
     if (latestP0 && typeof document !== "undefined") {
       document.title = `🔴 ${latestP0.symbol} ${latestP0.type} — Crime Hunter`;
     }
@@ -88,24 +131,24 @@ export const useCrimeStore = create<CrimeState>((set, get) => ({
     const utc = now.toISOString().slice(11, 16) + " UTC";
 
     set({
-      results: ranked,
+      results:         ranked,
       previousResults: ranked,
-      status: "complete",
-      nextScanIn: SCAN_INTERVAL_SEC,
-      lastScanAt: utc,
-      signals: [...newSignals, ...prevSignals].slice(0, 50),
-      p0Banner: latestP0 ?? get().p0Banner,
+      status:          "complete",
+      lastScanAt:      utc,
+      nextScanIn:      SCAN_INTERVAL_SEC,
+      signals:         [...newSignals, ...prevSignals].slice(0, 50),
+      p0Banner:        latestP0 ?? get().p0Banner,
     });
   },
 
   dismissBanner: () => {
-    if (typeof document !== "undefined") {
-      document.title = "Crime Hunter — V5";
-    }
+    if (typeof document !== "undefined") document.title = "Crime Hunter — V5";
     set({ p0Banner: null });
   },
 
   selectSymbol: (symbol) => set({ selectedSymbol: symbol }),
+
+  setProgress: (p) => set({ progress: p }),
 
   tickCountdown: () =>
     set((s) => {
@@ -113,34 +156,9 @@ export const useCrimeStore = create<CrimeState>((set, get) => ({
       return { nextScanIn: s.nextScanIn - 1 };
     }),
 
-  runScan: async () => {
-    const state = get();
-    if (state.status === "scanning") return;
-
-    scanAbortController?.abort();
-    scanAbortController = new AbortController();
-    const { signal } = scanAbortController;
-
-    set({ status: "scanning", progress: { current: 0, total: 0, estimatedSecondsLeft: 0 } });
-
-    try {
-      const coins = await runFullScan({
-        bybit:   state.bybitEnabled,
-        binance: state.binanceEnabled,
-        signal,
-        onProgress: (done, total) => {
-          const remaining = Math.round(((total - done) / Math.max(total, 1)) * 90);
-          get().setProgress({ current: done, total, estimatedSecondsLeft: remaining });
-        },
-      });
-
-      if (signal.aborted) return;
-      if (coins.length > 0) get().setResults(coins);
-      else set({ status: "complete", nextScanIn: 300 });
-    } catch {
-      if (!signal.aborted) set({ status: "error" as ScanStatus });
-    }
-  },
+  // ── 하위 호환 래퍼 ────────────────────────────────────────
+  runScan:  () => get().startEngine(),
+  stopScan: () => get().stopEngine(),
 
   runMockScan: async () => {
     const { setProgress, setResults, status } = get();
@@ -148,12 +166,11 @@ export const useCrimeStore = create<CrimeState>((set, get) => ({
 
     set({ status: "scanning", progress: { current: 0, total: 284, estimatedSecondsLeft: 45 } });
 
-    // 진행 시뮬레이션 (배치 단위로 점프)
     const total = 284;
     const steps = [40, 80, 120, 160, 200, 240, 284];
     for (const step of steps) {
       await new Promise((r) => setTimeout(r, 600));
-      if (get().status !== "scanning") return; // stop 눌렸으면 중단
+      if (get().status !== "scanning") return;
       const remaining = Math.round(((total - step) / total) * 45);
       setProgress({ current: step, total, estimatedSecondsLeft: remaining });
     }
@@ -161,12 +178,11 @@ export const useCrimeStore = create<CrimeState>((set, get) => ({
     await new Promise((r) => setTimeout(r, 400));
     if (get().status !== "scanning") return;
 
-    // 실제 데이터 대신 mock에 약간의 변동 추가 (스캔 결과 시뮬레이션)
     const varied = CRIME_TARGETS.map((c) => ({
       ...c,
-      score: c.score + Math.round((Math.random() - 0.4) * 15),
-      squeeze_fuel: Math.min(100, Math.max(0, c.squeeze_fuel + Math.round((Math.random() - 0.3) * 8))),
-      funding_rate: +(c.funding_rate + (Math.random() - 0.5) * 0.02).toFixed(4),
+      score:            c.score + Math.round((Math.random() - 0.4) * 15),
+      squeeze_fuel:     Math.min(100, Math.max(0, c.squeeze_fuel + Math.round((Math.random() - 0.3) * 8))),
+      funding_rate:     +(c.funding_rate + (Math.random() - 0.5) * 0.02).toFixed(4),
       oi_change_pct_1h: +(c.oi_change_pct_1h + (Math.random() - 0.4) * 2).toFixed(1),
     }));
 

@@ -246,10 +246,10 @@ function DashboardContent() {
 
         {isCrimeView ? (
           <CrimeMainPanel />
-        ) : (
-          <div className="relative px-6 py-2">
-              <div className="flex flex-col gap-4 relative z-10">
-                <MetricSelector />
+	        ) : (
+	          <div className="relative px-6 py-2">
+	              <div className="flex flex-col gap-4 relative z-10">
+	                <MetricSelector />
 
                 <div className="mt-2">
                   <BotList
@@ -260,15 +260,14 @@ function DashboardContent() {
 
                 <div className="flex flex-col min-h-0 gap-3 mt-2">
                   <ChartLegend names={chartNames} />
-                  <PerformanceChart chartRef={chartRef} labelPositions={labelPositions} currentMetric={currentMetric} />
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </PageLayout.Main>
-    </PageLayout>
-  );
+	                  <PerformanceChart chartRef={chartRef} labelPositions={labelPositions} currentMetric={currentMetric} />
+	                </div>
+	            </div>
+	          </div>
+	        )}
+	      </PageLayout.Main>
+	    </PageLayout>
+	  );
 }
 
 export default function Dashboard() {

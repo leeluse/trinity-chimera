@@ -44,7 +44,9 @@
       "Bash(cat)",
       "Bash(node /tmp/verify.js)",
       "Read(//tmp/**)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(curl -s --max-time 10 \"https://fapi.binance.com/fapi/v1/ping\")"
     ],
     "tools": "dontAsk",
     "commands": "dontAsk",

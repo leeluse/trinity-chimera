@@ -1,13 +1,19 @@
 const BASE_URL = "https://api.bybit.com/v5/market";
 
+let _scanSignal: AbortSignal | null = null;
+export function setScanSignal(signal: AbortSignal | null) {
+  _scanSignal = signal;
+}
+
 async function fetchJSON(url: string): Promise<any> {
+  if (_scanSignal?.aborted) return null;
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
+  _scanSignal?.addEventListener("abort", () => controller.abort(), { once: true });
+
   try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": "CrimePumpHunter/5.0" },
-    });
+    const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timer);
     if (!res.ok) return null;
     return await res.json();
