@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { Zap, History, FileSearch, Bot, Terminal as TerminalIcon, Skull } from "lucide-react";
+import { History, FileSearch, Bot, Terminal as TerminalIcon, Skull } from "lucide-react";
 
 const PanelTabsContent = () => {
   const pathname = usePathname();

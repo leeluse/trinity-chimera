@@ -1,11 +1,14 @@
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
+import json
 import logging
 import math
 import random
 import re
 from itertools import product
+from pathlib import Path
 
 from server.shared.market.provider import fetch_market_ohlcv
 from server.modules.engine.runtime import (
@@ -14,9 +17,17 @@ from server.modules.engine.runtime import (
     run_skill_backtest,
 )
 from server.modules.evolution.scoring import calculate_trinity_score
+from server.modules.regime.labeler import (
+    ARTIFACT_MAP,
+    DEFAULT_VALIDATION_END,
+    DEFAULT_VALIDATION_START,
+    run_regime_labeler,
+    resolve_out_root,
+)
 
 router = APIRouter(tags=["Backtest"])
 logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class LeaderboardRequest(BaseModel):
@@ -56,6 +67,14 @@ class BacktestOptimizeRequest(BaseModel):
     objective: str = Field(default="trinity")
     top_k: int = Field(default=5, ge=1, le=20)
     score_weights: Optional[Dict[str, float]] = None
+
+
+class BacktestRegimeRunRequest(BaseModel):
+    symbol: str = "BTCUSDT"
+    timeframe: str = "15m"
+    start_date: str = DEFAULT_VALIDATION_START
+    end_date: str = DEFAULT_VALIDATION_END
+    out_dir: Optional[str] = None
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -622,6 +641,110 @@ async def optimize_backtest_params(req: BacktestOptimizeRequest):
     except Exception as exc:
         logger.exception("Optimize params error")
         return {"success": False, "error": str(exc)}
+
+
+def _resolve_regime_run_dir(run_id: str, out_dir: Optional[str]) -> Path:
+    if not re.match(r"^[A-Za-z0-9_.-]+$", run_id):
+        raise HTTPException(status_code=400, detail="Invalid run_id format")
+    base_dir = resolve_out_root(out_dir).resolve()
+    run_dir = (base_dir / run_id).resolve()
+    if not str(run_dir).startswith(str(base_dir)):
+        raise HTTPException(status_code=400, detail="Invalid run_id path")
+    if not run_dir.exists() or not run_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run_dir
+
+
+@router.post("/regime/run")
+async def run_regime_labeling(req: BacktestRegimeRunRequest):
+    try:
+        result = run_regime_labeler(
+            symbol=req.symbol,
+            timeframe=req.timeframe,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            out_dir=req.out_dir,
+        )
+        run_id = str(result["run_id"])
+        base_dir = str(result["base_dir"])
+        return {
+            "success": True,
+            "run_id": run_id,
+            "base_dir": base_dir,
+            "stats": result["stats"],
+            "logs": result.get("logs", []),
+            "artifact_paths": result["artifact_paths"],
+            "preview_url": f"/api/backtest/regime/preview/{run_id}?out_dir={base_dir}",
+            "download_urls": {
+                "parquet": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['parquet']}?out_dir={base_dir}",
+                "stats": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['stats']}?out_dir={base_dir}",
+                "chart": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['chart']}?out_dir={base_dir}",
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Regime run error")
+        return {"success": False, "error": str(exc)}
+
+
+@router.get("/regime/result/{run_id}")
+async def get_regime_result(run_id: str, out_dir: Optional[str] = Query(None)):
+    run_dir = _resolve_regime_run_dir(run_id, out_dir)
+    stats_path = run_dir / ARTIFACT_MAP["stats"]
+    chart_path = run_dir / ARTIFACT_MAP["chart"]
+    parquet_path = run_dir / ARTIFACT_MAP["parquet"]
+
+    stats: Dict[str, Any] = {}
+    if stats_path.exists():
+        try:
+            stats = json.loads(stats_path.read_text(encoding="utf-8"))
+        except Exception:
+            stats = {}
+
+    base_dir = str(run_dir.parent.relative_to(PROJECT_ROOT))
+    return {
+        "success": True,
+        "run_id": run_id,
+        "base_dir": base_dir,
+        "stats": stats,
+        "logs": stats.get("logs", []),
+        "artifact_exists": {
+            "parquet": parquet_path.exists(),
+            "stats": stats_path.exists(),
+            "chart": chart_path.exists(),
+        },
+        "preview_url": f"/api/backtest/regime/preview/{run_id}?out_dir={base_dir}",
+        "download_urls": {
+            "parquet": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['parquet']}?out_dir={base_dir}",
+            "stats": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['stats']}?out_dir={base_dir}",
+            "chart": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['chart']}?out_dir={base_dir}",
+        },
+    }
+
+
+@router.get("/regime/preview/{run_id}")
+async def preview_regime_chart(run_id: str, out_dir: Optional[str] = Query(None)):
+    run_dir = _resolve_regime_run_dir(run_id, out_dir)
+    chart_path = run_dir / ARTIFACT_MAP["chart"]
+    if not chart_path.exists():
+        raise HTTPException(status_code=404, detail="Chart artifact not found")
+    return HTMLResponse(content=chart_path.read_text(encoding="utf-8"), status_code=200)
+
+
+@router.get("/regime/download/{run_id}/{artifact}")
+async def download_regime_artifact(run_id: str, artifact: str, out_dir: Optional[str] = Query(None)):
+    run_dir = _resolve_regime_run_dir(run_id, out_dir)
+    if artifact in ARTIFACT_MAP:
+        filename = ARTIFACT_MAP[artifact]
+    elif artifact in ARTIFACT_MAP.values():
+        filename = artifact
+    else:
+        raise HTTPException(status_code=404, detail="Unknown artifact")
+    file_path = run_dir / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return FileResponse(path=file_path, filename=filename)
 
 
 # -------------------------------------------------------------------------

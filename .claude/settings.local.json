@@ -46,7 +46,8 @@
       "Read(//tmp/**)",
       "Bash(git commit *)",
       "Bash(git push *)",
-      "Bash(curl -s --max-time 10 \"https://fapi.binance.com/fapi/v1/ping\")"
+      "Bash(curl -s --max-time 10 \"https://fapi.binance.com/fapi/v1/ping\")",
+      "Bash(xargs ls *)"
     ],
     "tools": "dontAsk",
     "commands": "dontAsk",

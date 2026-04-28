@@ -12,20 +12,20 @@ BEST_PARAMS: Dict[str, Any] = {
     "ema_trend": 150,
     "ema_fast": 20,
     "slope_lookback": 10,
-    "stoch_oversold": 30,
-    "stoch_overbought": 85,
-    "slope_min": 0.1,
-    "rsi_max_entry": 50,
-    "rsi_min_entry": 50,
+    "stoch_oversold": 35,
+    "stoch_overbought": 70,
+    "slope_min": -0.005,      # 비율 기반: EMA 기울기 -0.5%까지 허용
+    "rsi_max_entry": 60,
+    "rsi_min_entry": 40,
     "long_trail_mult": 2.0,
     "short_trail_mult": 3.0,
     "tp_atr_mult": 1.5,
     "profit_lock_thresh": 0.02,
-    "pivot_l": 7,
-    "pivot_r": 7,
+    "pivot_l": 5,
+    "pivot_r": 2,             # 확인 지연 최소화
     "vol_ma_len": 20,
     "vol_surge_mult": 1.2,
-    "use_ema_filter": False,
+    "use_ema_filter": True,   # EMA 필터: 트렌드 방향에서만 진입
     "use_vol_filter": False,
     "use_profit_lock": True,
     "warmup_bars": 150,
@@ -71,12 +71,19 @@ class RobustSignalEngineV2:
         return 100 * (c - low) / (high - low + 1e-9)
 
     @staticmethod
-    def pivot_low(s: pd.Series, left: int = 5, right: int = 5) -> pd.Series:
-        return (s.shift(left) > s) & (s.shift(-right) > s)
+    def pivot_low(s: pd.Series, left: int = 5, right: int = 2) -> pd.Series:
+        # 미래 참조 제거: pivot_r봉 전 저점 후보가 좌우보다 낮은지 현재봉으로 확인
+        pivot_bar = s.shift(right)
+        left_ok   = s.shift(right + left) > pivot_bar
+        right_ok  = s > pivot_bar
+        return left_ok & right_ok
 
     @staticmethod
-    def pivot_high(s: pd.Series, left: int = 5, right: int = 5) -> pd.Series:
-        return (s.shift(left) < s) & (s.shift(-right) < s)
+    def pivot_high(s: pd.Series, left: int = 5, right: int = 2) -> pd.Series:
+        pivot_bar = s.shift(right)
+        left_ok   = s.shift(right + left) < pivot_bar
+        right_ok  = s < pivot_bar
+        return left_ok & right_ok
 
     def divergence(self, c: pd.Series, rsi: pd.Series):
         pl = self.pivot_low(c, self.p["pivot_l"], self.p["pivot_r"])
@@ -120,16 +127,22 @@ class RobustSignalEngineV2:
         stoch_f = self.stochastic(h, l, c, self.p["stoch_f_len"])
         stoch_m = self.stochastic(h, l, c, self.p["stoch_m_len"])
         ema_trend = self.ema(c, self.p["ema_trend"])
-        slope = ema_trend - ema_trend.shift(self.p["slope_lookback"])
+        # 비율 기반 slope (가격 스케일 불변)
+        slope = (ema_trend - ema_trend.shift(self.p["slope_lookback"])) / (ema_trend.shift(self.p["slope_lookback"]) + 1e-9)
 
         vol_ma = v.rolling(self.p["vol_ma_len"]).mean()
         vol_surge = v > vol_ma * self.p["vol_surge_mult"]
         hbull, hbear, rbull, rbear = self.divergence(c, rsi)
 
+        # 피벗 확인은 pivot_r봉 지연됨 → stoch 조건은 실제 피벗 시점에서 체크
+        pr = self.p["pivot_r"]
+        sf_pv = stoch_f.shift(pr)
+        sm_pv = stoch_m.shift(pr)
+
         long_sig = (
             (hbull | rbull)
-            & (stoch_f < self.p["stoch_oversold"])
-            & (stoch_f > stoch_m)
+            & (sf_pv < self.p["stoch_oversold"])
+            & (sf_pv > sm_pv)
             & (slope > self.p["slope_min"])
             & ((c > ema_trend) if self.p["use_ema_filter"] else True)
             & (rsi < self.p["rsi_max_entry"])
@@ -138,8 +151,8 @@ class RobustSignalEngineV2:
 
         short_sig = (
             (hbear | rbear)
-            & (stoch_f > self.p["stoch_overbought"])
-            & (stoch_f < stoch_m)
+            & (sf_pv > self.p["stoch_overbought"])
+            & (sf_pv < sm_pv)
             & (slope < -self.p["slope_min"])
             & ((c < ema_trend) if self.p["use_ema_filter"] else True)
             & (rsi > self.p["rsi_min_entry"])
