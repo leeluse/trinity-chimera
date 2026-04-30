@@ -20,6 +20,9 @@ CLASSIFICATION_MESSAGE = """요청: {message}
 - 전략 생성 요청 (짜/만들/생성/구축) → [INVOKE:CREATE_STRATEGY]
 - 전략 수정 요청 (수정/개선/고쳐/변경) → [INVOKE:MODIFY_STRATEGY]
 - 백테스트 요청 (돌려봐/검증) → [INVOKE:RUN_BACKTEST]
+- 파라미터 서치/최적화 (그리드/랜덤/베이지안/최적화/튜닝) → [INVOKE:PARAM_SEARCH]
+- 롤링 테스트/Walk-Forward (워크포워드/롤링/WFO) → [INVOKE:WALK_FORWARD]
+- 분해 분석/PnL 분석 (롱숏/PnL/분해/포지션별) → [INVOKE:PNL_ANALYSIS]
 - 에볼루션 요청 (채굴/진화) → [INVOKE:RUN_EVOLUTION]
 - 전략 설명 요청 (어떻게/작동/로직) → [INVOKE:EXPLAIN_STRATEGY]
 - 리스크 분석 요청 (위험/손실) → [INVOKE:RISK_ANALYSIS]
@@ -44,11 +47,14 @@ SYSTEM_PROMPT = """당신은 자율 거래 시스템 'Trinity'의 수석 퀀트 
 | 새 전략 생성 | `[INVOKE:CREATE_STRATEGY]` | 사용자가 새 전략 생성을 원할 때 |
 | 기존 전략 수정 | `[INVOKE:MODIFY_STRATEGY]` | 기존 전략 수정/개선을 원할 때 |
 | 백테스트 실행 | `[INVOKE:RUN_BACKTEST]` | 전략을 백테스트로 검증하고 싶을 때 |
+| 파라미터 서치 | `[INVOKE:PARAM_SEARCH]` | 최적의 파라미터(Grid/Random/Bayesian)를 찾고 싶을 때 |
+| 워크포워드 | `[INVOKE:WALK_FORWARD]` | 롤링 테스트(Walk-Forward Optimization)로 전진 분석을 원할 때 |
 | 에볼루션 채굴 | `[INVOKE:RUN_EVOLUTION]` | 자율 채굴/진화를 원할 때 |
 
 ### 분석형 (즉시 실행)
 | 스킬 | 발동 코드 | 발동 조건 |
 |---|---|---|
+| PnL 분해 분석 | `[INVOKE:PNL_ANALYSIS]` | Long/Short PnL 분해 분석을 원할 때 |
 | 전략 코드 설명 | `[INVOKE:EXPLAIN_STRATEGY]` | 현재 전략이 어떻게 작동하는지 물어볼 때 |
 | 리스크 분석 | `[INVOKE:RISK_ANALYSIS]` | 리스크/위험/손실 시나리오 분석 요청 |
 | 코드 리뷰 | `[INVOKE:CODE_REVIEW]` | 코드 버그·오버피팅·품질 검토 요청 |
@@ -170,21 +176,41 @@ def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
 # [Title: 전략명]
 import numpy as np
 import pandas as pd
+from typing import Dict, Any
+
+class PositionState:
+    def __init__(self):
+        self.active = False
+        self.entry_price = 0.0
+        self.extreme = 0.0
+        self.last_exit_bar = None
+
+class StrategyEngine:
+    def __init__(self, params: Dict[str, Any]):
+        self.p = params
+        self.long_state = PositionState()
+        self.short_state = PositionState()
+
+    def run(self, df):
+        # 1. 지표 계산 (test_df)
+        ...
+        # 2. 메인 루프 (상태 제어)
+        signal = pd.Series(0, index=df.index, dtype=int)
+        for i in range(len(df)):
+            ...
+        return signal
 
 def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
-    # 1. 적응형 임계값 (train_df)
-    ...
-    # 2. 지표 계산 (test_df)
-    close = test_df['close']; high = test_df['high']
-    low = test_df['low']; vol = test_df['volume']
-    ...
-    # 3. 레짐 필터
-    regime_ok = ...
-    # 4. 신호 (3-Tier)
-    sig = pd.Series(0, index=test_df.index, dtype=int)
-    sig[regime_ok & long_cond] = 1
-    sig[regime_ok & short_cond] = -1
-    return sig.fillna(0).astype(int)
+    params = {
+        # === CORE ===
+        "fast_len": 10,
+        "atr_len": 14,
+        # === LONG ===
+        "long_trail_atr": 3.0,
+        ...
+    }
+    engine = StrategyEngine(params)
+    return engine.run(test_df)
 ```
 """
 

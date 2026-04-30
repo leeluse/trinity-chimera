@@ -5,8 +5,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from 'rehype-raw';
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown, Copy, Check } from "lucide-react";
+import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown, Copy, Check, SlidersHorizontal } from "lucide-react";
 import { fetchWithBypass } from "@/lib/api";
+import OptimizationMiniPanel from "@/components/features/backtest/OptimizationMiniPanel";
 
 interface ChatMessage {
   id: string;
@@ -318,7 +319,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [forceChatMode, setForceChatMode] = useState(false);
+  const [panelMode, setPanelMode] = useState<"pipeline" | "chat" | "optimize">("pipeline");
   const [chatModel, setChatModel] = useState("deepseek-v4-flash");
   const [showModelSelect, setShowModelSelect] = useState(false);
   const [statusText, setStatusText] = useState("AI 분석 중...");
@@ -868,8 +869,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           session_id: sessionIdRef.current,
           context,
           history,
-          force_chat_mode: forceChatMode,
-          ...(forceChatMode && { chat_model: chatModel }),
+          force_chat_mode: panelMode === "chat",
+          ...(panelMode === "chat" && { chat_model: chatModel }),
         }),
         signal: controller.signal,
         cache: "no-store", // [중요] 브라우저 캐시 무시
@@ -1197,53 +1198,75 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
       {/* Chat Messages - Virtualized for Scale */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
-        <Virtuoso
-          ref={virtuosoRef}
-          data={messages}
-          followOutput="smooth"
-          className="custom-scrollbar"
-          alignToBottom
-          itemContent={(index: number, msg: ChatMessage) => (
-            <div className="px-4">
-              <MessageItem
-                msg={msg}
-                onShowCode={handleShowCode}
-                onSendMessage={handleSend}
-                isStreaming={index === messages.length - 1 && isLoading}
-                onChoiceSelect={(choiceValue: string, originalMsg: ChatMessage, design?: any) => handleCodeGenModeChoice(choiceValue, originalMsg, design)}
-                onDesignCodeRequest={handleDesignCodeRequest}
-              />
-            </div>
-          )}
-          components={{
-            Header: () => (
-              <div className="pt-4">
-                {messages.length === 0 && !isLoading && !isGlobalMode && (
-                  <div className="flex flex-col gap-3 items-center justify-center space-y-4 opacity-80 py-10">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center border border-purple-500/20 mb-2">
-                      <Zap size={24} className="text-purple-400 animate-pulse" />
-                    </div>
-                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Get Started with AI Strategy</h3>
-                    <div className="flex flex-col gap-2 w-full max-w-sm px-4">
-                      {EXAMPLE_PROMPTS.map((prompt, i) => (
-                        <button
-                          key={i}
-                          onClick={() => handleSend(prompt)}
-                          className="text-left px-5 py-3 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-purple-500/30 hover:bg-purple-500/5 transition-all group"
-                        >
-                          <p className="text-[11px] text-slate-400 group-hover:text-purple-300 leading-relaxed font-medium">
-                            {prompt}
-                          </p>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+        {panelMode === "optimize" ? (
+          <div className="h-full overflow-y-auto no-scrollbar p-2">
+            <OptimizationMiniPanel
+              symbol={String(context?.symbol || "BTCUSDT")}
+              timeframe={String(context?.timeframe || "1h")}
+              startDate={String(context?.start_date || "")}
+              endDate={String(context?.end_date || "")}
+              strategy={String(context?.strategy || context?.strategy_title || "custom")}
+              strategyCode={String(context?.editor_code || context?.current_strategy?.code || "")}
+              busy={isLoading}
+              onApplyOptimizedCode={(code, payload) => {
+                if (onApplyCode) {
+                  onApplyCode(code, String(context?.strategy_title || context?.strategy || "Optimized Strategy"), payload);
+                }
+                if (payload && onBacktestGenerated) {
+                  onBacktestGenerated(payload);
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <Virtuoso
+            ref={virtuosoRef}
+            data={messages}
+            followOutput="smooth"
+            className="custom-scrollbar"
+            alignToBottom
+            itemContent={(index: number, msg: ChatMessage) => (
+              <div className="px-4">
+                <MessageItem
+                  msg={msg}
+                  onShowCode={handleShowCode}
+                  onSendMessage={handleSend}
+                  isStreaming={index === messages.length - 1 && isLoading}
+                  onChoiceSelect={(choiceValue: string, originalMsg: ChatMessage, design?: any) => handleCodeGenModeChoice(choiceValue, originalMsg, design)}
+                  onDesignCodeRequest={handleDesignCodeRequest}
+                />
               </div>
-            ),
-            Footer: () => <div className="h-0 pointer-events-none" />
-          }}
-        />
+            )}
+            components={{
+              Header: () => (
+                <div className="pt-4">
+                  {messages.length === 0 && !isLoading && !isGlobalMode && (
+                    <div className="flex flex-col gap-3 items-center justify-center space-y-4 opacity-80 py-10">
+                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center border border-purple-500/20 mb-2">
+                        <Zap size={24} className="text-purple-400 animate-pulse" />
+                      </div>
+                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Get Started with AI Strategy</h3>
+                      <div className="flex flex-col gap-2 w-full max-w-sm px-4">
+                        {EXAMPLE_PROMPTS.map((prompt, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleSend(prompt)}
+                            className="text-left px-5 py-3 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-purple-500/30 hover:bg-purple-500/5 transition-all group"
+                          >
+                            <p className="text-[11px] text-slate-400 group-hover:text-purple-300 leading-relaxed font-medium">
+                              {prompt}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ),
+              Footer: () => <div className="h-0 pointer-events-none" />
+            }}
+          />
+        )}
       </div>
 
       {/* Modern Integrated Chat Input Area */}
@@ -1283,33 +1306,44 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           {/* Mode Toggle + Model Selector */}
           <div className="flex items-center gap-2 px-1">
             {/* Pipeline / Chat 모드 토글 */}
-            <div className="flex items-center rounded-xl bg-white/[0.04] border border-white/[0.06] p-0.5 gap-0.5">
+            <div className="flex items-center rounded-sm bg-white/[0.04] border border-white/[0.06] p-0.5 gap-0.5 font-mono">
               <button
-                onClick={() => setForceChatMode(false)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[11px] font-semibold transition-all duration-200 ${
-                  !forceChatMode
-                    ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/30'
+                onClick={() => setPanelMode("pipeline")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
+                  panelMode === "pipeline"
+                    ? 'bg-purple-600/40 text-purple-100 border border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
                     : 'text-slate-500 hover:text-slate-300'
                 }`}
               >
-                <GitBranch size={11} />
-                Pipeline
+                <GitBranch size={10} />
+                PIPELINE
               </button>
               <button
-                onClick={() => setForceChatMode(true)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[11px] font-semibold transition-all duration-200 ${
-                  forceChatMode
-                    ? 'bg-white/10 text-white'
+                onClick={() => setPanelMode("chat")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
+                  panelMode === "chat"
+                    ? 'bg-white/10 text-white border border-white/20'
                     : 'text-slate-500 hover:text-slate-300'
                 }`}
               >
-                <MessageSquare size={11} />
-                Chat
+                <MessageSquare size={10} />
+                CHAT
+              </button>
+              <button
+                onClick={() => setPanelMode("optimize")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
+                  panelMode === "optimize"
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <SlidersHorizontal size={10} />
+                OPTIMIZE
               </button>
             </div>
 
             {/* 모델 셀렉터 (Chat 모드일 때만 표시) */}
-            {forceChatMode && (
+            {panelMode === "chat" && (
               <div className="relative" data-model-select>
                 <button
                   onClick={() => setShowModelSelect(v => !v)}
@@ -1351,38 +1385,40 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           </div>
 
           {/* Integrated Input Bar */}
-          <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${
-            isLoading 
-              ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]' 
-              : 'border-white/[0.08] bg-white/[0.02] shadow-2xl hover:border-white/[0.12] focus-within:border-purple-500/30 focus-within:bg-white/[0.04]'
-          }`}>
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              disabled={isLoading}
-              placeholder={isLoading ? "" : "Explore AI Trading Ideas..."}
-              className="flex-1 bg-transparent border-none focus:ring-0 text-[13px] text-slate-100 placeholder:text-slate-600 resize-none py-2.5 px-4 max-h-40 overflow-y-auto custom-scrollbar"
-              rows={1}
-            />
-            
-            <button
-              onClick={() => handleSend()}
-              disabled={!input.trim() || isLoading}
-              className={`p-2.5 rounded-[18px] transition-all duration-300 flex items-center justify-center ${
-                input.trim() && !isLoading 
-                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20 hover:scale-105 hover:bg-purple-500 active:scale-95' 
-                  : 'text-slate-700 opacity-40 cursor-not-allowed'
-              }`}
-            >
-              <Send size={18} fill={input.trim() && !isLoading ? "currentColor" : "none"} />
-            </button>
-          </div>
+          {panelMode !== "optimize" && (
+            <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${
+              isLoading 
+                ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]' 
+                : 'border-white/[0.08] bg-white/[0.02] shadow-2xl hover:border-white/[0.12] focus-within:border-purple-500/30 focus-within:bg-white/[0.04]'
+            }`}>
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                disabled={isLoading}
+                placeholder={isLoading ? "" : "Explore AI Trading Ideas..."}
+                className="flex-1 bg-transparent border-none focus:ring-0 text-[13px] text-slate-100 placeholder:text-slate-600 resize-none py-2.5 px-4 max-h-40 overflow-y-auto custom-scrollbar"
+                rows={1}
+              />
+              
+              <button
+                onClick={() => handleSend()}
+                disabled={!input.trim() || isLoading}
+                className={`p-2.5 rounded-[18px] transition-all duration-300 flex items-center justify-center ${
+                  input.trim() && !isLoading 
+                    ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20 hover:scale-105 hover:bg-purple-500 active:scale-95' 
+                    : 'text-slate-700 opacity-40 cursor-not-allowed'
+                }`}
+              >
+                <Send size={18} fill={input.trim() && !isLoading ? "currentColor" : "none"} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -1,5 +1,65 @@
 # Recent Changes (2026-04)
 
+## 2026-04-28 CRIME WS 엔진 · Bybit 마이그레이션 · Regime 분석 · 전략 룩어헤드 수정
+
+### CRIME Scanner — REST 폴링 → WebSocket 전환
+- **원인**: 300개 심볼 × 7 REST 호출 = 2,100회/사이클 → Binance IP 밴(418)
+- `client/components/features/crime/engine/crimeWsEngine.ts` 신규
+  - 두 WS 스트림: `!miniTicker@arr` (가격/거래량) + `!markPrice@arr@1s` (펀딩비)
+  - `preScore()`: WS 데이터만으로 1차 점수 계산
+  - `analyzeFull()`: 상위 35개만 REST 풀스캔 (OI, LS, 오더북, 테이커플로우)
+  - 5분 주기 자동 재스캔, 12초 후 첫 스캔, CONCURRENCY=4
+- `client/store/useCrimeStore.ts` 리라이트: `CrimeWsEngine` 콜백 기반
+- `client/components/features/crime/CrimeMainPanel.tsx`: 버튼 "LIVE START / DISCONNECT"
+
+### 마켓 데이터 — Binance → Bybit 전환
+- `server/shared/market/provider.py` 전면 교체
+  - `_fetch_bybit_klines()` Bybit v5 API, 최대 1000봉/요청, 429 재시도
+  - `fetch_ohlcv_dataframe()` 날짜 범위 자동 분할 페이지네이션
+  - 5분 TTL 인메모리 캐시 (`_OHLCV_CACHE`) — 최적화 루프 중복 호출 방지
+
+### 레짐 귀속 분석 파이프라인 신설
+- `server/modules/chat/skills/pipeline_regime.py` 신규
+  - 30일 슬라이딩 윈도우 백테스트 → 구간별 성과 집계
+  - 시장 특징 6개 추출 (trend_strength, atr_pct, momentum, vol_surge, range_pct, noise_pct)
+  - sklearn DecisionTreeClassifier → 한국어 규칙 자동 추출
+  - 피처-수익률 Pearson 상관관계 바차트
+- 인텐트: `REGIME_ANALYSIS` — "레짐 분석", "어떤 시장 조건일 때" 등 패턴 매칭
+- `server/modules/chat/skills/__init__.py`: `NO_CONFIRM_SKILLS` 추가
+
+### 전략 룩어헤드 바이어스 수정
+- **발견**: `pivot_low/pivot_high` 내 `s.shift(-right)` → 미래 7봉 선참조
+- **영향**: 백테스트 수익률 대폭 과장 (원래 +128% → 수정 후 실제 ~2~5%)
+- `server/strategies/robust_signal_v2_optimized.py` 수정:
+  - `pivot_low/pivot_high`: `s.shift(-right)` 제거 → 현재봉을 우측 확인으로 사용
+  - `slope`: 절대값 → 비율 기반 (`(ema - ema.shift(n)) / ema.shift(n)`)
+  - stoch 조건: 현재봉 체크 → 피벗 시점(`stoch.shift(pivot_r)`) 체크
+  - 파라미터 조정: `pivot_r=2`, `stoch_oversold=35`, `rsi_max_entry=60`, `use_ema_filter=True`
+
+### 백테스트 엔진 개선
+- `server/modules/backtest/backtest_engine.py`:
+  - `RealisticSimulator`: `freq` 파라미터 추가 (봉 단위별 펀딩비 정확 계산)
+  - 펀딩비 공식: `position × rate × (bar_hours / 8)` (8시간 기준)
+  - 거래 비용 모델 개선 (진입/청산 각각 수수료 적용)
+- `server/modules/engine/runtime.py`:
+  - `TF_BARS_PER_DAY` 딕셔너리 추가
+  - `RealisticSimulator` 호출 시 `freq` 전달
+
+### 영향 파일 요약
+| 파일 | 변경 |
+|---|---|
+| `client/.../crimeWsEngine.ts` | 신규: WS 기반 CRIME 엔진 |
+| `client/store/useCrimeStore.ts` | 리라이트: WS 엔진 연동 |
+| `client/.../CrimeMainPanel.tsx` | WS 상태 표시, 버튼 변경 |
+| `server/shared/market/provider.py` | Bybit 마이그레이션, 캐시 |
+| `server/modules/chat/skills/pipeline_regime.py` | 신규: 레짐 귀속 분석 |
+| `server/modules/chat/handler.py` | REGIME_ANALYSIS 인텐트 추가 |
+| `server/strategies/robust_signal_v2_optimized.py` | 룩어헤드 수정, 파라미터 조정 |
+| `server/modules/backtest/backtest_engine.py` | freq 파라미터, 펀딩비 개선 |
+| `server/modules/engine/runtime.py` | TF_BARS_PER_DAY, 포지션 사이징 |
+
+---
+
 ## 2026-04-18 Chat Pipeline 전면 재설계 + 모델 역할 라우팅
 
 ### 인텐트 분류기 전면 교체

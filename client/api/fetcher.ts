@@ -30,14 +30,24 @@ const LOCAL_API_FALLBACKS = [
   "http://localhost:8765",
 ].map(normalizeApiBase);
 
-const withBypassHeaders = (options: RequestInit): RequestInit => ({
-  ...options,
-  headers: {
-    ...options.headers,
-    "ngrok-skip-browser-warning": "true",
-    "Bypass-Tunnel-Reminder": "true",
-  },
-});
+const withBypassHeaders = (options: RequestInit, candidate: string): RequestInit => {
+  const isTunnel = candidate.includes("loca.lt") || candidate.includes("ngrok") || candidate.includes(DEFAULT_TUNNEL_SUBDOMAIN);
+  const isRelative = candidate.startsWith("/");
+  const isLocalhost = candidate.includes("localhost") || candidate.includes("127.0.0.1");
+  
+  // Only add tunnel bypass headers if it's targeting our proxy or a tunnel
+  if (isTunnel || isRelative || isLocalhost || (API_BASE && candidate.includes(API_BASE))) {
+    return {
+      ...options,
+      headers: {
+        ...options.headers,
+        "ngrok-skip-browser-warning": "true",
+        "Bypass-Tunnel-Reminder": "true",
+      },
+    };
+  }
+  return options;
+};
 
 type FetchWithBypassOptions = RequestInit & {
   timeoutMs?: number;
@@ -149,12 +159,11 @@ export const fetchWithBypass = async (url: string, options: FetchWithBypassOptio
       ...requestInit,
       cache: method === "GET" ? "no-store" : requestInit.cache,
       signal: timeoutController.signal,
-    });
+    }, candidate);
 
     try {
       const response = await fetch(candidate, requestOptions);
       if (!isLast && shouldRetryFallback(candidate, response)) {
-        console.warn(`[API] Candidate failed, retrying: ${candidate} (Status: ${response.status})`);
         continue;
       }
       return response;
@@ -164,7 +173,6 @@ export const fetchWithBypass = async (url: string, options: FetchWithBypassOptio
           ? new Error("Request timed out")
           : error;
       lastError = normalizedError;
-      console.warn(`[API] Candidate error: ${candidate}`, normalizedError);
       if (isLast) throw normalizedError;
     } finally {
       if (timeoutId !== null) {

@@ -9,7 +9,6 @@ export { default as PanelTabs } from "./panel/sections/PanelTabs";
 
 // Shared / Complex UI
 export { default as LogCard } from "./shared/LogCard";
-export { default as AgentCard } from "./shared/AgentCard";
 export { SideStat } from "./shared/SideStat";
 
 // Features - Dashboard
@@ -22,16 +21,17 @@ export { default as ModelSettingsModal } from "./features/dashboard/ModelSetting
 export { default as ChatInterface } from "./features/chat/ChatInterface";
 
 // Features - Backtest 
-export { StatsGrid } from "./features/backtest/StatsGrid";
-export { AiAnalysisModal } from "./features/backtest/AiAnalysisModal";
-export { BacktestChart } from "./features/backtest/BacktestChart";
+export { default as StatsGrid } from "./features/backtest/StatsGrid";
+export { default as AiAnalysisModal } from "./features/backtest/AiAnalysisModal";
+export { default as BacktestChart } from "./features/backtest/BacktestChart";
 export { default as ExecutionLog } from "./features/backtest/ExecutionLog";
 export { default as BacktestHeader } from "./features/backtest/BacktestHeader";
 export { default as EquityChart } from "./features/backtest/EquityChart";
 export { default as CodeModal } from "./features/backtest/CodeModal";
 export { default as StrategyCodeSection } from "./features/backtest/StrategyCodeSection";
-export { PerformanceDetails } from "./features/backtest/PerformanceDetails";
-export { TradeAnalysis } from "./features/backtest/TradeAnalysis";
+export { default as PerformanceDetails } from "./features/backtest/PerformanceDetails";
+export { default as TradeAnalysis } from "./features/backtest/TradeAnalysis";
+export { default as OptimizationMiniPanel } from "./features/backtest/OptimizationMiniPanel";
 
 // Features - Scanner
 export { CandidateRow } from "./features/scanner/CandidateRow";

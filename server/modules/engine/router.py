@@ -1,7 +1,14 @@
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
+import json
 import logging
+import math
+import random
+import re
+from itertools import product
+from pathlib import Path
 
 from server.shared.market.provider import fetch_market_ohlcv
 from server.modules.engine.runtime import (
@@ -9,9 +16,18 @@ from server.modules.engine.runtime import (
     list_skill_strategies,
     run_skill_backtest,
 )
+from server.modules.evolution.scoring import calculate_trinity_score
+from server.modules.regime.labeler import (
+    ARTIFACT_MAP,
+    DEFAULT_VALIDATION_END,
+    DEFAULT_VALIDATION_START,
+    run_regime_labeler,
+    resolve_out_root,
+)
 
 router = APIRouter(tags=["Backtest"])
 logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class LeaderboardRequest(BaseModel):
@@ -37,6 +53,30 @@ class BacktestAnalysisRequest(BaseModel):
     results: Dict[str, Any] = Field(default_factory=dict)
 
 
+class BacktestOptimizeRequest(BaseModel):
+    symbol: str = "BTCUSDT"
+    interval: str = "1h"
+    strategy: Optional[str] = None
+    code: Optional[str] = None
+    leverage: float = Field(default=10.0, ge=1, le=20)
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    param_count: int = Field(default=4, ge=1, le=12)
+    max_combos: int = Field(default=50, ge=1, le=300)
+    method: str = Field(default="grid")
+    objective: str = Field(default="trinity")
+    top_k: int = Field(default=5, ge=1, le=20)
+    score_weights: Optional[Dict[str, float]] = None
+
+
+class BacktestRegimeRunRequest(BaseModel):
+    symbol: str = "BTCUSDT"
+    timeframe: str = "15m"
+    start_date: str = DEFAULT_VALIDATION_START
+    end_date: str = DEFAULT_VALIDATION_END
+    out_dir: Optional[str] = None
+
+
 def _to_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -49,6 +89,240 @@ def _to_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _scan_numeric_params_from_code(code: str) -> Dict[str, float]:
+    found: Dict[str, float] = {}
+
+    for m in re.finditer(r"^\s*([a-zA-Z_]\w*)\s*=\s*(-?\d+\.?\d*)\s*(?:#.*)?$", code, re.MULTILINE):
+        name, val_str = m.group(1), m.group(2)
+        v = float(val_str)
+        found[name] = int(v) if v == int(v) else v
+
+    for m in re.finditer(r"[\"']([a-zA-Z_]\w*)[\"']\s*:\s*(-?\d+\.?\d*)", code):
+        name, val_str = m.group(1), m.group(2)
+        v = float(val_str)
+        found[name] = int(v) if v == int(v) else v
+
+    return found
+
+
+def _build_param_ranges(found: Dict[str, float]) -> List[Dict[str, Any]]:
+    priority_keywords = ("len", "period", "window", "lookback", "atr", "rsi", "stoch", "ema", "mult", "thresh", "pivot", "slope")
+
+    def rank(name: str, value: float) -> float:
+        score = 0.0
+        low_name = name.lower()
+        if any(k in low_name for k in priority_keywords):
+            score += 10.0
+        score += min(5.0, abs(float(value)))
+        if abs(float(value)) <= 1:
+            score -= 0.5
+        return score
+
+    sorted_items = sorted(found.items(), key=lambda item: rank(item[0], item[1]), reverse=True)
+    ranges: List[Dict[str, Any]] = []
+
+    for name, value in sorted_items:
+        if isinstance(value, bool):
+            continue
+
+        v = float(value)
+        is_int_like = float(v).is_integer()
+
+        if is_int_like:
+            base = int(v)
+            if base <= 0:
+                min_v, max_v, step = 0, max(3, abs(base) + 3), 1
+            elif base <= 3:
+                min_v, max_v, step = max(1, base - 1), base + 2, 1
+            else:
+                span = max(1, int(round(abs(base) * 0.5)))
+                min_v = max(1, base - span)
+                max_v = base + span
+                step = max(1, int(round(abs(base) * 0.1)))
+        else:
+            if abs(v) < 1e-9:
+                min_v, max_v, step = 0.0, 0.5, 0.1
+            else:
+                span = max(0.01, abs(v) * 0.5)
+                min_v = max(0.0, v - span) if v > 0 else v - span
+                max_v = v + span
+                step = max(0.01, abs(v) * 0.1)
+            min_v = round(float(min_v), 8)
+            max_v = round(float(max_v), 8)
+            step = round(float(step), 8)
+
+        if max_v <= min_v:
+            continue
+
+        ranges.append(
+            {
+                "name": name,
+                "current": int(v) if is_int_like else v,
+                "min": min_v,
+                "max": max_v,
+                "step": step,
+            }
+        )
+
+    return ranges
+
+
+def _float_range(min_v: float, max_v: float, step: float) -> List[float]:
+    values: List[float] = []
+    v = min_v
+    while v <= max_v + 1e-9:
+        values.append(round(v, 10))
+        v = round(v + step, 10)
+    return values
+
+
+def _build_param_combos(param_ranges: List[Dict[str, Any]], max_limit: int, method: str) -> List[Dict[str, Any]]:
+    if not param_ranges:
+        return []
+
+    names: List[str] = []
+    values_list: List[List[float]] = []
+    for p in param_ranges:
+        current = p.get("current")
+        # Preserve integer-typed params (e.g., rolling windows) to avoid runtime failures
+        # such as "window must be an integer 0 or greater".
+        if isinstance(current, int) and not isinstance(current, bool):
+            min_i = int(round(float(p["min"])))
+            max_i = int(round(float(p["max"])))
+            step_i = max(1, int(round(float(p["step"]))))
+            values = list(range(min_i, max_i + 1, step_i))
+        else:
+            values = _float_range(float(p["min"]), float(p["max"]), float(p["step"]))
+
+        if len(values) > 7:
+            picks = [0, len(values) // 4, len(values) // 2, (len(values) * 3) // 4, len(values) - 1]
+            values = sorted(set(values[i] for i in picks))
+        names.append(str(p["name"]))
+        values_list.append(values)
+
+    total = 1
+    for vals in values_list:
+        total *= len(vals)
+
+    method_lower = method.lower()
+    if method_lower == "random":
+        size = [len(v) for v in values_list]
+        sampled: set = set()
+        combos: List[Dict[str, Any]] = []
+        for _ in range(max_limit * 30):
+            if len(combos) >= max_limit:
+                break
+            idx_tuple = tuple(random.randrange(n) for n in size)
+            if idx_tuple in sampled:
+                continue
+            sampled.add(idx_tuple)
+            combos.append(dict(zip(names, [values_list[i][j] for i, j in enumerate(idx_tuple)])))
+        return combos
+
+    if total <= max_limit:
+        return [dict(zip(names, combo)) for combo in product(*values_list)]
+
+    sampled_idx: set = set()
+    combos: List[Dict[str, Any]] = []
+    size = [len(v) for v in values_list]
+    for _ in range(max_limit * 30):
+        if len(combos) >= max_limit:
+            break
+        idx_tuple = tuple(random.randrange(n) for n in size)
+        if idx_tuple in sampled_idx:
+            continue
+        sampled_idx.add(idx_tuple)
+        combos.append(dict(zip(names, [values_list[i][j] for i, j in enumerate(idx_tuple)])))
+    return combos
+
+
+def _apply_param_values_to_code(code: str, param_values: Dict[str, Any]) -> str:
+    modified = code
+    for param_name, param_value in param_values.items():
+        pattern_var = rf"(?<![a-zA-Z0-9_])({re.escape(param_name)}\s*=\s*)(-?\d+\.?\d*)"
+        modified = re.sub(pattern_var, rf"\g<1>{param_value}", modified)
+
+        pattern_dict = rf"([\"']{re.escape(param_name)}[\"']\s*:\s*)(-?\d+\.?\d*)"
+        modified = re.sub(pattern_dict, rf"\g<1>{param_value}", modified)
+    return modified
+
+
+def _extract_metrics(payload: Dict[str, Any]) -> Dict[str, float]:
+    res = (payload or {}).get("results", {}) or {}
+    return {
+        "total_return": _to_float(res.get("total_return")),
+        "max_drawdown": _to_float(res.get("max_drawdown")),
+        "sharpe_ratio": _to_float(res.get("sharpe_ratio")),
+        "win_rate": _to_float(res.get("win_rate")),
+        "profit_factor": _to_float(res.get("profit_factor")),
+        "total_trades": _to_float(res.get("total_trades")),
+    }
+
+
+def _default_score_weights() -> Dict[str, float]:
+    return {
+        "total_return": 0.45,
+        "sharpe_ratio": 0.30,
+        "win_rate": 0.05,
+        "profit_factor": 0.05,
+        "trades": 0.05,
+        "max_drawdown": 0.10,  # penalty
+    }
+
+
+def _normalize_score_weights(raw_weights: Optional[Dict[str, float]]) -> Dict[str, float]:
+    merged = _default_score_weights()
+    if raw_weights:
+        for key in merged.keys():
+            if key in raw_weights:
+                merged[key] = _to_float(raw_weights.get(key), merged[key])
+
+    total = sum(abs(v) for v in merged.values())
+    if total <= 1e-12:
+        merged = _default_score_weights()
+        total = sum(abs(v) for v in merged.values())
+    return {k: v / total for k, v in merged.items()}
+
+
+def _weighted_score(metrics: Dict[str, float], normalized_weights: Dict[str, float]) -> float:
+    # Normalize each metric into roughly comparable range before weighted sum.
+    total_return_norm = _to_float(metrics.get("total_return")) / 100.0
+    sharpe_norm = _to_float(metrics.get("sharpe_ratio")) / 3.0
+    win_rate_norm = _to_float(metrics.get("win_rate")) / 100.0
+    profit_factor_norm = min(_to_float(metrics.get("profit_factor")), 5.0) / 5.0
+
+    trades_raw = max(0.0, _to_float(metrics.get("total_trades")))
+    trades_norm = min(1.0, math.log1p(trades_raw) / math.log1p(500.0))
+    mdd_penalty_norm = abs(_to_float(metrics.get("max_drawdown"))) / 100.0
+
+    score = 0.0
+    score += normalized_weights.get("total_return", 0.0) * total_return_norm
+    score += normalized_weights.get("sharpe_ratio", 0.0) * sharpe_norm
+    score += normalized_weights.get("win_rate", 0.0) * win_rate_norm
+    score += normalized_weights.get("profit_factor", 0.0) * profit_factor_norm
+    score += normalized_weights.get("trades", 0.0) * trades_norm
+    score -= normalized_weights.get("max_drawdown", 0.0) * mdd_penalty_norm
+    return score * 100.0
+
+
+def _score_metrics(metrics: Dict[str, float], objective: str, score_weights: Optional[Dict[str, float]] = None) -> float:
+    objective_lower = objective.lower()
+    if objective_lower == "sharpe":
+        return _to_float(metrics.get("sharpe_ratio"))
+    if objective_lower == "return":
+        return _to_float(metrics.get("total_return"))
+    if objective_lower in {"weighted", "custom"}:
+        normalized = _normalize_score_weights(score_weights)
+        return _weighted_score(metrics, normalized)
+    return float(
+        calculate_trinity_score(
+            _to_float(metrics.get("total_return")) / 100.0,
+            _to_float(metrics.get("sharpe_ratio")),
+            -_to_float(metrics.get("max_drawdown")) / 100.0,
+        )
+    )
 
 
 def _build_backtest_analysis(req: BacktestAnalysisRequest) -> str:
@@ -249,6 +523,228 @@ async def run_backtest_leaderboard(req: LeaderboardRequest):
     except Exception as exc:
         logger.exception("Leaderboard error")
         return {"success": False, "error": str(exc), "grouped_by_timeframe": {}, "overall": []}
+
+
+# -------------------------------------------------------------------------
+# [API] 파라미터 최적화: 코드에서 수치 파라미터 스캔 후 조합 백테스트 [POST]
+# -------------------------------------------------------------------------
+@router.post("/optimize")
+async def optimize_backtest_params(req: BacktestOptimizeRequest):
+    try:
+        strategy_key = req.strategy or "custom_strategy"
+        source_code = (req.code or "").strip()
+
+        if not source_code and req.strategy:
+            source_code = get_strategy_source(req.strategy)
+        if not source_code:
+            return {"success": False, "error": "최적화할 전략 코드가 없습니다."}
+
+        scanned = _scan_numeric_params_from_code(source_code)
+        ranges = _build_param_ranges(scanned)
+        if not ranges:
+            return {"success": False, "error": "코드에서 조정 가능한 숫자 파라미터를 찾지 못했습니다."}
+
+        selected_ranges = ranges[: min(req.param_count, len(ranges))]
+        normalized_weights = (
+            _normalize_score_weights(req.score_weights)
+            if req.objective.lower() in {"weighted", "custom"}
+            else None
+        )
+        combos = _build_param_combos(
+            param_ranges=selected_ranges,
+            max_limit=max(1, min(req.max_combos, 300)),
+            method=req.method,
+        )
+        if not combos:
+            return {"success": False, "error": "생성된 파라미터 조합이 없습니다."}
+
+        baseline_payload = run_skill_backtest(
+            symbol=req.symbol,
+            interval=req.interval,
+            strategy=strategy_key,
+            leverage=req.leverage,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            include_candles=False,
+            code=source_code,
+        )
+        baseline_metrics = _extract_metrics(baseline_payload) if baseline_payload.get("success") else {}
+
+        tested: List[Dict[str, Any]] = []
+        for combo in combos:
+            candidate_code = _apply_param_values_to_code(source_code, combo)
+            payload = run_skill_backtest(
+                symbol=req.symbol,
+                interval=req.interval,
+                strategy=strategy_key,
+                leverage=req.leverage,
+                start_date=req.start_date,
+                end_date=req.end_date,
+                include_candles=False,
+                code=candidate_code,
+            )
+            if not payload.get("success"):
+                continue
+
+            metrics = _extract_metrics(payload)
+            tested.append(
+                {
+                    "params": combo,
+                    "metrics": metrics,
+                    "score": _score_metrics(metrics, req.objective, normalized_weights),
+                }
+            )
+
+        if not tested:
+            return {
+                "success": False,
+                "error": "모든 조합 백테스트가 실패했습니다.",
+                "baseline": baseline_metrics,
+                "selected_params": selected_ranges,
+                "tested_combos": len(combos),
+            }
+
+        tested.sort(key=lambda x: _to_float(x.get("score")), reverse=True)
+        best = tested[0]
+        best_code = _apply_param_values_to_code(source_code, best["params"])
+        best_payload = run_skill_backtest(
+            symbol=req.symbol,
+            interval=req.interval,
+            strategy=strategy_key,
+            leverage=req.leverage,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            include_candles=True,
+            code=best_code,
+        )
+
+        top_rows = tested[: max(1, min(req.top_k, len(tested)))]
+        return {
+            "success": True,
+            "objective": req.objective,
+            "score_weights": normalized_weights,
+            "method": req.method,
+            "scanned_param_count": len(ranges),
+            "selected_params": selected_ranges,
+            "tested_combos": len(combos),
+            "successful_combos": len(tested),
+            "baseline": baseline_metrics,
+            "best": {
+                "score": _to_float(best.get("score")),
+                "params": best.get("params", {}),
+                "metrics": best.get("metrics", {}),
+                "code": best_code,
+                "backtest_payload": best_payload if best_payload.get("success") else None,
+            },
+            "top": top_rows,
+        }
+    except Exception as exc:
+        logger.exception("Optimize params error")
+        return {"success": False, "error": str(exc)}
+
+
+def _resolve_regime_run_dir(run_id: str, out_dir: Optional[str]) -> Path:
+    if not re.match(r"^[A-Za-z0-9_.-]+$", run_id):
+        raise HTTPException(status_code=400, detail="Invalid run_id format")
+    base_dir = resolve_out_root(out_dir).resolve()
+    run_dir = (base_dir / run_id).resolve()
+    if not str(run_dir).startswith(str(base_dir)):
+        raise HTTPException(status_code=400, detail="Invalid run_id path")
+    if not run_dir.exists() or not run_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run_dir
+
+
+@router.post("/regime/run")
+async def run_regime_labeling(req: BacktestRegimeRunRequest):
+    try:
+        result = run_regime_labeler(
+            symbol=req.symbol,
+            timeframe=req.timeframe,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            out_dir=req.out_dir,
+        )
+        run_id = str(result["run_id"])
+        base_dir = str(result["base_dir"])
+        return {
+            "success": True,
+            "run_id": run_id,
+            "base_dir": base_dir,
+            "stats": result["stats"],
+            "logs": result.get("logs", []),
+            "artifact_paths": result["artifact_paths"],
+            "preview_url": f"/api/backtest/regime/preview/{run_id}?out_dir={base_dir}",
+            "download_urls": {
+                "parquet": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['parquet']}?out_dir={base_dir}",
+                "stats": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['stats']}?out_dir={base_dir}",
+                "chart": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['chart']}?out_dir={base_dir}",
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Regime run error")
+        return {"success": False, "error": str(exc)}
+
+
+@router.get("/regime/result/{run_id}")
+async def get_regime_result(run_id: str, out_dir: Optional[str] = Query(None)):
+    run_dir = _resolve_regime_run_dir(run_id, out_dir)
+    stats_path = run_dir / ARTIFACT_MAP["stats"]
+    chart_path = run_dir / ARTIFACT_MAP["chart"]
+    parquet_path = run_dir / ARTIFACT_MAP["parquet"]
+
+    stats: Dict[str, Any] = {}
+    if stats_path.exists():
+        try:
+            stats = json.loads(stats_path.read_text(encoding="utf-8"))
+        except Exception:
+            stats = {}
+
+    base_dir = str(run_dir.parent.relative_to(PROJECT_ROOT))
+    return {
+        "success": True,
+        "run_id": run_id,
+        "base_dir": base_dir,
+        "stats": stats,
+        "logs": stats.get("logs", []),
+        "artifact_exists": {
+            "parquet": parquet_path.exists(),
+            "stats": stats_path.exists(),
+            "chart": chart_path.exists(),
+        },
+        "preview_url": f"/api/backtest/regime/preview/{run_id}?out_dir={base_dir}",
+        "download_urls": {
+            "parquet": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['parquet']}?out_dir={base_dir}",
+            "stats": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['stats']}?out_dir={base_dir}",
+            "chart": f"/api/backtest/regime/download/{run_id}/{ARTIFACT_MAP['chart']}?out_dir={base_dir}",
+        },
+    }
+
+
+@router.get("/regime/preview/{run_id}")
+async def preview_regime_chart(run_id: str, out_dir: Optional[str] = Query(None)):
+    run_dir = _resolve_regime_run_dir(run_id, out_dir)
+    chart_path = run_dir / ARTIFACT_MAP["chart"]
+    if not chart_path.exists():
+        raise HTTPException(status_code=404, detail="Chart artifact not found")
+    return HTMLResponse(content=chart_path.read_text(encoding="utf-8"), status_code=200)
+
+
+@router.get("/regime/download/{run_id}/{artifact}")
+async def download_regime_artifact(run_id: str, artifact: str, out_dir: Optional[str] = Query(None)):
+    run_dir = _resolve_regime_run_dir(run_id, out_dir)
+    if artifact in ARTIFACT_MAP:
+        filename = ARTIFACT_MAP[artifact]
+    elif artifact in ARTIFACT_MAP.values():
+        filename = artifact
+    else:
+        raise HTTPException(status_code=404, detail="Unknown artifact")
+    file_path = run_dir / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return FileResponse(path=file_path, filename=filename)
 
 
 # -------------------------------------------------------------------------

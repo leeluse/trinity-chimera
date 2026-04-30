@@ -1,6 +1,7 @@
 """파라미터 최적화 파이프라인 (코드에서 파라미터 추출 → Grid Search → 최적값 선택)"""
 import json
 import logging
+import random
 import re
 from itertools import product
 from typing import Any, AsyncGenerator, Dict, List
@@ -15,14 +16,23 @@ logger = logging.getLogger(__name__)
 
 def _scan_params_from_code(code: str) -> Dict[str, float]:
     """
-    코드에서 `변수명 = 숫자` 패턴을 정적으로 스캔해 {이름: 현재값} 반환.
-    LLM 추출 결과의 이름 검증 및 fallback에 사용.
+    코드에서 `변수명 = 숫자` 및 `"키": 숫자` 패턴을 스캔해 {이름: 현재값} 반환.
     """
     found: Dict[str, float] = {}
+    
+    # 1. 일반 변수 할당 (var = 123)
     for m in re.finditer(r"^\s*([a-zA-Z_]\w*)\s*=\s*(\d+\.?\d*)\s*(?:#.*)?$", code, re.MULTILINE):
         name, val_str = m.group(1), m.group(2)
         v = float(val_str)
         found[name] = int(v) if v == int(v) else v
+        
+    # 2. 딕셔너리 키-값 ("key": 123)
+    for m in re.finditer(r"[\"']([a-zA-Z_]\w*)[\"']\s*:\s*(\d+\.?\d*)", code):
+        name, val_str = m.group(1), m.group(2)
+        v = float(val_str)
+        # 이미 변수명으로 찾은 경우가 있다면 딕셔너리 내 설정이 우선순위가 높을 수 있음 (필요시 조정)
+        found[name] = int(v) if v == int(v) else v
+        
     return found
 
 
@@ -40,10 +50,10 @@ async def _extract_params_from_code(strategy_code: str) -> Dict[str, Any]:
     최적화 대상: 이동평균 기간, 임계값, 손절/익절 비율, 룩백 기간, 모멘텀 기간, ATR 배수 등.
 
     ⚠️ 핵심 규칙:
-    - "name" 필드는 반드시 코드에 실제로 존재하는 변수명 그대로 사용해라. 절대 만들어 내지 마라.
-    - 고정된 수치 상수만 추출 (정수 또는 실수 모두 포함)
-    - 너무 작은 값(1-2)은 제외
-    - 최대 5개까지만 반환 (중요도 순)
+    - "name" 필드는 반드시 코드에 실제로 존재하는 변수명이나 딕셔너리 키를 그대로 사용해라.
+    - 고정된 수치 상수만 추출 (딕셔너리 내부 "key": value 포함)
+    - 너무 작은 값(0 또는 1)은 핵심 전략 변수가 아니면 제외
+    - 최대 10개까지 반환 (중요도 순: 기간, 임계값, 배수 우선)
     - current 값은 코드에 적힌 실제 값이어야 한다
     - min/max는 current 기준 ±50% 내외로 설정, step은 current의 약 10% 수준
 
@@ -150,45 +160,60 @@ def _float_range(min_v: float, max_v: float, step: float) -> List[float]:
     return values
 
 
-def _generate_param_grid(params: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    파라미터 목록에서 탐색할 조합 생성 (int/float 모두 지원).
-    - 파라미터 3개 이하: 전체 조합 (최대 30개)
-    - 4개 이상: 상위 2개만 (최대 20개)
-    """
+
+def _generate_custom_grid(params: List[Dict[str, Any]], max_limit: int = 100) -> List[Dict[str, Any]]:
+    """사용자 요청에 맞춘 커스텀 그리드 생성 (메모리 효율적인 랜덤 샘플링)."""
     if not params:
         return []
 
-    target = params if len(params) <= 3 else params[:2]
-    limit = 30 if len(params) <= 3 else 20
-
-    ranges = []
-    for p in target:
+    param_names: List[str] = []
+    param_vals: List[List[float]] = []
+    for p in params:
         values = _float_range(float(p["min"]), float(p["max"]), float(p["step"]))
-        ranges.append([(p["name"], v) for v in values])
+        if len(values) > 5:
+            indices = [0, len(values) // 3, (len(values) * 2) // 3, len(values) - 1]
+            values = sorted(set(values[i] for i in indices))
+        param_names.append(p["name"])
+        param_vals.append(values)
 
-    combinations = []
-    for combo in product(*ranges):
-        combinations.append(dict(combo))
+    total = 1
+    for vals in param_vals:
+        total *= len(vals)
 
-    return combinations[:limit]
+    # 전체 조합이 한계 이하면 전부 반환
+    if total <= max_limit:
+        return [dict(zip(param_names, combo)) for combo in product(*param_vals)]
 
+    # 전체 목록을 만들지 않고 랜덤 인덱스로 직접 샘플링
+    sizes = [len(v) for v in param_vals]
+    seen: set = set()
+    result: List[Dict[str, Any]] = []
+    for _ in range(max_limit * 20):
+        if len(result) >= max_limit:
+            break
+        idx = tuple(random.randrange(n) for n in sizes)
+        if idx not in seen:
+            seen.add(idx)
+            result.append(dict(zip(param_names, [param_vals[i][j] for i, j in enumerate(idx)])))
+    return result
 
-def _apply_params_to_code(code: str, param_values: Dict[str, int]) -> str:
+def _apply_params_to_code(code: str, param_values: Dict[str, Any]) -> str:
     """
-    코드에 파라미터 값 적용 (정규식으로 변수 값 교체).
+    코드에 파라미터 값 적용 (변수 및 딕셔너리 키 모두 지원).
     """
     modified_code = code
 
     for param_name, param_value in param_values.items():
-        # 변수명 = 숫자(정수 또는 소수) 형태 찾아서 교체
-        pattern = rf"({re.escape(param_name)}\s*=\s*)(\d+\.?\d*)"
-        replacement = rf"\g<1>{param_value}"
-        modified_code = re.sub(pattern, replacement, modified_code)
+        # 1. 변수명 = 숫자 형태 교체 (예: fast_len = 12)
+        # lookbehind로 더 긴 변수명 일부를 잘못 치환하는 버그 방지 (예: period → fast_period 오치환 차단)
+        pattern_var = rf"(?<![a-zA-Z0-9_])({re.escape(param_name)}\s*=\s*)(\d+\.?\d*)"
+        modified_code = re.sub(pattern_var, rf"\g<1>{param_value}", modified_code)
+
+        # 2. "키": 숫자 형태 교체 (예: 'fast_len': 12)
+        pattern_dict = rf"([\"']{re.escape(param_name)}[\"']\s*:\s*)(\d+\.?\d*)"
+        modified_code = re.sub(pattern_dict, rf"\g<1>{param_value}", modified_code)
 
     return modified_code
-
-
 async def run_optimize_pipeline(
     message: str,
     context: Dict[str, Any],
@@ -209,34 +234,80 @@ async def run_optimize_pipeline(
             })
             return
 
-        # ── Stage 1: 파라미터 추출 ──────────────────
-        yield format_sse({"type": "stage", "stage": 1, "label": "🔍 최적화 가능한 파라미터 추출 중..."})
+        # ── Stage 1: 파라미터 분석 ────────────────────────────────────
+        yield format_sse({"type": "stage", "stage": 1, "label": "🔍 전략 코드 분석 및 파라미터 식별 중..."})
 
         param_result = await _extract_params_from_code(strategy_code)
-        params = param_result.get("params", [])
+        all_params = param_result.get("params", [])
 
-        if not params:
-            yield format_sse({"type": "analysis", "content": "⚠️ 코드에서 최적화할 수치 파라미터를 찾지 못했습니다."})
-            yield format_sse({"type": "done"})
+        if not all_params:
+            yield format_sse({"type": "analysis", "content": "⚠️ 코드에서 최적화할 파라미터를 찾지 못했습니다."})
             return
 
-        param_summary = "\n".join(
-            f"  • `{p['name']}` = {p['current']}  →  [{p['min']} ~ {p['max']}, 간격 {p['step']}]"
-            for p in params
-        )
-        yield format_sse({"type": "analysis", "content": f"**추출된 최적화 파라미터:**\n{param_summary}"})
+        # 사용자 메시지에서 설정 추출 (없으면 기본값: 4개, 50번)
+        nums = re.findall(r"(\d+)", message)
+        try:
+            requested_count = int(nums[0]) if nums else 4
+            max_combos = int(nums[1]) if len(nums) >= 2 else 50
+        except (ValueError, IndexError):
+            requested_count = 4
+            max_combos = 50
 
-        # ── Stage 2: Grid Search ──────────────────────
-        param_grid = _generate_param_grid(params)
+        # target_count: 코드에서 찾은 파라미터 수 이하로만 클램핑
+        target_count = max(1, min(requested_count, len(all_params)))
+        max_combos = max(1, min(max_combos, 500))
+        selected_params = all_params[:target_count]
+
+        # 파라미터 목록 + 설정 확인 표시 (질문 없이 바로 진행)
+        param_list_str = "\n".join(
+            f"- `{p['name']}` (현재: {p['current']})" for p in all_params
+        )
+        clamp_note = (
+            f"\n> ⚠️ 요청하신 {requested_count}개는 발견된 파라미터 수({len(all_params)}개)를 초과해 "
+            f"**{target_count}개**로 조정했습니다."
+            if requested_count > len(all_params) else ""
+        )
+        yield format_sse({
+            "type": "analysis",
+            "content": (
+                f"### 🔍 파라미터 스캔 결과\n총 **{len(all_params)}개** 후보 발견:\n\n"
+                f"{param_list_str}{clamp_note}\n\n"
+                f"✅ **상위 {target_count}개** 변수 × 최대 **{max_combos}개** 조합으로 탐색합니다."
+            ),
+        })
+
+        # ── Stage 2: 탐색 (Grid / Random) ────────────────────────
+        method = "random" if any(k in message.lower() for k in ["랜덤", "random", "무작위"]) else "grid"
+
+        param_grid = _generate_custom_grid(selected_params, max_combos)
         if not param_grid:
             yield format_sse({"type": "analysis", "content": "❌ 탐색할 파라미터 조합이 없습니다."})
             yield format_sse({"type": "done"})
             return
 
-        yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ 파라미터 탐색 중... (0/{len(param_grid)})"})
+        method_label = "🎲 랜덤 서치" if method == "random" else "📐 그리드 서치"
+        yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ {method_label} 탐색 중... (0/{len(param_grid)})"})
 
         backtester = ChatBacktester()
         results = []
+
+        # 원본 파라미터 기준 baseline 백테스트 (비교표의 "원본" 칸에 사용)
+        yield format_sse({"type": "status", "content": "📊 원본 파라미터 기준선 측정 중..."})
+        baseline_metrics: Dict[str, Any] = {}
+        try:
+            bt_base = await backtester.run(strategy_code, message, context)
+            if bt_base.get("success"):
+                bm = bt_base.get("metrics", {})
+                baseline_metrics = {
+                    "total_return": bm.get("total_return", 0),
+                    "max_drawdown": bm.get("max_drawdown", 0),
+                    "sharpe_ratio": bm.get("sharpe_ratio", 0),
+                    "win_rate": bm.get("win_rate", 0),
+                    "profit_factor": bm.get("profit_factor", 0),
+                    "total_trades": bm.get("total_trades", 0),
+                }
+        except Exception as _e:
+            logger.warning(f"Baseline backtest failed: {_e}")
 
         for idx, param_values in enumerate(param_grid):
             modified_code = _apply_params_to_code(strategy_code, param_values)
@@ -246,20 +317,18 @@ async def run_optimize_pipeline(
                     raise Exception(bt_res.get("error", "Unknown error"))
 
                 bt_metrics = bt_res.get("metrics", {})
-                # bt_metrics의 total_return/max_drawdown은 퍼센트 단위 (예: -281.38, 27.04)
                 metrics = {
                     "total_return": bt_metrics.get("total_return", 0),
-                    "max_drawdown": bt_metrics.get("max_drawdown", 0),   # 이미 양수 (abs 처리됨)
+                    "max_drawdown": bt_metrics.get("max_drawdown", 0),
                     "sharpe_ratio": bt_metrics.get("sharpe_ratio", 0),
                     "win_rate": bt_metrics.get("win_rate", 0),
                     "profit_factor": bt_metrics.get("profit_factor", 0),
                     "total_trades": bt_metrics.get("total_trades", 0),
                 }
-                # calculate_trinity_score는 소수 기준을 기대하므로 /100 변환 필요
                 trinity_score = calculate_trinity_score(
                     metrics["total_return"] / 100,
                     metrics["sharpe_ratio"],
-                    -metrics["max_drawdown"] / 100,   # 양수 퍼센트 → 음수 소수
+                    -metrics["max_drawdown"] / 100,
                 )
                 results.append({"params": param_values, "metrics": metrics, "trinity_score": trinity_score})
 
@@ -286,24 +355,26 @@ async def run_optimize_pipeline(
 
         results.sort(key=lambda x: x["trinity_score"], reverse=True)
         best = results[0]
-        worst = results[-1]
         best_m = best["metrics"]
-        worst_m = worst["metrics"]
+
+        # 비교 기준: 원본 파라미터 baseline 우선, 실패 시 탐색 결과 중 최저 사용
+        ref_m = baseline_metrics if baseline_metrics else results[-1]["metrics"]
+        ref_label = "원본" if baseline_metrics else "최저 조합"
 
         # 최적 파라미터 요약 텍스트
         best_params_str = ", ".join(f"`{k}` = **{v}**" for k, v in best["params"].items())
-        improvement = best_m["total_return"] - worst_m["total_return"]
+        improvement = best_m["total_return"] - ref_m["total_return"]
         summary_lines = [
             f"## 🏆 최적 파라미터",
             f"{best_params_str}",
             f"",
-            f"| 지표 | 기존 | 최적 | 개선 |",
+            f"| 지표 | {ref_label} | 최적 | 개선 |",
             f"|------|------|------|------|",
-            f"| 수익률 | {worst_m['total_return']:+.2f}% | {best_m['total_return']:+.2f}% | {improvement:+.2f}% |",
-            f"| Sharpe | {worst_m['sharpe_ratio']:.2f} | {best_m['sharpe_ratio']:.2f} | {best_m['sharpe_ratio']-worst_m['sharpe_ratio']:+.2f} |",
-            f"| Win Rate | {worst_m['win_rate']:.1f}% | {best_m['win_rate']:.1f}% | — |",
-            f"| MDD | {worst_m['max_drawdown']:.2f}% | {best_m['max_drawdown']:.2f}% | — |",
-            f"| 거래 수 | {int(worst_m['total_trades'])} | {int(best_m['total_trades'])} | — |",
+            f"| 수익률 | {ref_m['total_return']:+.2f}% | {best_m['total_return']:+.2f}% | {improvement:+.2f}% |",
+            f"| Sharpe | {ref_m['sharpe_ratio']:.2f} | {best_m['sharpe_ratio']:.2f} | {best_m['sharpe_ratio']-ref_m['sharpe_ratio']:+.2f} |",
+            f"| Win Rate | {ref_m['win_rate']:.1f}% | {best_m['win_rate']:.1f}% | — |",
+            f"| MDD | {ref_m['max_drawdown']:.2f}% | {best_m['max_drawdown']:.2f}% | — |",
+            f"| 거래 수 | {int(ref_m['total_trades'])} | {int(best_m['total_trades'])} | — |",
         ]
         yield format_sse({"type": "analysis", "content": "\n".join(summary_lines)})
 

@@ -223,12 +223,14 @@ class RealisticSimulator:
         funding_rate: float = 0.0001, # 펀딩비 (8h당 0.01%)
         max_position: float = 1.0,    # 최대 포지션 비율
         use_kelly: bool = True,       # Kelly 포지션 사이징
+        freq: int = 24,               # 하루 봉 수 (1h=24, 15m=96)
     ):
         self.fee_rate = fee_rate
         self.slippage = slippage
         self.funding_rate = funding_rate
         self.max_position = max_position
         self.use_kelly = use_kelly
+        self.freq = max(1, int(freq))
 
     def run(self, df: pd.DataFrame, signal: pd.Series) -> tuple[pd.Series, int, list[float], pd.Series, pd.Series, pd.Series]:
         """
@@ -266,7 +268,8 @@ class RealisticSimulator:
 
         pos_change = position.diff().abs().fillna(0)
         total_cost = pos_change * (self.fee_rate + self.slippage)
-        funding_cost = position.abs() * self.funding_rate / 3
+        bar_hours = 24 / self.freq
+        funding_cost = position.abs() * self.funding_rate * (bar_hours / 8)
 
         # 포지션별 수익률 분리
         long_returns = (position[position > 0] * price_ret[position > 0]).fillna(0)
@@ -277,19 +280,33 @@ class RealisticSimulator:
         trade_results = []
         in_trade = False
         trade_start_val = 1.0
+        unit_funding_per_bar = self.funding_rate * (bar_hours / 8)
         
         for i in range(1, len(position)):
             curr_pos = position.iloc[i]
             prev_pos = position.iloc[i-1]
-            if curr_pos != 0 and prev_pos == 0:
-                in_trade = True
-                trade_start_val = 1.0
-            if in_trade:
-                trade_start_val *= (1 + strategy_ret.iloc[i])
-                if curr_pos == 0 or (curr_pos * prev_pos < 0):
+            trade_cost = self.fee_rate + self.slippage
+
+            if curr_pos != prev_pos:
+                if in_trade:
+                    close_cost = abs(prev_pos) * trade_cost
+                    trade_start_val *= (1 - close_cost)
                     trade_results.append(trade_start_val - 1.0)
-                    in_trade = (curr_pos != 0)
                     trade_start_val = 1.0
+                    in_trade = False
+                if curr_pos != 0:
+                    in_trade = True
+
+            if in_trade:
+                if curr_pos != prev_pos:
+                    open_cost = abs(curr_pos) * trade_cost
+                    bar_ret = curr_pos * price_ret.iloc[i] - open_cost - abs(curr_pos) * unit_funding_per_bar
+                else:
+                    bar_ret = strategy_ret.iloc[i]
+                trade_start_val *= (1 + bar_ret)
+
+        if in_trade:
+            trade_results.append(trade_start_val - 1.0)
 
         n_trades = len(trade_results)
         return strategy_ret, n_trades, trade_results, total_cost + funding_cost, long_returns, short_returns
@@ -349,13 +366,17 @@ class WalkForwardValidator:
             try:
                 # 전략 함수: train 데이터로 파라미터 최적화 후 signal 반환
                 signal = strategy_fn(train_df, test_df)
-                returns, n_trades, *_ = simulator.run(test_df, signal)
+                returns, n_trades, trade_results, costs, long_returns, short_returns = simulator.run(test_df, signal)
 
                 result = compute_metrics(
                     returns, n_trades,
                     name=f"WFO-{i+1:02d}",
                     start=str(test_df.index[0])[:10],
                     end=str(test_df.index[-1])[:10],
+                    trade_results=trade_results,
+                    costs=costs,
+                    long_returns=long_returns,
+                    short_returns=short_returns,
                 )
                 results.append(result)
                 
@@ -478,7 +499,7 @@ class BacktestEngine:
         self.wfo_end    = int(n * (1 - test_ratio))
         self.test_start = self.wfo_end
 
-        self.sim = RealisticSimulator(fee_rate=fee_rate, slippage=slippage)
+        self.sim = RealisticSimulator(fee_rate=fee_rate, slippage=slippage, freq=freq)
 
         # WFO 파라미터를 WFO 구간 길이 기준으로 계산
         wfo_len = self.wfo_end - self.train_end
@@ -565,12 +586,16 @@ class BacktestEngine:
             train_df = self.df.iloc[self.train_end:self.test_start]
             try:
                 signal = strategy_fn(train_df, test_df)
-                rets, n_trades, *_ = self.sim.run(test_df, signal)
+                rets, n_trades, trade_results, costs, long_returns, short_returns = self.sim.run(test_df, signal)
                 result.period_results.append(compute_metrics(
                     rets, n_trades, "FINAL_TEST",
                     str(test_df.index[0])[:10],
                     str(test_df.index[-1])[:10],
                     self.freq,
+                    trade_results=trade_results,
+                    costs=costs,
+                    long_returns=long_returns,
+                    short_returns=short_returns,
                 ))
             except Exception as e:
                 print(f"  최종 테스트 실패: {e}")

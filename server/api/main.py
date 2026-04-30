@@ -17,12 +17,11 @@ load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 # Routes - New Modular Structure
 from server.modules.chat.router import router as chat_router
-from server.modules.evolution.router import router as evolution_router, dashboard_router
+
 from server.modules.engine.router import router as engine_router
 from server.modules.settings.router import router as settings_router
 from server.modules.bots.router import router as bots_router
-from server.modules.evolution.orchestrator import get_evolution_orchestrator
-from server.modules.evolution.constants import AGENT_IDS, ACTIVE_AGENT_IDS
+
 from server.shared.market.metrics_buffer import get_metrics_buffer
 from server.modules.bots.manager import BotManager
 
@@ -114,45 +113,18 @@ app.add_middleware(
 
 # Router 등록
 app.include_router(chat_router, prefix="/api")
-app.include_router(evolution_router, prefix="/api")  # /api/agents ...
-app.include_router(dashboard_router, prefix="/api")  # /api/dashboard ...
+
 app.include_router(engine_router, prefix="/api/backtest")
 app.include_router(settings_router, prefix="/api/system")
 app.include_router(bots_router, prefix="/api")  # /api/bots ...
 
 # Scheduler setup
 scheduler = AsyncIOScheduler()
-evolution_orchestrator = get_evolution_orchestrator()
 
-async def scheduled_evolution_poll():
-    """Periodic job to check all agents for evolution triggers."""
-    logger.debug("Running scheduled evolution poll...")
-    if hasattr(evolution_orchestrator, "start_scheduled_loop"):
-        evolution_orchestrator.start_scheduled_loop(list(ACTIVE_AGENT_IDS))
-    for agent_id in ACTIVE_AGENT_IDS:
-        await evolution_orchestrator.run_evolution_cycle(agent_id)
 
 @app.on_event("startup")
 async def startup_event():
-    try:
-        poll_minutes = int(os.getenv("EVOLUTION_POLL_MINUTES", "60"))
-    except ValueError:
-        poll_minutes = 60
-    poll_minutes = max(1, min(poll_minutes, 24 * 60))
 
-    scheduler.add_job(
-        scheduled_evolution_poll,
-        "interval",
-        minutes=poll_minutes,
-        id="evolution_poll",
-        coalesce=True,
-        max_instances=1,
-        misfire_grace_time=poll_minutes * 60,
-    )
-    # 기본적으로 일시정지 상태로 시작하여 사용자의 명시적 'RUN' 요청 시 작동하게 함
-    job = scheduler.get_job("evolution_poll")
-    if job:
-        job.pause()
         
     # 3. 봇 매니저 초기화 및 활성 봇 로드
     bot_manager = BotManager()
@@ -171,8 +143,7 @@ async def startup_event():
 
     scheduler.start()
     logger.info(
-        "APScheduler started: Evolution poll added (PAUSED by default), Bot tick added (10s). active_agents=%s",
-        ACTIVE_AGENT_IDS,
+        "APScheduler started: Bot tick added (10s)."
     )
 
 @app.on_event("shutdown")
@@ -191,65 +162,10 @@ async def serve_client():
         return FileResponse(index_path)
     return {"message": "Trinity Chimery API 서버 실행 중"}
 
-@app.get("/api/system/status")
-async def get_system_status():
-    """시스템 상태 정보 반환"""
-    orchestrator = get_evolution_orchestrator()
-    metrics_buffer = get_metrics_buffer()
-
-    status = {
-        "agents": {},
-        "metrics_buffer": {},
-        "evolution_states": {},
-        "active_agents": list(ACTIVE_AGENT_IDS),
-    }
-
-    for agent_id in AGENT_IDS:
-        buffer_stats = metrics_buffer.get_buffer_status(agent_id)
-        evolution_state = orchestrator.agent_manager.get_state(agent_id).value
-
-        status["agents"][agent_id] = {
-            "buffer": buffer_stats,
-            "evolution_state": evolution_state
-        }
-
-    return status
 
 
-@app.get("/api/system/automation")
-async def get_automation_status():
-    """자동화 루프(스케줄러) 상태 조회"""
-    job = scheduler.get_job("evolution_poll")
-    if not job:
-        return {"enabled": False, "status": "not_found"}
-
-    # next_run_time이 None이면 일시정지 상태임
-    enabled = job.next_run_time is not None
-    return {
-        "enabled": enabled,
-        "status": "running" if enabled else "paused",
-        "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None
-    }
 
 
-@app.post("/api/system/automation")
-async def set_automation_status(data: dict):
-    """자동화 루프(스케줄러) 끄기/켜기"""
-    enabled = data.get("enabled", True)
-    job = scheduler.get_job("evolution_poll")
-    if not job:
-        return {"success": False, "error": "job_not_found"}
-
-    if enabled:
-        job.resume()
-        # 재개 시 즉시 실행되도록 다음 실행 시간을 지금으로 설정
-        job.modify(next_run_time=datetime.now())
-        logger.info("Evolution automation RESUMED and triggered immediately.")
-    else:
-        job.pause()
-        logger.info("Evolution automation PAUSED.")
-
-    return {"success": True, "enabled": enabled}
 
 if __name__ == "__main__":
     uvicorn_log_level = (os.getenv("UVICORN_LOG_LEVEL") or TRINITY_LOG_LEVEL).strip().lower()

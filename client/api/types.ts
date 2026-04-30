@@ -1,65 +1,8 @@
 // API Types definitions
 
-export interface RunLoopResponse {
-  success: boolean;
-  iteration: number;
-  queued_agents: string[];
-  message: string;
-}
 
-export interface EvolutionLogEvent {
-  id: number;
-  created_at: string;
-  level: string;
-  phase: string;
-  message: string;
-  agent_id?: string | null;
-  agent_label?: string | null;
-  meta?: {
-    decision?: {
-      result?: string;
-      status?: string;
-      stage?: string;
-      reason?: string;
-      attempt?: number;
-      attempt_budget?: number;
-      llm_mode?: string;
-      fingerprint?: string;
-      improved?: boolean;
-      strategy_id?: string | null;
-      agent_alias?: string;
-      agent_label?: string;
-      gate_reasons?: string[];
-      gate_thresholds?: Record<string, any>;
-      improvement_summary?: Array<{
-        metric: string;
-        label?: string;
-        baseline?: number;
-        candidate?: number;
-        delta?: number;
-        baseline_display?: string;
-        candidate_display?: string;
-        delta_display?: string;
-      }>;
-      hard_gates?: Record<string, any>;
-      quick_gates?: Record<string, any>;
-    };
-    metrics?: Record<string, any>;
-    baseline_metrics?: Record<string, any>;
-    verdict?: string;
-  } | null;
-}
 
-export interface DecisionLogEvent {
-  id: string | number;
-  created_at: string;
-  level: string;
-  phase: string;
-  message: string;
-  agent_id?: string | null;
-  agent_label?: string | null;
-  meta?: EvolutionLogEvent["meta"];
-}
+
 
 export interface DashboardProgress {
   active_improvements: number;

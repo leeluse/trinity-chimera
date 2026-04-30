@@ -3,8 +3,14 @@ import { ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
 import { Candidate } from "@/app/scanner/types";
 import { fmt } from "@/app/scanner/utils";
 import { SIGNAL_META } from "@/app/scanner/constants";
-import { SignalBar } from "./SignalBar";
-import { DetailBox } from "./DetailBox";
+import { DeepDivePanel } from "./DeepDivePanel";
+
+const STAGE_META = {
+  0: { label: "S0", cls: "text-slate-600 border-slate-700/50 bg-slate-900" },
+  1: { label: "S1", cls: "text-purple-400 border-purple-500/30 bg-purple-500/10" },
+  2: { label: "S2", cls: "text-amber-400 border-amber-500/30 bg-amber-500/10" },
+  3: { label: "S3", cls: "text-green-400 border-green-500/30 bg-green-500/10 shadow-[0_0_8px_rgba(34,197,94,0.15)]" },
+} as const;
 
 interface CandidateRowProps {
   candidate: Candidate;
@@ -15,7 +21,8 @@ interface CandidateRowProps {
   topSectors: Set<string>;
   botSectors: Set<string>;
   regimeLabel: string;
-  regimeAdaptive: boolean;
+  shortLiq5m?: number;
+  longLiq5m?: number;
 }
 
 export function CandidateRow({
@@ -27,9 +34,18 @@ export function CandidateRow({
   topSectors,
   botSectors,
   regimeLabel,
-  regimeAdaptive
+  shortLiq5m,
+  longLiq5m,
 }: CandidateRowProps) {
   const rs = c.change24 - btcChange24;
+  const activeSignals = SIGNAL_META
+    .filter(({ key }: { key: string }) => c.signals[key]?.score > 40)
+    .sort(
+      (a: { key: string }, b: { key: string }) =>
+        (c.signals[b.key]?.score ?? 0) - (c.signals[a.key]?.score ?? 0)
+    );
+  const visibleSignals = activeSignals.slice(0, 4);
+  const hiddenSignalCount = Math.max(0, activeSignals.length - visibleSignals.length);
 
   return (
     <>
@@ -40,6 +56,20 @@ export function CandidateRow({
         <td className="px-3 py-3">
           <div className="flex items-center gap-2">
             <span className="font-mono text-[13px] font-bold text-white/90">{c.symbol.replace("USDT", "")}</span>
+            <span
+              className={cn(
+                "font-mono text-[8px] font-black tracking-[0.1em] px-1.5 py-0.5 border rounded-sm",
+                STAGE_META[c.stage].cls
+              )}
+            >
+              {STAGE_META[c.stage].label}
+            </span>
+            {c.contextScore >= 62 && (
+              <span className="text-[9px] text-green-400 font-bold">▲</span>
+            )}
+            {c.contextScore <= 38 && (
+              <span className="text-[9px] text-red-400 font-bold">▼</span>
+            )}
             {c.pumpFlagged && (
               <span className="px-1 py-0.5 text-[8px] font-mono font-black tracking-[0.2em] bg-red-500/15 text-red-500 border border-red-500/20 rounded-sm">PUMP</span>
             )}
@@ -82,7 +112,7 @@ export function CandidateRow({
         </td>
         <td className="px-3 py-3">
           <div className="flex gap-1 flex-wrap">
-            {SIGNAL_META.filter(({ key }: { key: string }) => c.signals[key]?.score > 40).map(({ key, emoji }: { key: string; emoji: string }) => (
+            {visibleSignals.map(({ key, emoji }: { key: string; emoji: string }) => (
               <span
                 key={key}
                 className="inline-flex items-center justify-center w-5 h-5 text-xs bg-white/5 border border-white/10 rounded-sm cursor-help hover:bg-white/10 transition-colors"
@@ -91,7 +121,12 @@ export function CandidateRow({
                 {emoji}
               </span>
             ))}
-            {SIGNAL_META.filter(({ key }: { key: string }) => c.signals[key]?.score > 40).length === 0 && (
+            {hiddenSignalCount > 0 && (
+              <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 text-[9px] font-mono text-slate-400 border border-white/10 rounded-sm">
+                +{hiddenSignalCount}
+              </span>
+            )}
+            {activeSignals.length === 0 && (
               <span className="text-muted-foreground/30 text-[10px] tracking-[0.1em]">—</span>
             )}
           </div>
@@ -119,24 +154,14 @@ export function CandidateRow({
       {expanded && (
         <tr className="bg-white/[0.01]">
           <td colSpan={12} className="px-6 py-6 border-b border-white/5">
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
-              <DetailBox label="24h RANGE" value={`${fmt.price(c.low24)} → ${fmt.price(c.high24)}`} />
-              <DetailBox label="24h VOLUME" value={`${(c.quoteVolume / 1_000_000).toFixed(1)}M`} />
-              <DetailBox label="7d CHANGE" value={c.change7d != null ? fmt.pct(c.change7d) : "—"} />
-              <DetailBox label="1h / 4h" value={`${fmt.pct(c.change1h || 0, 2)} / ${fmt.pct(c.change4h || 0, 2)}`} />
-              <DetailBox label="SIGNALS" value={`${c.strongCount} ACTIVE`} />
-              <DetailBox label="NARRATIVE" value={c.narrativeMult > 1 ? `+${((c.narrativeMult - 1) * 100).toFixed(0)}%` : c.narrativeMult < 1 ? `-${((1 - c.narrativeMult) * 100).toFixed(0)}%` : "NEUTRAL"} />
-              <DetailBox label="SECTOR" value={c.sector || "—"} />
-              <DetailBox label="REGIME" value={regimeLabel} />
-            </div>
-            <div className="border-t border-white/5 pt-5">
-              <div className="font-mono text-[9px] tracking-[0.3em] text-muted-foreground/40 uppercase mb-4 pl-1">Signal Breakdown</div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
-                {SIGNAL_META.map(({ key, emoji, name, color }: { key: string; emoji: string; name: string; color: string }) => (
-                  <SignalBar key={key} label={`${emoji} ${name}`} value={c.signals[key].score} note={c.signals[key].note} color={color} />
-                ))}
-              </div>
-            </div>
+            <DeepDivePanel
+              candidate={c}
+              regimeLabel={regimeLabel}
+              topSectors={topSectors}
+              botSectors={botSectors}
+              shortLiq5m={shortLiq5m}
+              longLiq5m={longLiq5m}
+            />
           </td>
         </tr>
       )}

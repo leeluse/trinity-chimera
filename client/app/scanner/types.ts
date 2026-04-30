@@ -11,8 +11,12 @@ export interface Ticker {
   funding: number | null;
   volRatio?: number;
   oiChange24?: number;
+  oiChange1h?: number;
   dailyCloses?: number[];
   hourlyCloses?: number[];
+  candles5m?: Array<{ o: number; h: number; l: number; c: number; v: number; buyVol: number; quoteVol: number }>;
+  lsRatio?: number | null;
+  takerRatio?: number | null;
 }
 
 export interface Signal {
@@ -27,6 +31,9 @@ export interface Candidate extends Ticker {
   pumpFlagged: boolean;
   narrativeMult: number;
   sector: string;
+  contextScore: number;
+  contextMult: number;
+  stage: 0 | 1 | 2 | 3;
 }
 
 export interface SectorData {
@@ -37,4 +44,40 @@ export interface SectorData {
   avg24: number;
   avg7d: number;
   momentum: number;
+}
+
+export interface MarketGlobal {
+  fearGreed: number | null;
+  fearGreedLabel: string;
+  usdKrw: number | null;
+  btcKrwKimchi: number | null;
+  btcTx: number | null;
+  btcTxLabel: string;
+  mempoolFee: number | null;
+  mempoolFeeLabel: string;
+}
+
+export interface LiqData {
+  globalShortLiq5m: number;
+  globalLongLiq5m: number;
+  bySymbol: Record<string, { shortLiq: number; longLiq: number }>;
+  connected: boolean;
+}
+
+export interface PreSignal {
+  symbol: string;
+  type: "fundExt" | "oiBuild" | "capitulation";
+  dir: 1 | -1;
+  title: string;
+  desc: string;
+  ts: number;
+}
+
+export interface FlowData {
+  score: number;
+  signals: Array<{ text: string; type: "bull" | "bear" | "warn" | "neut" }>;
+  fundingRate: number;
+  oiPct: number;
+  lsRatio: number | null;
+  takerRatio: number;
 }
