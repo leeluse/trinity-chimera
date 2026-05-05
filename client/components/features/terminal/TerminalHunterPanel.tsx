@@ -109,7 +109,7 @@ export default function TerminalHunterPanel() {
       }
     }
     prevCompositeRef.current = next;
-  }, [enrichedRows]);
+  }, [enrichedRows, setCompositeAlert]);
 
   const onStart = () => { void runtimeRef.current?.api.startSystem(); };
   const onStop = () => { runtimeRef.current?.api.stopSystem(); };
