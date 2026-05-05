@@ -49,6 +49,7 @@ export function isCompositeSignal(row: EnrichedRow): boolean {
   );
 }
 
+/** Merge hunter rows with CRIME results. Wrap in useMemo to avoid redundant work on re-renders. */
 export function mergeRows(
   hunterRows: HunterRow[],
   crimeResults: CoinData[]
