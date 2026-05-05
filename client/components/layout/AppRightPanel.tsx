@@ -54,14 +54,12 @@ export function AppRightPanel({
   const { hunterLeaderboard, setSelectedSymbol } = useTerminalStore();
 
   const isBacktestPage = pathname === "/backtest";
-  const isScannerPage = pathname === "/scanner";
   const isTerminalPage = pathname === "/terminal";
   const isDashboardPage = pathname === "/";
 
   // const isEvolutionView = view === "evolution"; // REmoved
   const isLogsView = (view === "logs" || (view === "" && isDashboardPage)) && false; // Disabled logs for now as they were agent-specific
   const isBacktestView = isBacktestPage && view === "";
-  const isScannerView = isScannerPage;
   const isTerminalView = isTerminalPage;
 
   // Logic for filtering logs (borrowed from DashboardRightPanel)
@@ -92,11 +90,7 @@ export function AppRightPanel({
         />
       )}
 
-      {/* 2. Main Content Slots */}
-      
-
-
-      {/* Chat / Backtest Interface */}
+x      {/* Chat / Backtest Interface */}
       {isBacktestView && !!backtestContext && (
         <ChatInterface
           context={backtestContext}
@@ -105,12 +99,6 @@ export function AppRightPanel({
         />
       )}
 
-      {/* Scanner Sidebar Content */}
-      {isScannerView && scannerContent && (
-        <div className="flex-1 overflow-y-auto no-scrollbar">
-          {scannerContent}
-        </div>
-      )}
 
       {/* Terminal Leaderboard Sidebar */}
       {isTerminalView && (

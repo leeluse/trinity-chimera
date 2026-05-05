@@ -15,7 +15,7 @@ import {
   type HunterSortMode,
 } from "./hunterRuntime";
 
-type HunterTab = "lb" | "rg" | "pre";
+type HunterTab = "lb" | "rg";
 
 const INITIAL: HunterRuntimeSnapshot = {
   running: false,
@@ -68,12 +68,36 @@ export default function TerminalHunterPanel() {
     return () => { runtime.cleanup(); runtimeRef.current = null; };
   }, [setHunterRows, setHunterRegime, setHunterAlert, setHunterLeaderboard, setHunterSummary]);
 
-  const onStart = () => { void runtimeRef.current?.api.startSystem(); };
+  const onStart = () => {
+    void runtimeRef.current?.api.startSystem();
+
+    // TODO: 테스트용 CRIME 신호 주입. 실제 detectSignals 연결 후에는 제거.
+    runtimeRef.current?.api.pushCrimeSignals?.([
+      {
+        symbol: "PEPEUSDT",
+        type: "PRE_IGNITION",
+        message: "PRE_IGNITION 진입 score 187 연료 91",
+        timestamp: Date.now(),
+        score: 187,
+      },
+    ]);
+
+  };
   const onStop = () => { runtimeRef.current?.api.stopSystem(); };
   const onToggleFreeze = () => { runtimeRef.current?.api.toggleFreeze(); };
   const onToggleFocus = () => { runtimeRef.current?.api.toggleFocus(); };
   const onToggleMute = () => { runtimeRef.current?.api.toggleMute(); };
   const onSetSort = (mode: HunterSortMode) => { runtimeRef.current?.api.setSort(mode); };
+
+  const crimeBySymbol = new Map<string, HunterPreSignal[]>();
+  state.preSignals
+    .filter((p) => p.type.startsWith("crime:"))
+    .forEach((p) => {
+      const key = p.sym.endsWith("USDT") ? p.sym : `${p.sym}USDT`;
+      const list = crimeBySymbol.get(key) ?? [];
+      list.push(p);
+      crimeBySymbol.set(key, list);
+    });
 
   const wsTagClass = (on: boolean) =>
     cn(
@@ -208,7 +232,6 @@ export default function TerminalHunterPanel() {
       <div className="flex items-center gap-2 overflow-x-auto border-b border-white/[0.06] bg-[#080910] px-5 py-3 no-scrollbar">
         <TabBtn active={tab === "lb"} onClick={() => setTab("lb")} icon={<Trophy size={14} />}>리더보드</TabBtn>
         <TabBtn active={tab === "rg"} onClick={() => setTab("rg")} icon={<BarChart3 size={14} />}>레짐</TabBtn>
-        <TabBtn active={tab === "pre"} onClick={() => setTab("pre")} icon={<Flame size={14} />}>선행</TabBtn>
       </div>
 
       {/* ── Content ── */}
@@ -219,19 +242,19 @@ export default function TerminalHunterPanel() {
             {/* Sort bar */}
             <div className="border-b border-white/[0.06] bg-[#080910] px-4 py-2">
               <div className="grid grid-cols-4 gap-1 rounded-lg border border-white/[0.06] bg-[#0d0e17] p-1">
-              {(["total", "cross", "sqz", "whale"] as HunterSortMode[]).map((m) => {
-                const label = m === "total" ? "🔥 TOTAL" : m === "cross" ? "⚡ CROSS" : m === "sqz" ? "💥 SQZ" : "🐋 WHALE";
-                const Icon = m === "total" ? Flame : m === "cross" ? Zap : m === "sqz" ? Activity : Cpu;
-                return (
-                  <button key={m} type="button" onClick={() => onSetSort(m)}
-                    className={cn("flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[9px] font-black tracking-widest transition-all",
-                      state.sortMode === m ? "bg-violet-500/14 text-violet-100 shadow-[0_0_10px_rgba(139,92,246,0.12)]" : "text-slate-600 hover:bg-white/[0.035] hover:text-slate-300"
-                    )}>
-                    <Icon size={12} />
-                    {label}
-                  </button>
-                );
-              })}
+                {(["total", "cross", "sqz", "whale"] as HunterSortMode[]).map((m) => {
+                  const label = m === "total" ? "🔥 TOTAL" : m === "cross" ? "⚡ CROSS" : m === "sqz" ? "💥 SQZ" : "🐋 WHALE";
+                  const Icon = m === "total" ? Flame : m === "cross" ? Zap : m === "sqz" ? Activity : Cpu;
+                  return (
+                    <button key={m} type="button" onClick={() => onSetSort(m)}
+                      className={cn("flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[9px] font-black tracking-widest transition-all",
+                        state.sortMode === m ? "bg-violet-500/14 text-violet-100 shadow-[0_0_10px_rgba(139,92,246,0.12)]" : "text-slate-600 hover:bg-white/[0.035] hover:text-slate-300"
+                      )}>
+                      <Icon size={12} />
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -274,7 +297,13 @@ export default function TerminalHunterPanel() {
                 </div>
               )}
               {state.rows.map((row) => (
-                <SniperRow key={row.full} row={row} onSelect={() => setSelectedSymbol(row.full)} focusMode={state.focusMode} />
+                <SniperRow
+                  key={row.full}
+                  row={row}
+                  crimeSignals={crimeBySymbol.get(row.full) ?? []}
+                  onSelect={() => setSelectedSymbol(row.full)}
+                  focusMode={state.focusMode}
+                />
               ))}
             </div>
           </div>
@@ -317,56 +346,6 @@ export default function TerminalHunterPanel() {
             />
           </div>
         )}
-
-        {/* ── Pre-signals tab ── */}
-        {tab === "pre" && (
-          <div className="space-y-2 p-4">
-            <div className="mb-2 flex items-center gap-3 px-1">
-              <Flame size={18} className="text-fuchsia-300" />
-              <div className="text-[12px] font-black uppercase tracking-[0.2em] text-violet-50">Anomaly Detection Stream</div>
-            </div>
-            {state.preSignals.length === 0 && (
-              <div className="px-3 py-24 text-center">
-                <Activity size={32} className="mx-auto mb-4 text-violet-950" />
-                <div className="text-[11px] font-black uppercase tracking-[0.3em] text-violet-200/25">Awaiting Early Detection Triggers</div>
-              </div>
-            )}
-            {state.preSignals.slice(0, 40).map((p, idx) => (
-              <button
-                key={`${p.sym}-${p.type}-${idx}`}
-                type="button"
-                onClick={() => setSelectedSymbol(p.sym)}
-                className={cn(
-                  "group relative w-full overflow-hidden rounded-xl border border-violet-300/10 px-5 py-4 text-left backdrop-blur-sm transition-all hover:border-violet-300/25 hover:bg-violet-400/[0.04]",
-                  p.dir > 0 ? "bg-violet-500/[0.03]" : "bg-pink-500/[0.03]"
-                )}
-              >
-                <div className="absolute bottom-0 left-0 top-0 w-1 opacity-60 transition-all group-hover:w-1.5"
-                     style={{ backgroundColor: p.dir > 0 ? "#a78bfa" : "#f472b6" }} />
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={cn("rounded-lg border p-1.5", p.dir > 0 ? "border-violet-300/25 bg-violet-500/10 text-violet-200" : "border-pink-300/25 bg-pink-500/10 text-pink-300")}>
-                      {p.dir > 0 ? <Rocket size={14} /> : <Flame size={14} />}
-                    </div>
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-[16px] font-black uppercase text-violet-50 transition-colors group-hover:text-violet-200">{p.sym.replace("USDT", "")}</span>
-                        <span className="text-[10px] font-bold uppercase text-violet-200/30">USDT</span>
-                      </div>
-                      <div className="mt-0.5 text-[11px] font-black uppercase tracking-wide text-violet-100">{p.title}</div>
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    <span className={cn("rounded-md border px-2.5 py-1 font-mono text-[12px] font-black", p.dir > 0 ? "border-violet-300/30 bg-violet-500/10 text-violet-200" : "border-pink-300/30 bg-pink-500/10 text-pink-300")}>
-                      {p.dir > 0 ? "▲ BULLISH" : "▼ BEARISH"}
-                    </span>
-                    <span className="mt-1 text-[9px] font-bold uppercase tracking-widest text-violet-200/35">{p.desc}</span>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -375,8 +354,9 @@ export default function TerminalHunterPanel() {
 /* ─────────────────────────────────────────────────────────
    Sniper Row
  ───────────────────────────────────────────────────────── */
-function SniperRow({ row, onSelect, focusMode }: {
+function SniperRow({ row, crimeSignals, onSelect, focusMode }: {
   row: HunterRow;
+  crimeSignals: HunterPreSignal[];
   onSelect: () => void;
   focusMode: boolean;
 }) {
@@ -390,6 +370,9 @@ function SniperRow({ row, onSelect, focusMode }: {
       ? row.price.toLocaleString(undefined, { maximumFractionDigits: 2 })
       : row.price.toLocaleString(undefined, { maximumFractionDigits: 5 })
     : "—";
+  const primaryCrime = crimeSignals[0];
+  const crimeType = primaryCrime?.type.replace("crime:", "");
+  const isCrimeDanger = primaryCrime && (primaryCrime.type.includes("EXIT_ALERT") || primaryCrime.type.includes("TRAP_ALERT"));
 
   return (
     <div className="px-4 py-0.5">
@@ -476,7 +459,25 @@ function SniperRow({ row, onSelect, focusMode }: {
             />
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap gap-1">
-            {row.sig.slice(0, 4).map((s, i) => (
+            {primaryCrime && (
+              <span
+                title={primaryCrime.desc}
+                className={cn(
+                  "rounded-sm border px-1.5 py-[1px] text-[8px] font-black uppercase tracking-wider",
+                  isCrimeDanger
+                    ? "border-pink-300/22 bg-pink-500/8 text-pink-300"
+                    : "border-violet-300/22 bg-violet-500/8 text-violet-200/75"
+                )}
+              >
+                CRIME {crimeType} {primaryCrime.score}
+              </span>
+            )}
+            {crimeSignals.length > 1 && (
+              <span className="rounded-sm border border-white/[0.06] bg-white/[0.025] px-1.5 py-[1px] text-[8px] font-black uppercase tracking-wider text-slate-500">
+                +{crimeSignals.length - 1}
+              </span>
+            )}
+            {row.sig.slice(0, primaryCrime ? 3 : 4).map((s, i) => (
               <span
                 key={i}
                 className={cn(
@@ -491,7 +492,7 @@ function SniperRow({ row, onSelect, focusMode }: {
                 {s.n}
               </span>
             ))}
-            {!row.sig.length && (
+            {!row.sig.length && !primaryCrime && (
               <span className="rounded-sm border border-white/[0.06] bg-white/[0.025] px-1.5 py-[1px] text-[8px] font-black uppercase tracking-wider text-slate-700">
                 No Trigger
               </span>

@@ -61,6 +61,14 @@ export interface HunterPreSignal {
   score: number;
 }
 
+export interface CrimeSignalLike {
+  symbol: string;
+  type: string;
+  message: string;
+  timestamp: number;
+  score: number;
+}
+
 export interface HunterLeaderboardItem {
   sym: string;
   total: number;
@@ -96,6 +104,7 @@ export interface HunterRuntimeApi {
   toggleFreeze: () => void;
   setSort: (mode: HunterSortMode) => void;
   togglePin: (sym: string) => void;
+  pushCrimeSignals: (signals: CrimeSignalLike[]) => void;
 }
 
 const C = {
@@ -183,7 +192,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
 
   const preSigHistory: any[] = [];
   const preSigCooldown: Record<string, number> = {};
-
+  let crimeSignals: CrimeSignalLike[] = [];
   let lastRegimeUpdate = 0;
   const regimeState = { btcAltDelta: 0, avgFunding: 0, ready: false };
 
@@ -250,9 +259,9 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
       o.onended = () => {
         try {
           void c.close();
-        } catch (_e) {}
+        } catch (_e) { }
       };
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   function clearTimer(refName: 'scanIv' | 'decayIv' | 'fundIv' | 'oiIv' | 'lsrIv' | 'regimeIv') {
@@ -266,6 +275,18 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     if (refName === 'regimeIv') regimeIv = null;
   }
 
+  function crimeToPreSignal(s: CrimeSignalLike): HunterPreSignal {
+    return {
+      sym: s.symbol,
+      type: `crime:${s.type}`,
+      dir: s.type === "EXIT_ALERT" || s.type === "TRAP_ALERT" ? -1 : 1,
+      ts: s.timestamp,
+      title: `CRIME ${s.type}`,
+      desc: s.message,
+      score: s.score,
+    };
+  }
+
   function closeWs(ws: WebSocket | null) {
     if (!ws) return;
     try {
@@ -274,7 +295,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
       ws.onclose = null;
       ws.onerror = null;
       ws.close();
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   function stopSystem() {
@@ -312,7 +333,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
       const r = await fetch('https://fapi.binance.com/fapi/v1/klines?symbol=' + sym + '&interval=1d&limit=1');
       const d = await r.json();
       if (d && d[0]) P9[sym] = parseFloat(d[0][1]);
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   function subBn(s: string) {
@@ -557,7 +578,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
             m.totalQuoteVol = parseFloat(t.q);
           }
         });
-      } catch (_e) {}
+      } catch (_e) { }
     };
 
     gWs.onclose = () => {
@@ -568,7 +589,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     gWs.onerror = () => {
       try {
         gWs?.close();
-      } catch (_e) {}
+      } catch (_e) { }
     };
   }
 
@@ -592,7 +613,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
         if (d.e === 'aggTrade') onTrade(d);
         else if (d.e === 'depthUpdate' || (d.b && d.a)) onDepth(d);
         else if (d.e === 'forceOrder' || d.o) onLiq(d);
-      } catch (_e) {}
+      } catch (_e) { }
     };
 
     bnWs.onclose = () => {
@@ -602,7 +623,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     bnWs.onerror = () => {
       try {
         bnWs?.close();
-      } catch (_e) {}
+      } catch (_e) { }
     };
   }
 
@@ -633,7 +654,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
             });
           }
         }
-      } catch (_e) {}
+      } catch (_e) { }
     };
 
     oxWs.onclose = () => {
@@ -645,7 +666,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     oxWs.onerror = () => {
       try {
         oxWs?.close();
-      } catch (_e) {}
+      } catch (_e) { }
     };
   }
 
@@ -675,7 +696,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
             });
           }
         }
-      } catch (_e) {}
+      } catch (_e) { }
     };
 
     byWs.onclose = () => {
@@ -687,7 +708,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     byWs.onerror = () => {
       try {
         byWs?.close();
-      } catch (_e) {}
+      } catch (_e) { }
     };
   }
 
@@ -768,7 +789,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
           sd.bgBidVol = bV;
           sd.bgAskVol = aV;
         }
-      } catch (_e) {}
+      } catch (_e) { }
     };
 
     bgWs.onclose = () => {
@@ -780,7 +801,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     bgWs.onerror = () => {
       try {
         bgWs?.close();
-      } catch (_e) {}
+      } catch (_e) { }
     };
   }
 
@@ -1011,16 +1032,28 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
 
   function cleanPreSignals() {
     const n = Date.now();
-    const l = preSigHistory.length;
-    for (let i = l - 1; i >= 0; i--) {
+    const preLen = preSigHistory.length;
+    const crimeLen = crimeSignals.length;
+
+    for (let i = preLen - 1; i >= 0; i--) {
       if (n - preSigHistory[i].ts > C.preCardTtl) preSigHistory.splice(i, 1);
     }
 
-    if (!isFrozen && preSigHistory.length !== l) syncPreSignals();
+    crimeSignals = crimeSignals.filter((s) => n - s.timestamp < C.preCardTtl);
+
+    if (!isFrozen && (preSigHistory.length !== preLen || crimeSignals.length !== crimeLen)) syncPreSignals();
   }
 
   function syncPreSignals() {
-    ui.preSignals = preSigHistory.map((p) => ({ ...p })).slice(0, C.preCardMax);
+    const now = Date.now();
+
+    crimeSignals = crimeSignals.filter((s) => now - s.timestamp < C.preCardTtl);
+
+    ui.preSignals = [
+      ...crimeSignals.map(crimeToPreSignal),
+      ...preSigHistory.map((p) => ({ ...p })),
+    ].slice(0, C.preCardMax);
+
     ui.summary.pre = ui.preSignals.length;
   }
 
@@ -1053,7 +1086,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
           firePreSignal(d.symbol, 'miDiv', mi < 0 ? 1 : -1, '📡 MI 괴리', '선물괴리 ' + (mi * 100).toFixed(3) + '%', 0);
         }
       });
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   async function pollOI() {
@@ -1078,7 +1111,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
           OI[s].prev = v;
         }
       });
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   async function pollLSR() {
@@ -1099,7 +1132,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
           LSR[r.value.s] = { longPct: parseFloat(r.value.d.longAccount) };
         }
       });
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   function renderSummary(list: any[]) {
@@ -1119,7 +1152,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
       ui.summary.bias = '—';
     }
 
-    ui.summary.pre = preSigHistory.length;
+    ui.summary.pre = Math.min(C.preCardMax, preSigHistory.length + crimeSignals.length);
   }
 
   function renderTable(list: any[]) {
@@ -1619,6 +1652,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     }
   }
 
+
   function toggleMute() {
     muted = !muted;
     emit();
@@ -1648,6 +1682,31 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     emit();
   }
 
+  function pushCrimeSignals(signals: CrimeSignalLike[]) {
+    if (!Array.isArray(signals) || signals.length === 0) return;
+
+    const seen = new Set(crimeSignals.map((s) => `${s.symbol}:${s.type}:${s.timestamp}`));
+
+    signals.forEach((s) => {
+      if (!s?.symbol || !s?.type || !s?.timestamp) return;
+
+      const key = `${s.symbol}:${s.type}:${s.timestamp}`;
+      if (seen.has(key)) return;
+
+      seen.add(key);
+      crimeSignals.unshift(s);
+    });
+
+    crimeSignals = crimeSignals
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, C.preCardMax);
+
+    if (!isFrozen) {
+      syncPreSignals();
+      emit();
+    }
+  }
+
   const api: HunterRuntimeApi = {
     startSystem,
     stopSystem,
@@ -1656,6 +1715,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     toggleFreeze,
     setSort,
     togglePin,
+    pushCrimeSignals,
   };
 
   emit();
@@ -1667,3 +1727,5 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     },
   };
 }
+
+
