@@ -5,6 +5,7 @@ import { RightPanelShell } from "@/components/panel/RightPanelShell";
 
 import ChatInterface from "@/components/features/chat/ChatInterface";
 import AgentFilter from "@/components/panel/sections/AgentFilter";
+import TerminalHunterPanel from "@/components/features/terminal/TerminalHunterPanel";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import { useMemo } from "react";
 
@@ -12,13 +13,13 @@ interface AppRightPanelProps {
   agentIds?: string[];
   names?: string[];
 
-  automationStatus?: any;
+  automationStatus?: unknown;
   onToggleAutomation?: () => void;
-  backtestContext?: any;
-  onBacktestGenerated?: (data: any) => void;
-  onApplyCode?: (code: string, name?: string, payload?: any) => void;
+  backtestContext?: unknown;
+  onBacktestGenerated?: (data: unknown) => void;
+  onApplyCode?: (code: string, name?: string, payload?: unknown) => void;
 
-  botTrades?: any[];
+  botTrades?: unknown[];
   scannerContent?: React.ReactNode;
 }
 
@@ -30,15 +31,15 @@ export function AppRightPanel({
 
   automationStatus = null,
   onToggleAutomation,
-
+  
   // Backtest Props
   backtestContext = null,
   onBacktestGenerated,
   onApplyCode,
-
+  
 
   botTrades = [],
-
+  
   // Scanner Props
   scannerContent = null,
 }: AppRightPanelProps) {
@@ -69,7 +70,7 @@ export function AppRightPanel({
 
   const filteredLogs = useMemo(() => {
     const isAll = !activeBot || activeBot === "ALL" || activeBot === "전체";
-    const logs: any[] = []; // No logs for bots yet
+    const logs: unknown[] = []; // No logs for bots yet
     if (isAll) return logs;
     return logs;
   }, [activeBot]);
@@ -87,7 +88,7 @@ export function AppRightPanel({
       )}
 
       {/* 2. Main Content Slots */}
-
+      
 
 
       {/* Chat / Backtest Interface */}
@@ -106,12 +107,8 @@ export function AppRightPanel({
         </div>
       )}
 
-      {/* Terminal Hunter Fusion Content - Now moved to main view */}
-      {isTerminalView && (
-        <div className="flex h-full items-center justify-center text-[10px] text-slate-600">
-          Selected Target Details (Empty)
-        </div>
-      )}
+      {/* Terminal Hunter Fusion Content */}
+      {isTerminalView && <TerminalHunterPanel />}
 
       {/* Decision Logs (Standard Terminal List) - Hidden for now */}
       {isLogsView && (
