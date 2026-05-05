@@ -5,7 +5,6 @@ import { RightPanelShell } from "@/components/panel/RightPanelShell";
 
 import ChatInterface from "@/components/features/chat/ChatInterface";
 import AgentFilter from "@/components/panel/sections/AgentFilter";
-import TerminalHunterPanel from "@/components/features/terminal/TerminalHunterPanel";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import { useMemo } from "react";
 
@@ -107,8 +106,12 @@ export function AppRightPanel({
         </div>
       )}
 
-      {/* Terminal Hunter Fusion Content */}
-      {isTerminalView && <TerminalHunterPanel />}
+      {/* Terminal Hunter Fusion Content - Now moved to main view */}
+      {isTerminalView && (
+        <div className="flex h-full items-center justify-center text-[10px] text-slate-600">
+          Selected Target Details (Empty)
+        </div>
+      )}
 
       {/* Decision Logs (Standard Terminal List) - Hidden for now */}
       {isLogsView && (
