@@ -4,19 +4,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
   LayoutDashboard, 
-  Search, 
   History, 
   Settings, 
-  ShieldAlert,
   BarChart3
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/" },
-  { icon: Search, label: "Scanner", href: "/scanner" },
   { icon: History, label: "Backtest", href: "/backtest" },
-  { icon: ShieldAlert, label: "Liquidation", href: "/liquidation" },
   { icon: BarChart3, label: "Stats", href: "/stats" },
   { icon: Settings, label: "Settings", href: "/settings" },
 ];

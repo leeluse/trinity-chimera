@@ -33,11 +33,6 @@ export { default as PerformanceDetails } from "./features/backtest/PerformanceDe
 export { default as TradeAnalysis } from "./features/backtest/TradeAnalysis";
 export { default as OptimizationMiniPanel } from "./features/backtest/OptimizationMiniPanel";
 
-// Features - Scanner
-export { CandidateRow } from "./features/scanner/CandidateRow";
-export { SignalBar } from "./features/scanner/SignalBar";
-export { DetailBox } from "./features/scanner/DetailBox";
-
 // Bots
 export { default as BotList } from "./bots/BotList";
 export { BotSettingsModal } from "./bots/BotSettingsModal";

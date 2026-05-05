@@ -24,7 +24,6 @@ export function mountTerminalV4() {
   let selectedSym: string | null = null;
   let totalScanned = 0;
   let scanMode: 'topn' | 'custom' = 'topn';
-  let realtimeLiqData: any = {};
 
   const store = useTerminalStore.getState();
 
@@ -43,8 +42,6 @@ export function mountTerminalV4() {
     const wk = results.filter((r) => r.wyckoffScore > 8).length;
     const mtf = results.filter((r) => r.mtfScore >= 10).length;
     const sq = results.filter((r) => r.bbScore >= 5).length;
-    const liq = results.filter((r) => r.realLiqScore >= 6).length;
-
     store.updateSummaryStats({
       strongBull: sb,
       bull: b,
@@ -55,7 +52,6 @@ export function mountTerminalV4() {
       wyckoff: wk,
       mtf,
       squeeze: sq,
-      liquidation: liq,
     });
   }
 
@@ -118,36 +114,7 @@ export function mountTerminalV4() {
     };
 
     ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        const events = Array.isArray(data) ? data : [data];
-        const now = Date.now();
-        let globalShort = 0;
-        let globalLong = 0;
-
-        events.forEach((d: any) => {
-          const sym = d?.o?.s;
-          const side = d?.o?.S;
-          const usd = parseFloat(d?.o?.q || 0) * parseFloat(d?.o?.p || 0);
-          if (!sym || !side || !usd) return;
-          if (!realtimeLiqData[sym]) realtimeLiqData[sym] = { longLiq: 0, shortLiq: 0, events: [] };
-          realtimeLiqData[sym].events.push({ side, usd, time: now });
-        });
-
-        Object.keys(realtimeLiqData).forEach((k) => {
-          const item = realtimeLiqData[k];
-          item.events = item.events.filter((ev: any) => now - ev.time < 300000);
-          item.shortLiq = item.events.filter((ev: any) => ev.side === 'BUY').reduce((s: number, x: any) => s + x.usd, 0);
-          item.longLiq = item.events.filter((ev: any) => ev.side === 'SELL').reduce((s: number, x: any) => s + x.usd, 0);
-          globalShort += item.shortLiq;
-          globalLong += item.longLiq;
-        });
-
-        store.updateGlobalMetrics({
-          globalShortLiq: '$' + (globalShort / 1000).toFixed(0) + 'K',
-          globalLongLiq: '$' + (globalLong / 1000).toFixed(0) + 'K',
-        });
-      } catch (e) {}
+      // Stream is active but liquidation parsing is removed
     };
 
     ws.onclose = () => {
@@ -328,7 +295,7 @@ export function mountTerminalV4() {
   async function fetchSymbol(symbol: string, pricePct: number) {
     const pd = (document.getElementById('period') as HTMLSelectElement | null)?.value || '4h';
 
-    const [cdR, cd1hR, cd1dR, frR, oiR, lsR, tkR, obR, liqR, cd5mR, oi5mR] = await Promise.allSettled([
+    const [cdR, cd1hR, cd1dR, frR, oiR, lsR, tkR, obR, cd5mR, oi5mR] = await Promise.allSettled([
       jFetch(FAPI + '/fapi/v1/klines?symbol=' + symbol + '&interval=' + pd + '&limit=150'),
       jFetch(FAPI + '/fapi/v1/klines?symbol=' + symbol + '&interval=1h&limit=100'),
       jFetch(FAPI + '/fapi/v1/klines?symbol=' + symbol + '&interval=1d&limit=100'),
@@ -337,7 +304,6 @@ export function mountTerminalV4() {
       jFetch(FAPI + '/futures/data/globalLongShortAccountRatio?symbol=' + symbol + '&period=' + pd + '&limit=4'),
       jFetch(FAPI + '/futures/data/takerlongshortRatio?symbol=' + symbol + '&period=5m&limit=12'),
       jFetch(FAPI + '/fapi/v1/depth?symbol=' + symbol + '&limit=20'),
-      jFetch(FAPI + '/fapi/v1/forceOrders?symbol=' + symbol + '&limit=50'),
       jFetch(FAPI + '/fapi/v1/klines?symbol=' + symbol + '&interval=5m&limit=60'),
       jFetch(FAPI + '/futures/data/openInterestHist?symbol=' + symbol + '&period=1h&limit=6'),
     ]);
@@ -395,16 +361,6 @@ export function mountTerminalV4() {
       asks = ((obR.value as any).asks || []).slice(0, 15).map((a: any) => [parseFloat(a[0]), parseFloat(a[1])]);
     }
 
-    let forceOrders: any[] = [];
-    if (liqR.status === 'fulfilled' && Array.isArray(liqR.value)) {
-      forceOrders = (liqR.value as any[]).map((o: any) => ({
-        side: o.side,
-        qty: parseFloat(o.origQty || o.q || 0),
-        price: parseFloat(o.price || o.p || 0),
-        time: o.time || o.T || 0,
-      }));
-    }
-
     return {
       candles,
       candles1h,
@@ -420,7 +376,6 @@ export function mountTerminalV4() {
       takerVals,
       bids,
       asks,
-      forceOrders,
       pricePct,
     };
   }
@@ -598,18 +553,6 @@ function L4_ob(bids, asks) {
     return { score, ratio: +ratio.toFixed(2), label, bidVol: bV, askVol: aV, bids, asks };
 }
 
-function L5_liq(fr, currentPrice, oiPct) {
-    let score = 0, label = 'NEUTRAL', risk = '낮음';
-    if (fr > 0.08 && oiPct > 4) { score = -12; label = '롱 과밀 — 하방 강제청산 위험'; risk = '높음'; }
-    else if (fr > 0.05 && oiPct > 2) { score = -8; label = '롱 포지션 축적 — 하락시 청산 가속'; risk = '중간'; }
-    else if (fr < -0.08 && oiPct > 4) { score = 12; label = '숏 과밀 — 상방 스퀴즈 대기'; risk = '높음(상방)'; }
-    else if (fr < -0.05 && oiPct > 2) { score = 8; label = '숏 포지션 축적 — 상승시 스퀴즈'; risk = '중간(상방)'; }
-    else if (fr > 0.03) { score = -4; label = '롱 우세 — 청산존 하방'; }
-    else if (fr < -0.03) { score = 4; label = '숏 우세 — 스퀴즈 가능성'; }
-    const liqLong = currentPrice ? currentPrice * 0.90 : null;
-    const liqShort = currentPrice ? currentPrice * 1.10 : null;
-    return { score, label, risk, liqLong, liqShort };
-}
 
 function L6_onchain(btcOnchain, mempool, mempoolFees) {
     if (!btcOnchain && !mempool) return { score: 0, label: '데이터 없음', nTx: 0 };
@@ -670,31 +613,6 @@ function L8_kimchi(symbol, currentPrice, upbitMap, bithumbMap, usdKrw) {
     return { score, premium: +prem.toFixed(2), label, upbitP: upP ? +((upP / binanceKrw - 1) * 100).toFixed(2) : null, bithumbP: biP ? +((biP / binanceKrw - 1) * 100).toFixed(2) : null, upbitKrw: upP || null, bithumbKrw: biP || null, binanceKrw: +binanceKrw.toFixed(0), };
 }
 
-function L9_realLiq(forceOrders, currentPrice) {
-    if (!forceOrders || !forceOrders.length) return { score: 0, label: '청산 데이터 없음', longLiq: 0, shortLiq: 0, net: 0, sigs: [] };
-    const now = Date.now();
-    const recent = forceOrders.filter(o => now - o.time < 3600000);
-    let shortLiqUSD = 0, longLiqUSD = 0;
-    recent.forEach(o => {
-        const usd = o.qty * (o.price || currentPrice || 1);
-        if (o.side === 'BUY') shortLiqUSD += usd;
-        if (o.side === 'SELL') longLiqUSD += usd;
-    });
-    const total = shortLiqUSD + longLiqUSD;
-    const net = shortLiqUSD - longLiqUSD;
-    const sigs = []; let score = 0;
-    if (total > 0) {
-        const shortPct = (shortLiqUSD / total * 100).toFixed(0);
-        const longPct = (longLiqUSD / total * 100).toFixed(0);
-        if (shortLiqUSD > 500000 && shortLiqUSD > longLiqUSD * 2) { score = 10; sigs.push({ t: `숏 강제청산 $${fmtNum(shortLiqUSD)} — 상방 스퀴즈 진행 중 ⚡`, type: 'bull' }); }
-        else if (shortLiqUSD > 100000 && shortLiqUSD > longLiqUSD * 1.5) { score = 6; sigs.push({ t: `숏 청산 우세 $${fmtNum(shortLiqUSD)} (${shortPct}%)`, type: 'bull' }); }
-        else if (longLiqUSD > 500000 && longLiqUSD > shortLiqUSD * 2) { score = -10; sigs.push({ t: `롱 강제청산 $${fmtNum(longLiqUSD)} — 하방 청산 가속 ⚠`, type: 'bear' }); }
-        else if (longLiqUSD > 100000 && longLiqUSD > shortLiqUSD * 1.5) { score = -6; sigs.push({ t: `롱 청산 우세 $${fmtNum(longLiqUSD)} (${longPct}%)`, type: 'bear' }); }
-        else if (total > 200000) { sigs.push({ t: `청산 균형 (롱$${fmtNum(longLiqUSD)} / 숏$${fmtNum(shortLiqUSD)})`, type: 'neut' }); }
-    } else { sigs.push({ t: '최근 1H 강제청산 없음 — 레버리지 포지션 안정', type: 'neut' }); }
-    const label = score > 5 ? '숏 스퀴즈 진행' : score < -5 ? '롱 청산 가속' : total > 0 ? `1H 총 $${fmtNum(total)}` : '청산 없음';
-    return { score: Math.max(-12, Math.min(12, score)), label, shortLiqUSD, longLiqUSD, net, total, sigs };
-}
 
 function L10_mtf(c4h, c1h, c1d) {
     const results = [];
@@ -975,31 +893,7 @@ function computeAlphaV4(L) {
     (L.fl.sigs || []).forEach(s => allSigs.push(s));
     if (L.vs.label !== 'NORMAL' && L.vs.label !== 'NO DATA') allSigs.push({ t: `[V-Surge] ${L.vs.label} ${L.vs.surgeFactor}×`, type: L.vs.score > 0 ? 'bull' : L.vs.score < 0 ? 'bear' : 'neut' });
     if (L.ob.label !== 'NO DATA') allSigs.push({ t: `[OB] ${L.ob.label} ${L.ob.ratio}`, type: L.ob.score > 0 ? 'bull' : L.ob.score < 0 ? 'bear' : 'neut' });
-    if (L.lq.score !== 0) allSigs.push({ t: `[청산존] ${L.lq.label}`, type: L.lq.score > 0 ? 'bull' : L.lq.score < 0 ? 'bear' : 'warn' });
-    allSigs.push({ t: `[F&G] ${L.fg.label}`, type: L.fg.score > 0 ? 'bull' : L.fg.score < 0 ? 'bear' : 'neut' });
-    if (L.km.premium !== null) allSigs.push({ t: `[김치] ${L.km.label}`, type: L.km.score > 0 ? 'bull' : L.km.score < 0 ? 'bear' : 'neut' });
-    (L.rl?.sigs || []).forEach(s => allSigs.push({ ...s, t: '[실제청산] ' + s.t }));
-    (L.mtf?.sigs || []).forEach(s => allSigs.push({ ...s, t: '[MTF] ' + s.t }));
-    (L.cvd?.sigs || []).forEach(s => allSigs.push({ ...s, t: '[CVD] ' + s.t }));
-    (L.sec?.sigs || []).forEach(s => allSigs.push({ ...s, t: '[섹터] ' + s.t }));
-    (L.brk?.sigs || []).forEach(s => allSigs.push({ ...s, t: '[돌파] ' + s.t }));
-    (L.bb?.sigs || []).forEach(s => allSigs.push({ ...s, t: '[BB] ' + s.t }));
-    (L.atr?.sigs || []).forEach(s => allSigs.push({ ...s, t: '[ATR] ' + s.t }));
-    (L.vwap?.sigs || []).forEach(s => allSigs.push({ ...s, t: '[VWAP] ' + s.t }));
-    (L.rs?.sigs || []).forEach(s => allSigs.push({ ...s, t: '[RS] ' + s.t }));
-    (L.mom?.sigs || []).forEach(s => allSigs.push(s));
-    (L.oiA?.sigs || []).forEach(s => allSigs.push(s));
-
-    // ── [점수 그룹화] ──
-    const scoreA = L.wk.score + (L.mtf?.score || 0) + (L.brk?.score || 0) + (L.sec?.score || 0) + (L.rs?.score || 0);
-    const scoreB = L.fl.score + L.vs.score + L.ob.score + (L.cvd?.score || 0) + (L.vwap?.score || 0);
-    // L18+L19 실시간 모멘텀 그룹 (독립 그룹 — 구조 충돌에도 반영)
-    const scoreMom = (L.mom?.score || 0) + (L.oiA?.score || 0);
-
-    let wsScore = 0;
-    if (L.wsLiq?.shortLiq > 50000 && L.wsLiq?.shortLiq > L.wsLiq?.longLiq * 2) wsScore = 15;
-    else if (L.wsLiq?.longLiq > 50000 && L.wsLiq?.longLiq > L.wsLiq?.shortLiq * 2) wsScore = -15;
-    const scoreC = L.lq.score + L.fg.score + L.km.score + (L.rl?.score || 0) + (L.bb?.score || 0) + (L.atr?.score || 0) + wsScore;
+    const scoreC = L.fg.score + L.km.score + (L.bb?.score || 0) + (L.atr?.score || 0);
 
     // ── 1단계: 상쇄 및 충돌 감지 ──
     let finalA = scoreA;
@@ -1026,7 +920,7 @@ function computeAlphaV4(L) {
     // ── 3단계: 시너지 폭발 가중치 ──
     let synergyBonus = 0;
 
-    const isShortSqueeze = L.fl.fr < -0.05 && ((L.rl?.score || 0) > 5 || wsScore > 5) && (L.bb?.score || 0) >= 4;
+    const isShortSqueeze = L.fl.fr < -0.05 && (L.bb?.score || 0) >= 4;
     if (isShortSqueeze) {
         synergyBonus += 25; setupTag = 'SHORT_SQUEEZE';
         allSigs.push({ t: '[🔥 시너지] 숏 스퀴즈 폭발 임박 (가중치 +25)', type: 'bull' });
@@ -1081,7 +975,7 @@ function computeAlphaV4(L) {
     }
 
     note = `활성 신호 ${allSigs.length}개 · 상승 ${allSigs.filter(s => s.type === 'bull').length}개 / 하락 ${allSigs.filter(s => s.type === 'bear').length}개`;
-    return { alpha, verdict, vClass, allSigs, note, setupTag, wsScore, scoreMom };
+    return { alpha, verdict, vClass, allSigs, note, setupTag, scoreMom };
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1193,11 +1087,9 @@ function computeAlphaV4(L) {
               fl: L2_flow(d.fr, d.oiChangePct, d.lsRatio, d.takerRatio, pricePct),
               vs: L3_vsurge(d.candles, d.candles5m),
               ob: L4_ob(d.bids, d.asks),
-              lq: L5_liq(d.fr, d.currentPrice, d.oiChangePct),
               oc: L6_onchain(globalCtx.btcOnchain, globalCtx.mempool, globalCtx.mempoolFees),
               fg: L7_fg(globalCtx.fearGreed),
               km: L8_kimchi(symbol, d.currentPrice, globalCtx.upbitMap, globalCtx.bithumbMap, globalCtx.usdKrw),
-              rl: L9_realLiq(d.forceOrders, d.currentPrice),
               mtf: L10_mtf(d.candles, d.candles1h, d.candles1d),
               cvd: L11_cvd(d.candles5m || d.candles),
               sec: L12_sector(symbol),
@@ -1208,7 +1100,6 @@ function computeAlphaV4(L) {
               rs: L17_rs(d.candles1h, globalCtx.btcCandles),
               mom: L18_shortMomentum(d.candles5m),
               oiA: L19_oiAccel(d.oiShortChangePct || 0, d.fr, pricePct),
-              wsLiq: realtimeLiqData[symbol] || { shortLiq: 0, longLiq: 0 },
             };
 
             const res = computeAlphaV4(L);
@@ -1225,10 +1116,9 @@ function computeAlphaV4(L) {
               wyckoffScore: L.wk.score,
               vwapScore: L.vwap.score,
               rsScore: L.rs.score,
-              mtfScore: L.mtf.score,
-              cvdScore: L.cvd.score,
-              realLiqScore: L.rl.score + res.wsScore,
-              bbScore: L.bb.score,
+               mtfScore: L.mtf.score,
+               cvdScore: L.cvd.score,
+               bbScore: L.bb.score,
               atrScore: L.atr.score,
               brkScore: L.brk.score,
               flowScore: L.fl.score,

@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 
 import type { HunterRow, HunterRegime } from './hunterRuntime';
-import type { CompositeAlert } from './compositeSignal';
 
 export interface HunterAlert {
   sym: string;
@@ -49,8 +48,6 @@ export interface GlobalMetrics {
   btcTxLabel: string;
   mempoolFees: number;
   mempoolFeesLabel: string;
-  globalShortLiq: string;
-  globalLongLiq: string;
   wsStatus: 'LIVE' | 'OFF' | 'CONNECTING';
 }
 
@@ -64,7 +61,6 @@ export interface SummaryStats {
   wyckoff: number;
   mtf: number;
   squeeze: number;
-  liquidation: number;
 }
 
 interface TerminalState {
@@ -86,8 +82,9 @@ interface TerminalState {
   hunterRows: HunterRow[];
   hunterRegime: HunterRegime | null;
   hunterAlert: HunterAlert | null;
-  compositeAlert:    CompositeAlert | null;
 
+  hunterLeaderboard: HunterLeaderboardItem[];
+  hunterSummary: { snipers: number; s2plus: number; s1: number; bias: string; pre: number };
   // Actions
   setResults: (results: TerminalResult[]) => void;
   updateGlobalMetrics: (metrics: Partial<GlobalMetrics>) => void;
@@ -102,8 +99,9 @@ interface TerminalState {
   setHunterRows: (rows: HunterRow[]) => void;
   setHunterRegime: (regime: HunterRegime) => void;
   setHunterAlert: (alert: HunterAlert | null) => void;
-  setCompositeAlert: (alert: CompositeAlert | null) => void;
-
+  setHunterLeaderboard: (leaderboard: HunterLeaderboardItem[]) => void;
+  setHunterSummary: (summary: { snipers: number; s2plus: number; s1: number; bias: string; pre: number }) => void;
+  
   // Computed
   applyFilters: () => void;
 }
@@ -119,13 +117,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     btcTxLabel: '—',
     mempoolFees: 0,
     mempoolFeesLabel: '—',
-    globalShortLiq: '$0K',
-    globalLongLiq: '$0K',
     wsStatus: 'CONNECTING',
   },
   summaryStats: {
     strongBull: 0, bull: 0, neutral: 0, bear: 0, strongBear: 0,
-    total: 0, wyckoff: 0, mtf: 0, squeeze: 0, liquidation: 0,
+    total: 0, wyckoff: 0, mtf: 0, squeeze: 0,
   },
   isRunning: false,
   progress: 0,
@@ -138,7 +134,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   hunterRows: [],
   hunterRegime: null,
   hunterAlert: null,
-  compositeAlert: null,
+  hunterLeaderboard: [],
+  hunterSummary: { snipers: 0, s2plus: 0, s1: 0, bias: '—', pre: 0 },
 
   setResults: (results) => {
     set({ results });
@@ -179,7 +176,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   setHunterRows: (hunterRows) => set({ hunterRows }),
   setHunterRegime: (hunterRegime) => set({ hunterRegime }),
   setHunterAlert: (hunterAlert) => set({ hunterAlert }),
-  setCompositeAlert: (compositeAlert) => set({ compositeAlert }),
+  setHunterLeaderboard: (hunterLeaderboard) => set({ hunterLeaderboard }),
+  setHunterSummary: (hunterSummary) => set({ hunterSummary }),
 
   applyFilters: () => {
     const { results, activeFilter, searchQuery, sort } = get();
