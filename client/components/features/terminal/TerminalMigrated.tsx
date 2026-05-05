@@ -93,6 +93,30 @@ export default function TerminalMigrated() {
     return () => clearTimeout(t);
   }, [hunterAlert?.ts]);
 
+  const compositeAlert    = useTerminalStore(s => s.compositeAlert);
+  const setCompositeAlert = useTerminalStore(s => s.setCompositeAlert);
+  const [visibleComposite, setVisibleComposite] = useState<typeof compositeAlert>(null);
+
+  useEffect(() => {
+    if (!compositeAlert) return;
+    setVisibleComposite(compositeAlert);
+    try {
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new Ctx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 1200;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.5);
+    } catch { /* audio 미지원 무시 */ }
+    const t = setTimeout(() => setVisibleComposite(null), 6000);
+    return () => clearTimeout(t);
+  }, [compositeAlert?.ts]);
+
   const [scanMode, setScanMode] = useState<"topn" | "custom">("topn");
 
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
@@ -197,6 +221,25 @@ export default function TerminalMigrated() {
             >
               🎯 Hunter Alert: {visibleAlert.sym}{" "}
               {visibleAlert.stage === 3 ? "▲▲S3 스나이퍼" : visibleAlert.dir >= 0 ? "▲S2 진입" : "▼S2 진입"}{" "}
+              <span className="text-slate-400 font-normal">— 클릭하여 이동</span>
+            </button>
+          </div>
+        )}
+
+        {visibleComposite && (
+          <div className="relative z-50 mx-6 mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedSymbol(visibleComposite.full);
+                setVisibleComposite(null);
+                setCompositeAlert(null);
+              }}
+              className="w-full rounded border border-violet-400/60 bg-violet-400/10 text-violet-200 px-4 py-2 text-left text-[11px] font-bold animate-pulse"
+            >
+              🔥 COMPOSITE: {visibleComposite.sym}{" "}
+              <span className="text-violet-400">{visibleComposite.crimeStage}</span>{" "}
+              S{visibleComposite.hunterStage} · fuel {visibleComposite.squeezeFuel}%{" "}
               <span className="text-slate-400 font-normal">— 클릭하여 이동</span>
             </button>
           </div>
