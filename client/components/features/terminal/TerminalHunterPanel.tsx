@@ -13,6 +13,7 @@ import {
   type HunterRow,
   type HunterRuntimeSnapshot,
   type HunterSortMode,
+  type HunterPreSignal,
 } from "./hunterRuntime";
 
 type HunterTab = "lb" | "rg";
@@ -71,16 +72,6 @@ export default function TerminalHunterPanel() {
   const onStart = () => {
     void runtimeRef.current?.api.startSystem();
 
-    // TODO: 테스트용 CRIME 신호 주입. 실제 detectSignals 연결 후에는 제거.
-    runtimeRef.current?.api.pushCrimeSignals?.([
-      {
-        symbol: "PEPEUSDT",
-        type: "PRE_IGNITION",
-        message: "PRE_IGNITION 진입 score 187 연료 91",
-        timestamp: Date.now(),
-        score: 187,
-      },
-    ]);
 
   };
   const onStop = () => { runtimeRef.current?.api.stopSystem(); };
@@ -243,7 +234,7 @@ export default function TerminalHunterPanel() {
             <div className="border-b border-white/[0.06] bg-[#080910] px-4 py-2">
               <div className="grid grid-cols-4 gap-1 rounded-lg border border-white/[0.06] bg-[#0d0e17] p-1">
                 {(["total", "cross", "sqz", "whale"] as HunterSortMode[]).map((m) => {
-                  const label = m === "total" ? "🔥 TOTAL" : m === "cross" ? "⚡ CROSS" : m === "sqz" ? "💥 SQZ" : "🐋 WHALE";
+                  const label = m === "total" ? "🔥 30M TOTAL" : m === "cross" ? "⚡ CROSS" : m === "sqz" ? "💥 SQZ" : "🐋 WHALE";
                   const Icon = m === "total" ? Flame : m === "cross" ? Zap : m === "sqz" ? Activity : Cpu;
                   return (
                     <button key={m} type="button" onClick={() => onSetSort(m)}
@@ -265,7 +256,7 @@ export default function TerminalHunterPanel() {
                   <Crosshair size={12} className="text-violet-300" />
                 </div>
                 <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-200">
-                  SNIPER TARGETS <span className="mx-2 text-slate-700">|</span> <span className="text-violet-300/55">ACTIVE PROTOCOLS</span>
+                  SNIPER TARGETS <span className="mx-2 text-slate-700">|</span> <span className="text-violet-300/55">ACTIVE PROTOCOLS</span> <span className="ml-2 text-slate-600">· LB 30M ROLLING</span>
                 </span>
               </div>
               <div className="flex items-center gap-4 text-[9px] font-bold uppercase tracking-widest text-violet-200/35">
@@ -373,6 +364,7 @@ function SniperRow({ row, crimeSignals, onSelect, focusMode }: {
   const primaryCrime = crimeSignals[0];
   const crimeType = primaryCrime?.type.replace("crime:", "");
   const isCrimeDanger = primaryCrime && (primaryCrime.type.includes("EXIT_ALERT") || primaryCrime.type.includes("TRAP_ALERT"));
+  const isTripleCrown = row.aGradeActive && row.aGradeCount > 0;
 
   return (
     <div className="px-4 py-0.5">
@@ -381,7 +373,11 @@ function SniperRow({ row, crimeSignals, onSelect, focusMode }: {
         onClick={onSelect}
         className={cn(
           "group relative grid w-full grid-cols-[minmax(210px,0.85fr)_150px_minmax(180px,1fr)_72px] items-center gap-3 overflow-hidden rounded-lg border border-white/[0.06] bg-[#090a12] px-3 py-2 text-left transition-all hover:border-violet-300/22 hover:bg-[#0d0e18]",
-          row.aGradeActive ? (isBull ? "ring-1 ring-violet-300/20" : "ring-1 ring-pink-300/20") : ""
+          isTripleCrown
+            ? isBull
+              ? "animate-pulse border-violet-300/45 bg-violet-500/[0.055] shadow-[inset_0_0_18px_rgba(139,92,246,0.18),0_0_14px_rgba(139,92,246,0.18)]"
+              : "animate-pulse border-pink-300/45 bg-pink-500/[0.055] shadow-[inset_0_0_18px_rgba(244,114,182,0.18),0_0_14px_rgba(244,114,182,0.18)]"
+            : row.aGradeActive ? (isBull ? "ring-1 ring-violet-300/20" : "ring-1 ring-pink-300/20") : ""
         )}
       >
         <div className="pointer-events-none absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-violet-300/20 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
@@ -405,6 +401,16 @@ function SniperRow({ row, crimeSignals, onSelect, focusMode }: {
                 USDT
               </span>
               {row.pinned && <Target size={11} className="shrink-0 text-violet-300" />}
+              {row.aGradeCount > 0 && (
+                <span className={cn(
+                  "rounded-sm border px-1.5 py-[1px] text-[8px] font-black uppercase tracking-wider",
+                  isBull
+                    ? "border-violet-300/25 bg-violet-500/10 text-violet-200"
+                    : "border-pink-300/25 bg-pink-500/10 text-pink-300"
+                )}>
+                  A×{row.aGradeCount}
+                </span>
+              )}
             </div>
             <div className="mt-1 flex items-center gap-1.5">
               <span className="font-mono text-[9px] font-bold text-slate-500">${priceText}</span>

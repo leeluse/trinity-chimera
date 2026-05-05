@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import type { HunterRow, HunterRegime } from './hunterRuntime';
+import type { HunterRow, HunterRegime, HunterLeaderboardItem } from './hunterRuntime';
 
 export interface HunterAlert {
   sym: string;

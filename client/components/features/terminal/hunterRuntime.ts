@@ -196,6 +196,16 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
   let lastRegimeUpdate = 0;
   const regimeState = { btcAltDelta: 0, avgFunding: 0, ready: false };
 
+  function resetLeaderboardHistory() {
+    sigHist = [];
+    actAlerts.clear();
+    currentTopCoins = new Set<string>();
+    currentLeaderboard = {};
+    lastSortTime = 0;
+    displayedOrder = [];
+    ui.leaderboard = [];
+  }
+
   const ui: HunterRuntimeSnapshot = {
     running: false,
     muted: false,
@@ -320,6 +330,8 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     oxWs = null;
     byWs = null;
     bgWs = null;
+
+    resetLeaderboardHistory();
 
     ui.ws.bn = false;
     ui.ws.okx = false;
@@ -1577,6 +1589,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     if (running) return;
 
     running = true;
+    resetLeaderboardHistory();
     ui.statusText = '로딩중...';
     emit();
 
