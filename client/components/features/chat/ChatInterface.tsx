@@ -8,6 +8,7 @@ import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown, Copy, Check, SlidersHorizontal } from "lucide-react";
 import { fetchWithBypass } from "@/lib/api";
 import OptimizationMiniPanel from "@/components/features/backtest/OptimizationMiniPanel";
+import RegimeChatPanel from "@/components/features/chat/RegimeChatPanel";
 
 interface ChatMessage {
   id: string;
@@ -319,9 +320,11 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [panelMode, setPanelMode] = useState<"pipeline" | "chat" | "optimize">("pipeline");
+  const [panelMode, setPanelMode] = useState<"pipeline" | "chat" | "optimize" | "regime">("pipeline");
   const [chatModel, setChatModel] = useState("deepseek-v4-flash");
   const [showModelSelect, setShowModelSelect] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [autoStatus, setAutoStatus] = useState<Record<string, any> | null>(null);
   const [statusText, setStatusText] = useState("AI 분석 중...");
   const [currentStage, setCurrentStage] = useState(0);
   const [totalStages, setTotalStages] = useState(0);
@@ -419,6 +422,119 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   };
 
   const [sessions, setSessions] = useState<any[]>([]);
+
+  const formatHms = (ts: number) => {
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  };
+
+  const chatLogLines = useMemo(() => {
+    return messages
+      .slice(-120)
+      .map((msg) => {
+        const rawTs = Number(String(msg.id || "").split("-")[0]);
+        const ts = Number.isFinite(rawTs) ? rawTs : 0;
+        const role = msg.role === "user" ? "USER" : "AI";
+        let text = String(msg.content || "").replace(/\s+/g, " ").trim();
+        if (!text && msg.type === "invocation") text = `[invoke] ${String(msg.data?.skill || "")}`;
+        if (!text && msg.type === "strategy") text = "[strategy] 생성 완료";
+        if (!text && msg.type === "backtest") text = "[backtest] 완료";
+        if (!text) text = `[${msg.type || "message"}]`;
+        if (text.length > 240) text = `${text.slice(0, 240)}…`;
+        return `[${formatHms(ts)}] ${role} ${text}`;
+      })
+      .filter(Boolean);
+  }, [messages]);
+
+  const fetchAutoStatus = useCallback(async () => {
+    try {
+      const res = await fetchWithBypass(`/api/chat/llm-loop/automation/status?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setAutoStatus(data?.status || null);
+    } catch (e) {
+      console.error("automation status fetch failed", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    const ms = autoStatus?.running ? 1500 : 3500;
+    const timer = window.setInterval(fetchAutoStatus, ms);
+    return () => window.clearInterval(timer);
+  }, [fetchAutoStatus, autoStatus?.running]);
+
+  const openRegimePanel = useCallback(() => {
+    setPanelMode("regime");
+    fetchAutoStatus();
+  }, [fetchAutoStatus]);
+
+  const handleStartAuto = useCallback(async () => {
+    if (autoBusy) return;
+    setAutoBusy(true);
+    try {
+      const payload = {
+        symbol: String(context?.symbol || "BTCUSDT"),
+        timeframe: String(context?.timeframe || "15m"),
+        regime_timeframe: "1h",
+        start_date: String(context?.start_date || "2021-01-01"),
+        end_date: String(context?.end_date || "2026-01-31"),
+        strategies: ["Bull Strategy 01", "Bull Strategy 02", "Bull Strategy 03", "Bull Strategy 04"],
+        iterations: 1,
+        interval_minutes: 5,
+        fallback_minutes: 30,
+        apply_best_db: true,
+        parallel_strategies: 2,
+        run_immediately: true,
+      };
+      const res = await fetchWithBypass("/api/chat/llm-loop/automation/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      console.error("start automation failed", e);
+    } finally {
+      setAutoBusy(false);
+      fetchAutoStatus();
+    }
+  }, [autoBusy, context, fetchAutoStatus]);
+
+  const handleStopAuto = useCallback(async () => {
+    if (autoBusy) return;
+    setAutoBusy(true);
+    try {
+      const res = await fetchWithBypass("/api/chat/llm-loop/automation/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ terminate_running: true }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      console.error("stop automation failed", e);
+    } finally {
+      setAutoBusy(false);
+      fetchAutoStatus();
+    }
+  }, [autoBusy, fetchAutoStatus]);
+
+  const autoStatusLabel = useMemo(() => {
+    const enabled = Boolean(autoStatus?.enabled);
+    const running = Boolean(autoStatus?.running);
+    return `AUTO: ${enabled ? "ON" : "OFF"}${running ? " · RUNNING" : ""}`;
+  }, [autoStatus]);
+
+  const autoMetaLabel = useMemo(() => {
+    const total = Number(autoStatus?.total_runs || 0);
+    const success = Number(autoStatus?.success_runs || 0);
+    const improved = Number(autoStatus?.improved_runs || 0);
+    return `성공 ${success}/${total} · 개선런 ${improved}/${total}`;
+  }, [autoStatus]);
   const loadSessions = async () => {
     try {
       const res = await fetchWithBypass("/api/chat/sessions?limit=20");
@@ -1218,6 +1334,25 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
               }}
             />
           </div>
+        ) : panelMode === "regime" ? (
+          <RegimeChatPanel
+            context={context}
+            busy={isLoading}
+            autoBusy={autoBusy}
+            autoRunning={Boolean(autoStatus?.running)}
+            autoStatusLabel={autoStatusLabel}
+            autoMetaLabel={autoMetaLabel}
+            streamStatusLabel={isLoading ? statusText : ""}
+            streamElapsedSeconds={stageElapsedSeconds}
+            chatLogLines={chatLogLines}
+            autoLastError={String(autoStatus?.last_error || "")}
+            autoLastSummaryPath={String(autoStatus?.last_summary_path || "")}
+            autoLastStdoutTail={String(autoStatus?.last_stdout_tail || "")}
+            autoCurrentStdoutTail={String(autoStatus?.current_stdout_tail || "")}
+            onRunPrompt={(prompt) => handleSend(prompt)}
+            onStartAuto={handleStartAuto}
+            onStopAuto={handleStopAuto}
+          />
         ) : (
           <Virtuoso
             ref={virtuosoRef}
@@ -1340,6 +1475,17 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 <SlidersHorizontal size={10} />
                 OPTIMIZE
               </button>
+              <button
+                onClick={openRegimePanel}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
+                  panelMode === "regime"
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-[0_0_10px_rgba(34,211,238,0.2)]'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <Zap size={10} />
+                REGIME
+              </button>
             </div>
 
             {/* 모델 셀렉터 (Chat 모드일 때만 표시) */}
@@ -1385,7 +1531,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           </div>
 
           {/* Integrated Input Bar */}
-          {panelMode !== "optimize" && (
+          {panelMode !== "optimize" && panelMode !== "regime" && (
             <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${
               isLoading 
                 ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]' 

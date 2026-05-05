@@ -1,5 +1,6 @@
 "use client"
 
+import { Suspense } from "react"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { RefreshCw, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -28,7 +29,7 @@ import { Candidate, Ticker, SectorData, Signal } from "./types"
 import { fmt, fetchJson, sleep, getSector } from "./utils"
 import { sigMomentum, sigVolume, sigBreakout, sigCompression, sigFunding, sigOI, sigCapitulation, sigEarly, sigFlow, sigVolSurge, computeContextMult, calcStage } from "./scannerLogic"
 
-export default function SoloScanner() {
+function ScannerContent() {
   const [mode, setMode] = useState<string>("momentum")
   const [minScore, setMinScore] = useState<number>(0)
   const [candidates, setCandidates] = useState<Candidate[]>([])
@@ -559,5 +560,13 @@ export default function SoloScanner() {
         </div>
       </PageLayout.Main>
     </PageLayout>
+  )
+}
+
+export default function ScannerPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-background text-white">로딩 중...</div>}>
+      <ScannerContent />
+    </Suspense>
   )
 }

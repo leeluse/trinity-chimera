@@ -15,6 +15,7 @@ import { useTerminalStore } from "./terminalStore";
 import { mountTerminalV4 } from "./terminalRuntimeV4";
 import { cn } from "@/lib/utils";
 import { PageLayout, PageHeader, AppRightPanel } from "@/components";
+import TerminalHunterPanel from "./TerminalHunterPanel";
 
 const FILTERS = [
   { id: "ALL", label: "ALL" },
@@ -88,12 +89,52 @@ export default function TerminalMigrated() {
 
   useEffect(() => {
     if (!hunterAlert) return;
-    setVisibleAlert(hunterAlert);
-    const t = setTimeout(() => setVisibleAlert(null), 5000);
-    return () => clearTimeout(t);
-  }, [hunterAlert?.ts]);
+    const showTimer = window.setTimeout(() => setVisibleAlert(hunterAlert), 0);
+    const hideTimer = window.setTimeout(() => setVisibleAlert(null), 5000);
+    return () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [hunterAlert]);
+
+  const compositeAlert    = useTerminalStore(s => s.compositeAlert);
+  const setCompositeAlert = useTerminalStore(s => s.setCompositeAlert);
+  const [visibleComposite, setVisibleComposite] = useState<typeof compositeAlert>(null);
+
+  useEffect(() => {
+    if (!compositeAlert) return;
+    const showTimer = window.setTimeout(() => {
+      setVisibleComposite(compositeAlert);
+      try {
+        const Ctx =
+          window.AudioContext ??
+          (window as Window & { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = new Ctx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 1200;
+        osc.type = "sine";
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.5);
+      } catch {
+        /* audio 미지원 무시 */
+      }
+    }, 0);
+    const hideTimer = window.setTimeout(() => setVisibleComposite(null), 6000);
+    return () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [compositeAlert]);
 
   const [scanMode, setScanMode] = useState<"topn" | "custom">("topn");
+  const [mainView, setMainView] = useState<"fusion" | "alpha">("alpha");
 
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
 
@@ -131,6 +172,11 @@ export default function TerminalMigrated() {
     callApi("setMode", mode);
   };
 
+  const runLegacyAlphaScan = () => {
+    setMainView("alpha");
+    callApi("doScan");
+  };
+
   return (
     <div className="h-screen w-full overflow-hidden bg-[#030508] text-slate-200">
       <PageLayout fullHeight={true}>
@@ -140,11 +186,37 @@ export default function TerminalMigrated() {
 
         <PageLayout.Main>
           <PageHeader
-            statusText="Terminal Engine Active"
-            statusColor="blue"
+            statusText={mainView === "fusion" ? "Trinity Fusion Engine Active" : "Alpha Scan Engine Active"}
+            statusColor={mainView === "fusion" ? "violet" : "blue"}
             extra={
               <div className="mr-4 flex items-center gap-6 text-[10px] uppercase tracking-widest">
-                <div className="text-right">
+                <div className="flex items-center gap-2 rounded-lg bg-black/40 p-1 border border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => setMainView("fusion")}
+                    className={cn(
+                      "px-3 py-1.5 rounded transition-all font-bold text-[10px]",
+                      mainView === "fusion"
+                        ? "bg-violet-500/20 text-violet-300 border border-violet-500/50 shadow-[0_0_10px_rgba(139,92,246,0.2)]"
+                        : "text-slate-500 hover:text-slate-300 border border-transparent"
+                    )}
+                  >
+                    TRINITY FUSION (Live)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMainView("alpha")}
+                    className={cn(
+                      "px-3 py-1.5 rounded transition-all font-bold text-[10px]",
+                      mainView === "alpha"
+                        ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-[0_0_10px_rgba(34,211,238,0.2)]"
+                        : "text-slate-500 hover:text-slate-300 border border-transparent"
+                    )}
+                  >
+                    ALPHA SCAN (Snapshot)
+                  </button>
+                </div>
+                <div className="text-right ml-4">
                   <div className="text-slate-600">WS</div>
                   <div
                     className={cn(
@@ -157,12 +229,14 @@ export default function TerminalMigrated() {
                     {globalMetrics.wsStatus}
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-slate-600">Matches</div>
-                  <div className="font-mono font-bold text-cyan-400">
-                    {filteredResults.length}
+                {mainView === "alpha" && (
+                  <div className="text-right">
+                    <div className="text-slate-600">Matches</div>
+                    <div className="font-mono font-bold text-cyan-400">
+                      {filteredResults.length}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             }
           />
@@ -179,30 +253,56 @@ export default function TerminalMigrated() {
 
             <div className="relative z-10 flex h-full flex-col overflow-hidden">
 
-        {visibleAlert && (
-          <div className="relative z-50 mx-6 mt-2">
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedSymbol(visibleAlert.full);
-                setVisibleAlert(null);
-                setHunterAlert(null);
-              }}
-              className={cn(
-                "w-full rounded border px-4 py-2 text-left text-[11px] font-bold animate-pulse",
-                visibleAlert.stage === 3
-                  ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-200"
-                  : "border-rose-400/60 bg-rose-400/10 text-rose-200",
-              )}
-            >
-              🎯 Hunter Alert: {visibleAlert.sym}{" "}
-              {visibleAlert.stage === 3 ? "▲▲S3 스나이퍼" : visibleAlert.dir >= 0 ? "▲S2 진입" : "▼S2 진입"}{" "}
-              <span className="text-slate-400 font-normal">— 클릭하여 이동</span>
-            </button>
+        {mainView === "fusion" ? (
+          <div className="flex-1 w-full h-full overflow-hidden bg-[#030508]/60 backdrop-blur-xl">
+            {/* 퓨전 엔진 메인 렌더링 */}
+            <TerminalHunterPanel />
           </div>
-        )}
+        ) : (
+          <>
+            {visibleAlert && (
+              <div className="relative z-50 mx-6 mt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSymbol(visibleAlert.full);
+                    setVisibleAlert(null);
+                    setHunterAlert(null);
+                  }}
+                  className={cn(
+                    "w-full rounded border px-4 py-2 text-left text-[11px] font-bold animate-pulse",
+                    visibleAlert.stage === 3
+                      ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-200"
+                      : "border-rose-400/60 bg-rose-400/10 text-rose-200",
+                  )}
+                >
+                  🎯 Hunter Alert: {visibleAlert.sym}{" "}
+                  {visibleAlert.stage === 3 ? "▲▲S3 스나이퍼" : visibleAlert.dir >= 0 ? "▲S2 진입" : "▼S2 진입"}{" "}
+                  <span className="text-slate-400 font-normal">— 클릭하여 이동</span>
+                </button>
+              </div>
+            )}
 
-        <section className="grid grid-cols-2 gap-3 border-b border-white/10 bg-[#050911]/70 px-6 py-3 md:grid-cols-4 lg:grid-cols-8">
+            {visibleComposite && (
+              <div className="relative z-50 mx-6 mt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSymbol(visibleComposite.full);
+                    setVisibleComposite(null);
+                    setCompositeAlert(null);
+                  }}
+                  className="w-full rounded border border-violet-400/60 bg-violet-400/10 text-violet-200 px-4 py-2 text-left text-[11px] font-bold animate-pulse"
+                >
+                  🔥 COMPOSITE: {visibleComposite.sym}{" "}
+                  <span className="text-violet-400">{visibleComposite.crimeStage}</span>{" "}
+                  S{visibleComposite.hunterStage} · fuel {visibleComposite.squeezeFuel}%{" "}
+                  <span className="text-slate-400 font-normal">— 클릭하여 이동</span>
+                </button>
+              </div>
+            )}
+
+            <section className="relative z-10 grid grid-cols-2 gap-4 border-b border-white/[0.05] bg-black/40 backdrop-blur-xl px-6 py-4 md:grid-cols-4 lg:grid-cols-8 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
           <MetricCard
             label="Short Liq"
             value={globalMetrics.globalShortLiq}
@@ -249,7 +349,7 @@ export default function TerminalMigrated() {
           />
         </section>
 
-        <section className="border-b border-white/10 bg-[#04070d] px-6 py-3">
+        <section className="relative z-10 border-b border-white/[0.05] bg-black/60 backdrop-blur-md px-6 py-4">
           <div className="flex flex-wrap items-end gap-4">
             <div>
               <div className="mb-1 text-[9px] uppercase tracking-widest text-slate-600">
@@ -318,21 +418,27 @@ export default function TerminalMigrated() {
 
             <button
               type="button"
-              onClick={() => callApi("doScan")}
+              onClick={runLegacyAlphaScan}
               disabled={isRunning}
-              className="ml-auto inline-flex h-9 items-center gap-2 rounded border border-cyan-400/50 bg-cyan-400/10 px-5 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-300 transition hover:bg-cyan-400/20 disabled:opacity-50"
+              className="group relative ml-auto inline-flex h-10 items-center gap-2 overflow-hidden rounded-lg border border-cyan-500/50 bg-cyan-500/10 px-6 text-[12px] font-black uppercase tracking-[0.2em] text-cyan-300 transition-all hover:border-cyan-400 hover:bg-cyan-500/20 hover:shadow-[0_0_20px_rgba(34,211,238,0.3)] disabled:opacity-50"
             >
-              <Zap size={13} className={isRunning ? "animate-pulse" : ""} />
-              ALPHA SCAN
+              <div className="absolute inset-0 flex h-full w-full justify-center [transform:skew(-12deg)_translateX(-100%)] group-hover:duration-1000 group-hover:[transform:skew(-12deg)_translateX(100%)]">
+                <div className="relative h-full w-8 bg-white/20" />
+              </div>
+              <Zap size={14} className={isRunning ? "animate-pulse" : ""} />
+              <span className="relative z-10">ALPHA SCAN v4.0</span>
             </button>
 
             {isRunning && (
               <button
                 type="button"
                 onClick={() => callApi("doStop")}
-                className="inline-flex h-9 items-center rounded border border-rose-500/50 bg-rose-500/10 px-4 text-[11px] font-black uppercase tracking-wider text-rose-300"
+                className="group relative inline-flex h-10 items-center overflow-hidden rounded-lg border border-rose-500/50 bg-rose-500/10 px-5 text-[12px] font-black uppercase tracking-wider text-rose-300 transition-all hover:border-rose-400 hover:bg-rose-500/20 hover:shadow-[0_0_20px_rgba(244,63,94,0.3)]"
               >
-                STOP
+                <div className="absolute inset-0 flex h-full w-full justify-center [transform:skew(-12deg)_translateX(-100%)] group-hover:duration-1000 group-hover:[transform:skew(-12deg)_translateX(100%)]">
+                  <div className="relative h-full w-8 bg-white/20" />
+                </div>
+                <span className="relative z-10">STOP</span>
               </button>
             )}
           </div>
@@ -351,7 +457,7 @@ export default function TerminalMigrated() {
           </div>
         </section>
 
-        <section className="border-b border-white/10 bg-[#04070d]/80 px-6 py-3">
+        <section className="relative z-10 border-b border-white/[0.05] bg-black/40 backdrop-blur-md px-6 py-3">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative mr-3 w-full max-w-xs">
               <Search
@@ -389,24 +495,30 @@ export default function TerminalMigrated() {
 
         <main className="relative flex-1 overflow-auto px-6 py-4">
           {results.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 text-slate-600">
-              <Activity size={26} />
-              <p className="text-[12px] uppercase tracking-[0.3em]">Engine Standby</p>
+            <div className="flex h-full flex-col items-center justify-center gap-4 text-slate-600">
+              <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-white/5 bg-black/40 shadow-[0_0_50px_rgba(34,211,238,0.05)]">
+                <div className="absolute inset-0 animate-ping rounded-full border border-cyan-500/20" />
+                <Activity size={32} className="text-cyan-500/50" />
+              </div>
+              <div className="text-center">
+                <p className="text-[14px] font-black uppercase tracking-[0.4em] text-cyan-500/50 drop-shadow-md">Engine Standby</p>
+                <p className="mt-2 text-[10px] uppercase tracking-widest text-slate-500">Initiate scan to begin processing</p>
+              </div>
             </div>
           ) : (
             <table className="min-w-[1900px] w-full border-separate border-spacing-y-1">
-              <thead className="sticky top-0 z-20 bg-[#030508]/95 backdrop-blur">
-                <tr>
+              <thead className="sticky top-0 z-20">
+                <tr className="bg-black/80 backdrop-blur-xl shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
                   {COLUMNS.map((h) => (
                     <th
                       key={h.key}
                       onClick={() => setSort(h.key)}
                       className={cn(
-                        "cursor-pointer px-3 py-2 text-left text-[10px] uppercase tracking-[0.18em]",
-                        sort.col === h.key ? "text-cyan-400" : "text-slate-500",
+                        "cursor-pointer px-3 py-3 text-left text-[10px] uppercase tracking-[0.18em] border-b border-white/10 hover:bg-white/5 transition-colors",
+                        sort.col === h.key ? "text-cyan-400" : "text-slate-400",
                       )}
                     >
-                      <span className="inline-flex items-center gap-1">
+                      <span className="inline-flex items-center gap-1.5">
                         {h.label}
                         {sort.col === h.key && (
                           <ArrowDownNarrowWide
@@ -454,11 +566,16 @@ export default function TerminalMigrated() {
                       data-symbol={r.symbol}
                       onClick={() => setSelectedSymbol(r.symbol)}
                       className={cn(
-                        "cursor-pointer bg-white/[0.02] hover:bg-white/[0.05]",
-                        selectedSymbol === r.symbol && "bg-cyan-500/10",
+                        "group cursor-pointer transition-all duration-200 border-b border-white/[0.02]",
+                        selectedSymbol === r.symbol 
+                          ? "bg-cyan-500/[0.08] shadow-[inset_0_1px_0_rgba(34,211,238,0.2),inset_0_-1px_0_rgba(34,211,238,0.2)]" 
+                          : "bg-black/20 hover:bg-white/[0.04] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),inset_0_-1px_0_rgba(255,255,255,0.05)]",
                       )}
                     >
-                      <td className="rounded-l-md px-3 py-2 font-mono text-[12px] font-black text-white">
+                      <td className="relative px-3 py-2.5 font-mono text-[12px] font-black text-white">
+                        {selectedSymbol === r.symbol && (
+                          <div className="absolute left-0 top-0 h-full w-[2px] bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
+                        )}
                         <span>{r.symbol.replace("USDT", "")}</span>
                         {(() => {
                           const h = hunterMap.get(r.symbol);
@@ -545,6 +662,8 @@ export default function TerminalMigrated() {
             </table>
           )}
         </main>
+      </>
+    )}
       </div>
             </div>
           </PageLayout.Main>
@@ -639,22 +758,45 @@ function MetricCard({
   tone: string;
 }) {
   return (
-    <div className="rounded border border-white/10 bg-black/30 px-3 py-2">
-      <div className="text-[9px] uppercase tracking-widest text-slate-600">{label}</div>
-      <div className={cn("mt-1 font-mono text-[14px] font-black", tone)}>{value}</div>
-      {sub ? <div className="mt-0.5 text-[9px] text-slate-600">{sub}</div> : null}
+    <div className="group relative overflow-hidden rounded-xl border border-white/5 bg-gradient-to-b from-white/[0.04] to-black/40 p-3.5 transition-all duration-300 hover:border-white/10 hover:bg-white/[0.06] hover:shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+      <div className="absolute left-0 top-0 h-[1px] w-full bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+      <div className="absolute -left-10 top-0 h-full w-[2px] bg-gradient-to-b from-transparent via-cyan-500/50 to-transparent opacity-0 blur-sm transition-all duration-500 group-hover:left-0 group-hover:opacity-100" />
+      
+      <div className="flex flex-col justify-between h-full">
+        <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{label}</div>
+        <div className="mt-2 flex items-end justify-between">
+          <div className={cn("font-mono text-[18px] font-black tracking-tight", tone)} style={{ textShadow: "0 0 20px currentColor" }}>
+            {value}
+          </div>
+          {sub && (
+            <div className="mb-0.5 text-[10px] font-medium text-slate-500">
+              {sub}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 function LayerScore({ score, label }: { score: number; label: string }) {
+  const isPos = score > 0;
+  const isNeg = score < 0;
+  
   return (
-    <td className="px-3 py-2 font-mono text-[11px] text-slate-300">
-      <span className="mr-2 text-slate-500">{label}</span>
-      <span className={cn(score > 0 ? "text-emerald-400" : score < 0 ? "text-rose-400" : "text-slate-500")}>
-        {score > 0 ? "+" : ""}
-        {score}
-      </span>
+    <td className="px-3 py-2 font-mono text-[11px] transition-colors">
+      <div className="flex items-center justify-between">
+        <span className="text-slate-500/80 text-[10px] uppercase tracking-wider">{label}</span>
+        <span className={cn(
+          "font-bold rounded-sm px-1.5 py-0.5",
+          isPos ? "bg-emerald-500/10 text-emerald-400" : 
+          isNeg ? "bg-rose-500/10 text-rose-400" : 
+          "text-slate-500"
+        )}>
+          {isPos ? "+" : ""}
+          {score}
+        </span>
+      </div>
     </td>
   );
 }
@@ -671,12 +813,19 @@ function DetailCard({
   icon: React.ReactNode;
 }) {
   return (
-    <div className="rounded border border-white/10 bg-black/30 p-3">
-      <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-widest text-slate-500">
-        {icon}
-        {label}
+    <div className="group relative overflow-hidden rounded-xl border border-white/5 bg-gradient-to-br from-white/[0.04] to-black/60 p-4 transition-all hover:border-white/10 hover:bg-white/[0.06] hover:shadow-[0_4px_24px_rgba(0,0,0,0.4)]">
+      <div className="absolute -inset-1 rounded-xl bg-gradient-to-br from-white/5 to-transparent opacity-0 blur-xl transition-opacity duration-500 group-hover:opacity-100" />
+      <div className="relative z-10">
+        <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+          <span className={cn("flex h-6 w-6 items-center justify-center rounded-full bg-white/5", tone)}>
+            {icon}
+          </span>
+          {label}
+        </div>
+        <div className={cn("mt-1 font-mono text-[18px] font-black tracking-tight drop-shadow-md", tone)}>
+          {value}
+        </div>
       </div>
-      <div className={cn("font-mono text-[14px] font-black", tone)}>{value}</div>
     </div>
   );
 }

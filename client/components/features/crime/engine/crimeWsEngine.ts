@@ -7,6 +7,7 @@ import {
   getBinanceOrderbook, getBinanceTakerFlow, getBinanceKlines,
 } from "./binanceApi";
 import { scoreCoin, calculateAtr } from "./scoring";
+import { subscribeTickerBus, subscribeMarkPriceBus } from "../../terminal/sharedBinanceBus";
 
 // ─── 타입 ─────────────────────────────────────────────────
 interface LiveData {
@@ -134,13 +135,12 @@ async function analyzeFull(symbol: string, live: LiveData): Promise<CoinData | n
 
 // ─── WS 엔진 클래스 ────────────────────────────────────────
 export class CrimeWsEngine {
-  private liveData    = new Map<string, LiveData>();
-  private tickerWs:   WebSocket | null = null;
-  private markWs:     WebSocket | null = null;
-  private scanTimer:  ReturnType<typeof setTimeout> | null = null;
-  private reconnTimer: ReturnType<typeof setTimeout> | null = null;
-  private stopped     = false;
-  private wsReady     = false;
+  private liveData         = new Map<string, LiveData>();
+  private unsubTicker:     (() => void) | null = null;
+  private unsubMarkPrice:  (() => void) | null = null;
+  private scanTimer:       ReturnType<typeof setTimeout> | null = null;
+  private stopped          = false;
+  private wsReady          = false;
 
   constructor(private cb: WsEngineCallbacks) {}
 
@@ -149,7 +149,7 @@ export class CrimeWsEngine {
     this.stopped  = false;
     this.wsReady  = false;
     this.cb.onStatus("connecting");
-    this.connectWs();
+    this.connectBus();
     // WS 데이터가 채워질 시간을 준 후 첫 스캔
     this.scanTimer = setTimeout(() => this.runScan(), FIRST_SCAN_MS);
   }
@@ -157,80 +157,47 @@ export class CrimeWsEngine {
   // ── 정지 ──────────────────────────────────────────────
   stop() {
     this.stopped = true;
-    this.tickerWs?.close();
-    this.markWs?.close();
-    this.tickerWs  = null;
-    this.markWs    = null;
-    if (this.scanTimer)  clearTimeout(this.scanTimer);
-    if (this.reconnTimer) clearTimeout(this.reconnTimer);
+    this.unsubTicker?.();
+    this.unsubMarkPrice?.();
+    this.unsubTicker    = null;
+    this.unsubMarkPrice = null;
+    if (this.scanTimer) clearTimeout(this.scanTimer);
     this.cb.onStatus("idle");
   }
 
   get symbolCount() { return this.liveData.size; }
 
-  // ── WebSocket 연결 ─────────────────────────────────────
-  private connectWs() {
-    // 1. miniTicker: 가격 / 거래량 / 24h 변화율
-    const tw = new WebSocket("wss://fstream.binance.com/ws/!miniTicker@arr");
-    tw.onmessage = (ev) => {
-      try {
-        const list = JSON.parse(ev.data as string) as Array<{
-          s: string; c: string; o: string; q: string;
-        }>;
-        for (const item of list) {
-          if (!item.s.endsWith("USDT")) continue;
-          const existing = this.liveData.get(item.s) ?? newEmpty();
-          const close = parseFloat(item.c);
-          const open  = parseFloat(item.o);
-          this.liveData.set(item.s, {
-            ...existing,
-            price:  close,
-            vol24h: parseFloat(item.q),
-            pc24h:  open > 0 ? (close - open) / open * 100 : 0,
-          });
-        }
-        if (!this.wsReady && this.liveData.size > 50) {
-          this.wsReady = true;
-          this.cb.onStatus("live");
-        }
-      } catch { /* 파싱 실패 무시 */ }
-    };
-    tw.onerror = () => this.scheduleReconnect();
-    tw.onclose = () => { if (!this.stopped) this.scheduleReconnect(); };
-    this.tickerWs = tw;
-
-    // 2. markPrice: 펀딩비 / 마크가격 / 인덱스가격
-    const mw = new WebSocket("wss://fstream.binance.com/ws/!markPrice@arr@1s");
-    mw.onmessage = (ev) => {
-      try {
-        const list = JSON.parse(ev.data as string) as Array<{
-          s: string; p: string; i: string; r: string;
-        }>;
-        for (const item of list) {
-          if (!item.s.endsWith("USDT")) continue;
-          const existing = this.liveData.get(item.s) ?? newEmpty();
-          this.liveData.set(item.s, {
-            ...existing,
-            fundingRate: parseFloat(item.r) * 100,
-            markPrice:   parseFloat(item.p),
-            indexPrice:  parseFloat(item.i),
-          });
-        }
-      } catch { /* 파싱 실패 무시 */ }
-    };
-    mw.onerror = () => {}; // markPrice WS 오류는 ticker WS가 커버
-    this.markWs = mw;
-  }
-
-  private scheduleReconnect() {
-    if (this.stopped) return;
-    this.cb.onStatus("error", "WS 연결 끊김 — 재연결 중...");
-    this.reconnTimer = setTimeout(() => {
-      if (!this.stopped) {
-        this.wsReady = false;
-        this.connectWs();
+  // ── 공유 버스 구독 ─────────────────────────────────────
+  private connectBus() {
+    this.unsubTicker = subscribeTickerBus((list) => {
+      for (const item of list) {
+        const existing = this.liveData.get(item.s) ?? newEmpty();
+        const close = parseFloat(item.c);
+        const open  = parseFloat(item.o);
+        this.liveData.set(item.s, {
+          ...existing,
+          price:  close,
+          vol24h: parseFloat(item.q),
+          pc24h:  open > 0 ? (close - open) / open * 100 : 0,
+        });
       }
-    }, 3_000);
+      if (!this.wsReady && this.liveData.size > 50) {
+        this.wsReady = true;
+        this.cb.onStatus("live");
+      }
+    });
+
+    this.unsubMarkPrice = subscribeMarkPriceBus((list) => {
+      for (const item of list) {
+        const existing = this.liveData.get(item.s) ?? newEmpty();
+        this.liveData.set(item.s, {
+          ...existing,
+          fundingRate: parseFloat(item.r) * 100,
+          markPrice:   parseFloat(item.p),
+          indexPrice:  parseFloat(item.i),
+        });
+      }
+    });
   }
 
   // ── REST 보완 스캔 ─────────────────────────────────────

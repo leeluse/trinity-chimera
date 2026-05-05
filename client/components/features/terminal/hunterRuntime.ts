@@ -1,6 +1,8 @@
 /* eslint-disable */
 
-export type HunterSortMode = 'total' | 'cross' | 'sqz' | 'whale';
+import { subscribeTickerBus } from "./sharedBinanceBus";
+
+export type HunterSortMode = 'total' | 'cross' | 'sqz' | 'whale' | 'combo';
 
 export interface HunterWsState {
   bn: boolean;
@@ -150,7 +152,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
   let isFrozen = false;
   let sortMode: HunterSortMode = 'total';
 
-  let gWs: WebSocket | null = null;
+  let unsubGlobal: (() => void) | null = null;
   let bnWs: WebSocket | null = null;
   let oxWs: WebSocket | null = null;
   let byWs: WebSocket | null = null;
@@ -288,13 +290,14 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     clearTimer('lsrIv');
     clearTimer('regimeIv');
 
-    closeWs(gWs);
+    unsubGlobal?.();
+    unsubGlobal = null;
+    setWs('wsBn', false);
     closeWs(bnWs);
     closeWs(oxWs);
     closeWs(byWs);
     closeWs(bgWs);
 
-    gWs = null;
     bnWs = null;
     oxWs = null;
     byWs = null;
@@ -543,33 +546,18 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
   }
 
   function openGlobal() {
-    gWs = new WebSocket('wss://fstream.binance.com/market/ws/!miniTicker@arr');
-
-    gWs.onopen = () => setWs('wsBn', true);
-
-    gWs.onmessage = (e) => {
-      try {
-        JSON.parse(e.data).forEach((t: any) => {
-          const m = M[t.s];
-          if (m) {
-            m.price = parseFloat(t.c);
-            m.currentVol = parseFloat(t.q);
-            m.totalQuoteVol = parseFloat(t.q);
-          }
-        });
-      } catch (_e) {}
-    };
-
-    gWs.onclose = () => {
-      setWs('wsBn', false);
-      if (running) setTimeout(openGlobal, 3000);
-    };
-
-    gWs.onerror = () => {
-      try {
-        gWs?.close();
-      } catch (_e) {}
-    };
+    unsubGlobal?.();
+    unsubGlobal = subscribeTickerBus((list) => {
+      for (const t of list) {
+        const m = M[t.s];
+        if (m) {
+          m.price         = parseFloat(t.c);
+          m.currentVol    = parseFloat(t.q);
+          m.totalQuoteVol = parseFloat(t.q);
+        }
+      }
+      setWs('wsBn', true);
+    });
   }
 
   function openBnSniper() {

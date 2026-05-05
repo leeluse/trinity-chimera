@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 import type { HunterRow, HunterRegime } from './hunterRuntime';
+import type { CompositeAlert } from './compositeSignal';
 
 export interface HunterAlert {
   sym: string;
@@ -85,6 +86,7 @@ interface TerminalState {
   hunterRows: HunterRow[];
   hunterRegime: HunterRegime | null;
   hunterAlert: HunterAlert | null;
+  compositeAlert:    CompositeAlert | null;
 
   // Actions
   setResults: (results: TerminalResult[]) => void;
@@ -100,7 +102,8 @@ interface TerminalState {
   setHunterRows: (rows: HunterRow[]) => void;
   setHunterRegime: (regime: HunterRegime) => void;
   setHunterAlert: (alert: HunterAlert | null) => void;
-  
+  setCompositeAlert: (alert: CompositeAlert | null) => void;
+
   // Computed
   applyFilters: () => void;
 }
@@ -135,6 +138,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   hunterRows: [],
   hunterRegime: null,
   hunterAlert: null,
+  compositeAlert: null,
 
   setResults: (results) => {
     set({ results });
@@ -175,6 +179,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   setHunterRows: (hunterRows) => set({ hunterRows }),
   setHunterRegime: (hunterRegime) => set({ hunterRegime }),
   setHunterAlert: (hunterAlert) => set({ hunterAlert }),
+  setCompositeAlert: (compositeAlert) => set({ compositeAlert }),
 
   applyFilters: () => {
     const { results, activeFilter, searchQuery, sort } = get();
