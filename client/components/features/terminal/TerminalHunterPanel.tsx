@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useTerminalStore } from "./terminalStore";
 import {
@@ -10,8 +10,27 @@ import {
   type HunterRuntimeSnapshot,
   type HunterSortMode,
 } from "./hunterRuntime";
+import { useEnrichedRows }   from "@/hooks/useEnrichedRows";
+import { isCompositeSignal } from "./compositeSignal";
+import type { EnrichedRow }  from "./compositeSignal";
 
 type HunterTab = "lb" | "rg" | "pre";
+
+function FuelBlocks({ value }: { value: number }) {
+  const BLOCKS = 5;
+  const filled = Math.round((value / 100) * BLOCKS);
+  const color =
+    value >= 80 ? "bg-violet-400 shadow-[0_0_3px_rgba(167,139,250,0.6)]" :
+    value >= 60 ? "bg-indigo-400" :
+    "bg-white/20";
+  return (
+    <div className="flex gap-[2px] items-center ml-1">
+      {Array.from({ length: BLOCKS }).map((_, i) => (
+        <div key={i} className={`w-[3px] h-[7px] rounded-[1px] ${i < filled ? color : "bg-white/[0.06]"}`} />
+      ))}
+    </div>
+  );
+}
 
 const INITIAL: HunterRuntimeSnapshot = {
   running: false,
@@ -42,6 +61,15 @@ export default function TerminalHunterPanel() {
   const runtimeRef = useRef<ReturnType<typeof mountHunterRuntime> | null>(null);
   const prevRowsRef = useRef<HunterRow[]>([]);
 
+  const enrichedRows = useEnrichedRows();
+  const { setCompositeAlert } = useTerminalStore();
+  const prevCompositeRef = useRef<Set<string>>(new Set());
+
+  const sortedRows = useMemo(() => {
+    if (state.sortMode !== 'combo') return enrichedRows;
+    return [...enrichedRows].sort((a, b) => b.compositeScore - a.compositeScore);
+  }, [enrichedRows, state.sortMode]);
+
   useEffect(() => {
     const runtime = mountHunterRuntime((snapshot) => {
       setState(snapshot);
@@ -61,6 +89,27 @@ export default function TerminalHunterPanel() {
     runtimeRef.current = runtime;
     return () => { runtime.cleanup(); runtimeRef.current = null; };
   }, []);
+
+  useEffect(() => {
+    const next = new Set<string>();
+    for (const row of enrichedRows) {
+      if (isCompositeSignal(row)) {
+        next.add(row.full);
+        if (!prevCompositeRef.current.has(row.full)) {
+          setCompositeAlert({
+            sym:            row.sym,
+            full:           row.full,
+            crimeStage:     row.crimeStage,
+            hunterStage:    row.stage,
+            squeezeFuel:    row.squeezeFuel,
+            compositeScore: row.compositeScore,
+            ts:             Date.now(),
+          });
+        }
+      }
+    }
+    prevCompositeRef.current = next;
+  }, [enrichedRows]);
 
   const onStart = () => { void runtimeRef.current?.api.startSystem(); };
   const onStop = () => { runtimeRef.current?.api.stopSystem(); };
@@ -167,6 +216,13 @@ export default function TerminalHunterPanel() {
                   </button>
                 );
               })}
+              <button onClick={() => onSetSort('combo')}
+                className={cn("text-[9px] uppercase px-1.5 py-0.5 rounded border",
+                  state.sortMode === 'combo'
+                    ? "border-violet-400/70 text-violet-300 bg-violet-400/10"
+                    : "border-white/10 text-slate-500 hover:text-white/40")}>
+                COMBO
+              </button>
             </div>
 
             {/* Sniper targets header */}
@@ -180,11 +236,11 @@ export default function TerminalHunterPanel() {
             </div>
 
             {/* Sniper rows */}
-            {state.rows.length === 0 && (
+            {sortedRows.length === 0 && (
               <div className="px-3 py-6 text-center text-[10px] italic text-[#604828]">시스템 가동 대기중...</div>
             )}
-            {state.rows.map((row) => (
-              <SniperRow key={row.full} row={row} onSelect={() => setSelectedSymbol(row.full)} focusMode={state.focusMode} />
+            {sortedRows.map((row) => (
+              <SniperRow key={row.full} row={row as EnrichedRow} onSelect={() => setSelectedSymbol(row.full)} focusMode={state.focusMode} />
             ))}
 
             {/* Leaderboard (sigHist) */}
@@ -271,7 +327,7 @@ export default function TerminalHunterPanel() {
    Sniper Row
 ───────────────────────────────────────────────────────── */
 function SniperRow({ row, onSelect, focusMode }: {
-  row: HunterRow;
+  row: EnrichedRow;
   onSelect: () => void;
   focusMode: boolean;
 }) {
@@ -298,7 +354,11 @@ function SniperRow({ row, onSelect, focusMode }: {
     <button
       type="button"
       onClick={onSelect}
-      className={cn("w-full border-b border-[#2a2000]/50 px-0 py-0 text-left hover:bg-amber-500/[0.06] cursor-pointer", rowBg)}
+      className={cn(
+        "w-full border-b border-[#2a2000]/50 px-0 py-0 text-left hover:bg-amber-500/[0.06] cursor-pointer",
+        rowBg,
+        isCompositeSignal(row) && "ring-1 ring-violet-500/40 bg-violet-500/[0.05]"
+      )}
     >
       <div className="flex items-start">
         {/* 종목 column */}
@@ -335,6 +395,26 @@ function SniperRow({ row, onSelect, focusMode }: {
               S{row.stage}
               <div className="absolute bottom-0 left-0 h-[2px] bg-current" style={{ width: `${row.latchRatio * 100}%` }} />
             </div>
+            {/* CRIME stage badge */}
+            {(row as EnrichedRow).crimeStage !== "NONE" && (
+              <span className={cn(
+                "text-[8px] font-bold px-1 rounded border ml-1",
+                (row as EnrichedRow).crimeStage === "IGNITION"
+                  ? "border-amber-400/60 text-amber-300 bg-amber-400/10"
+                  : (row as EnrichedRow).crimeStage === "PRE_IGNITION"
+                  ? "border-indigo-400/60 text-indigo-300 bg-indigo-400/10"
+                  : (row as EnrichedRow).crimeStage === "SPRING"
+                  ? "border-emerald-400/60 text-emerald-300 bg-emerald-400/10"
+                  : "border-white/10 text-white/30"
+              )}>
+                {(row as EnrichedRow).crimeStage === "PRE_IGNITION"
+                  ? "PRE"
+                  : (row as EnrichedRow).crimeStage.slice(0, 4)}
+              </span>
+            )}
+            {(row as EnrichedRow).squeezeFuel > 0 && (
+              <FuelBlocks value={(row as EnrichedRow).squeezeFuel} />
+            )}
 
             {/* jb-bar: centered bar with label */}
             <div className="relative flex-1 h-[18px] rounded bg-[#1a1400] border border-[#2a2000] overflow-hidden">

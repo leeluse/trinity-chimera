@@ -2,7 +2,7 @@
 
 import { subscribeTickerBus } from "./sharedBinanceBus";
 
-export type HunterSortMode = 'total' | 'cross' | 'sqz' | 'whale';
+export type HunterSortMode = 'total' | 'cross' | 'sqz' | 'whale' | 'combo';
 
 export interface HunterWsState {
   bn: boolean;
