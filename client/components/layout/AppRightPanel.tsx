@@ -6,7 +6,6 @@ import { RightPanelShell } from "@/components/panel/RightPanelShell";
 import ChatInterface from "@/components/features/chat/ChatInterface";
 import AgentFilter from "@/components/panel/sections/AgentFilter";
 import TerminalHunterPanel from "@/components/features/terminal/TerminalHunterPanel";
-import CrimeDashboard from "@/components/features/crime/CrimeDashboard";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import { useMemo } from "react";
 
@@ -59,7 +58,6 @@ export function AppRightPanel({
   const isBacktestView = isBacktestPage && view === "";
   const isScannerView = isScannerPage;
   const isTerminalView = isTerminalPage;
-  const isCrimeView = view === "crime";
 
   // Logic for filtering logs (borrowed from DashboardRightPanel)
   const agentNameMap = useMemo(() => {
@@ -111,9 +109,6 @@ export function AppRightPanel({
 
       {/* Terminal Hunter Fusion Content */}
       {isTerminalView && <TerminalHunterPanel />}
-
-      {/* Crime Mega Pump Content */}
-      {isCrimeView && <CrimeDashboard />}
 
       {/* Decision Logs (Standard Terminal List) - Hidden for now */}
       {isLogsView && (
