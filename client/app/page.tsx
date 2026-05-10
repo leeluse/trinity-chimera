@@ -84,8 +84,6 @@ function DashboardContent() {
     isLoading: isLoadingInitial,
     botTrades,
     bots,
-    automationStatus,
-    toggleAutomation
   } = useDashboardQueries({
     statsIntervalMs: 6000,
     logsIntervalMs: 8000,
@@ -228,8 +226,6 @@ function DashboardContent() {
           agentIds={runtimeAgentIds}
           names={agentNames}
           botTrades={botTrades}
-          automationStatus={automationStatus}
-          onToggleAutomation={() => toggleAutomation(!automationStatus?.enabled)}
         />
       </PageLayout.Side>
 

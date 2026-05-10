@@ -10,16 +10,14 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from server.shared.llm.client import generate_chat_reply, stream_chat_reply
 from server.shared.db.supabase import SupabaseManager
 from server.modules.engine.runtime import invalidate_strategy_cache
-from server.modules.chat.prompts import SYSTEM_PROMPT, CLASSIFICATION_SYSTEM, CLASSIFICATION_MESSAGE
+from server.modules.chat.prompts import SYSTEM_PROMPT, CLASSIFICATION_SYSTEM, CLASSIFICATION_MESSAGE, DIRECT_CHAT_SYSTEM
 from server.modules.chat.skills import (
     dispatch_analysis,
     run_create_pipeline,
     run_modify_pipeline,
     run_backtest,
-    run_optimize_pipeline,
     run_walk_forward_pipeline,
     run_pnl_analysis,
-    run_regime_pipeline,
     get_last_strategy,
     format_sse,
     NO_CONFIRM_SKILLS,
@@ -32,18 +30,13 @@ logger = logging.getLogger(__name__)
 INTENT_GENERAL   = "GENERAL_CHAT"
 INTENT_CREATE    = "STRATEGY_CREATE"
 INTENT_MODIFY    = "STRATEGY_MODIFY"
-INTENT_EVOLVE    = "STRATEGY_EVOLVE"
 INTENT_BACKTEST  = "STRATEGY_BACKTEST"
-INTENT_OPTIMIZE  = "PARAM_OPTIMIZE"
 
 _INTENT_LABEL = {
     INTENT_CREATE:    "전략 생성 파이프라인",
     INTENT_MODIFY:    "전략 수정 파이프라인",
-    INTENT_EVOLVE:    "에볼루션 채굴 파이프라인",
     INTENT_BACKTEST:  "백테스트",
-    INTENT_OPTIMIZE:  "파라미터 최적화/서치",
     "STRATEGY_WFO":   "워크포워드(롤링) 분석",
-    "REGIME_ANALYSIS": "레짐 귀속 분석",
 }
 
 # ── INVOKE 마커 매핑 ──────────────────────────────────────────────
@@ -51,8 +44,6 @@ _INVOKE_MAP = {
     "CREATE_STRATEGY":  INTENT_CREATE,
     "MODIFY_STRATEGY":  INTENT_MODIFY,
     "RUN_BACKTEST":     INTENT_BACKTEST,
-    "RUN_EVOLUTION":    INTENT_EVOLVE,
-    "PARAM_SEARCH":     INTENT_OPTIMIZE,
     "WALK_FORWARD":     "STRATEGY_WFO",
     "PNL_ANALYSIS":     "PNL_ANALYSIS",
 }
@@ -64,25 +55,28 @@ _CONTINUATION_META_RE = re.compile(
     r"\[직전\s*답변\]|이것이中途)",
     re.IGNORECASE,
 )
+_SMALLTALK_RE = re.compile(
+    r"^\s*(안녕+|하이+|hello+|hey+|yo+|ㅎ+ㅇ+|반가워+|좋은\s*(아침|점심|저녁)|굿모닝|굿이브닝|테스트|test)\s*[!.?~…]*\s*$",
+    re.IGNORECASE,
+)
+_DIRECT_CHAT_REFERENTIAL_RE = re.compile(
+    r"(이전|방금|아까|직전|위에|앞에서|그거|그건|그거는|이거|이건|저거|저건|그럼|그러면|이어서|계속|방금\s*전략|현재\s*전략|지금\s*전략)",
+    re.IGNORECASE,
+)
+_DIRECT_CHAT_STRATEGY_RE = re.compile(
+    r"(전략|백테스트|코드|시그널|진입|청산|손절|익절|포지션|수익률|승률|샤프|sortino|calmar|mdd|drawdown|성과|지표|ema|rsi|atr|btc|롱|숏)",
+    re.IGNORECASE,
+)
+_DIRECT_CHAT_META_RE = re.compile(
+    r"(너\s*(누구|뭐해|무슨\s*모델|뭐임|정체)|자기소개|도움말|사용법|메뉴|기능|할\s*수\s*있는\s*거|농담|잡담)",
+    re.IGNORECASE,
+)
 
 # 빠른 규칙 기반 분류 (LLM 없이 ~95% 커버)
 _KEYWORD_INTENT_MAP = {
-    "PARAM_SEARCH": [
-        r"파라미터\s*(서치|최적화|튜닝|찾아|탐색)",
-        r"(그리드|랜덤|베이지안)\s*(서치|검색|최적화)",
-        r"(최적|좋은|나은)\s*파라미터",
-        r"(하이퍼파라미터|hyperparameter)",
-    ],
     "WALK_FORWARD": [
         r"(워크포워드|워크\s*포워드|walk\s*forward|wfo)",
         r"(롤링|전진)\s*(테스트|검사|분석)",
-    ],
-    "REGIME_ANALYSIS": [
-        r"(레짐|regime)\s*(분석|귀속|찾|탐색)",
-        r"(특정|어떤)\s*구간.{0,10}(조건|파라미터|이유|왜)",
-        r"구간.{0,10}(조건|이유|원인|특성).{0,5}(찾|분석|알)",
-        r"(어떤|언제)\s*(시장|조건|상황).{0,10}(잘|좋|안|나쁨|먹|통)",
-        r"(시장|조건)\s*(필터|레짐|상황)\s*(분석|찾|추출)",
     ],
     "PNL_ANALYSIS": [
         r"(pnl|수익|손익)\s*(분석|분해|상세|리포트)",
@@ -96,7 +90,6 @@ _KEYWORD_INTENT_MAP = {
     ],
     "MODIFY_STRATEGY": [r"(수정|개선|변경|고쳐|보완|강화)", r"(이전|기존|아까)\s*(거|전략)\s*(수정|개선|고쳐)"],
     "RUN_BACKTEST": [r"(돌려봐|검증|테스트|백테스트|실행해|결과)", r"(성과|수익|손실|성능)\s*(보|봐|확인)"],
-    "RUN_EVOLUTION": [r"(채굴|에볼루션|자동|자율|진화|마이닝)", r"(최적|탐색|최상)\s*(후보|전략)"],
     "EXPLAIN_STRATEGY": [r"(설명|어떻게|작동|로직|왜|이유|원리)", r"(이\s*(전략|코드)|코드)\s*(어떻게|설명)"],
     "RISK_ANALYSIS": [r"(리스크|위험|손실|위험도|MDD|낙폭)", r"(언제|언제쯤)\s*(망|실패|손실)"],
     "CODE_REVIEW": [
@@ -124,6 +117,39 @@ def _classify_by_keywords(text: str) -> Optional[str]:
             if re.search(pattern, t):
                 return invoke_key
     return None
+
+
+def _is_smalltalk_message(text: str) -> bool:
+    body = (text or "").strip()
+    if not body:
+        return False
+    return bool(_SMALLTALK_RE.match(body))
+
+
+def _should_use_direct_chat_context(message: str, context: Optional[Dict[str, Any]], history: Optional[List[Dict[str, Any]]]) -> bool:
+    body = (message or "").strip()
+    if not body:
+        return False
+    if _is_smalltalk_message(body):
+        return False
+    if _DIRECT_CHAT_META_RE.search(body):
+        return False
+    if _DIRECT_CHAT_REFERENTIAL_RE.search(body):
+        return True
+
+    has_context = bool(context)
+    has_history = bool(history)
+    mentions_strategy = bool(_DIRECT_CHAT_STRATEGY_RE.search(body))
+
+    if mentions_strategy and (has_context or has_history):
+        return True
+
+    # 짧고 모호한 입력은 새 대화로 보고 문맥을 붙이지 않는다.
+    compact = re.sub(r"\s+", "", body)
+    if len(compact) <= 12:
+        return False
+
+    return False
 
 
 class ChatHandler:
@@ -169,8 +195,6 @@ class ChatHandler:
         if not cls._env_enabled("CHAT_PIPELINE_CONFIRM_ENABLED", True):
             return False
         if intent == INTENT_MODIFY and cls._env_enabled("CHAT_MODIFY_AUTO_RUN", True):
-            return False
-        if intent == INTENT_OPTIMIZE:
             return False
         return True
 
@@ -231,12 +255,8 @@ class ChatHandler:
             return "새 전략 생성 요청으로 분류했습니다. 승인하면 실제 파이프라인(설계→코드→백테스트)을 실행합니다."
         if intent == INTENT_MODIFY:
             return "전략 수정 요청으로 분류했습니다. 승인하면 기존 전략을 분석해 수정안과 백테스트 비교를 진행합니다."
-        if intent == INTENT_EVOLVE:
-            return "에볼루션 채굴 요청으로 분류했습니다. 승인하면 후보 생성/검증 루프를 시작합니다."
         if intent == INTENT_BACKTEST:
             return "백테스트 실행 요청으로 분류했습니다. 승인하면 마지막 전략으로 검증을 시작합니다."
-        if intent == INTENT_OPTIMIZE:
-            return "파라미터 서치 요청으로 분류했습니다. Grid/Random/Bayesian 탐색을 시작할까요?"
         if intent == "STRATEGY_WFO":
             return "워크포워드(롤링) 분석 요청으로 분류했습니다. 과거 데이터를 여러 구간으로 쪼개서 전진 분석을 수행합니다."
         return ""
@@ -714,14 +734,25 @@ class ChatHandler:
     ) -> AsyncGenerator[str, None]:
         resolved_model = (model or os.getenv("LITELLM_MODEL") or os.getenv("OLLAMA_MODEL") or None)
         logger.info("[chat] direct_chat_reply session=%s model=%s", session_id, resolved_model or "default")
+        use_context = _should_use_direct_chat_context(message, context, history)
+        direct_chat_system = DIRECT_CHAT_SYSTEM
+        effective_context = context if use_context else None
+        effective_history = history if use_context else []
+        logger.info(
+            "[chat] direct_chat context_gate session=%s use_context=%s msg=%r",
+            session_id,
+            use_context,
+            self._preview_text(message),
+        )
         full = ""
         try:
             async for chunk in stream_chat_reply(
                 user_message=message,
-                context=context,
-                history=history,
+                context=effective_context,
+                history=effective_history,
                 model=resolved_model,
                 temperature=0.3,
+                custom_system_prompt=direct_chat_system,
             ):
                 thought = chunk.get("thought")
                 content = chunk.get("content")
@@ -800,7 +831,7 @@ class ChatHandler:
         )
 
         clean_response = self._sanitize_chat_text(full_response)
-        if intent in {INTENT_CREATE, INTENT_MODIFY, INTENT_EVOLVE, INTENT_BACKTEST}:
+        if intent in {INTENT_CREATE, INTENT_MODIFY, INTENT_BACKTEST}:
             preface = self._execution_preface(intent)
             if preface:
                 clean_response = preface
@@ -881,9 +912,6 @@ class ChatHandler:
         elif intent == INTENT_MODIFY:
             async for ev in run_modify_pipeline(message, session_id, context, history, db, sm):
                 yield ev
-        elif intent == INTENT_EVOLVE:
-            async for ev in run_create_pipeline(message, session_id, context, history, db, sm, is_mining=True, code_gen_mode=code_gen_mode):
-                yield ev
         elif intent == INTENT_BACKTEST:
             prev = await get_last_strategy(session_id, db, sm)
             if prev:
@@ -895,26 +923,10 @@ class ChatHandler:
             else:
                 yield format_sse({"type": "analysis", "content": "백테스트할 전략이 없습니다."})
             yield format_sse({"type": "done"})
-        elif intent == INTENT_OPTIMIZE:
-            prev = await get_last_strategy(session_id, db, sm)
-            if prev:
-                async for ev in run_optimize_pipeline(message, context, prev.get("code", ""), sm.get(session_id, {})):
-                    yield ev
-            else:
-                yield format_sse({"type": "error", "content": "❌ 최적화할 전략이 없습니다. 먼저 전략을 생성해주세요."})
-            yield format_sse({"type": "done"})
         elif intent == "STRATEGY_WFO":
             prev = await get_last_strategy(session_id, db, sm)
             if prev:
                 async for ev in run_walk_forward_pipeline(message, context, prev.get("code", ""), sm.get(session_id, {})):
-                    yield ev
-            else:
-                yield format_sse({"type": "error", "content": "❌ 분석할 전략이 없습니다. 먼저 전략을 생성해주세요."})
-            yield format_sse({"type": "done"})
-        elif intent == "REGIME_ANALYSIS":
-            prev = await get_last_strategy(session_id, db, sm)
-            if prev:
-                async for ev in run_regime_pipeline(message, context, prev.get("code", ""), sm.get(session_id, {})):
                     yield ev
             else:
                 yield format_sse({"type": "error", "content": "❌ 분석할 전략이 없습니다. 먼저 전략을 생성해주세요."})
@@ -937,14 +949,12 @@ class ChatHandler:
         base_msgs = {
             INTENT_CREATE:   "전략 생성 파이프라인(설계 → 코드 → 백테스트)을 실행할까요?",
             INTENT_MODIFY:   f"'{prev.get('title', '이전 전략')}' 수정 파이프라인을 실행할까요?" if prev else "",
-            INTENT_EVOLVE:   "에볼루션 채굴 파이프라인(WFO + Monte Carlo)을 실행할까요?\n⚠️ 수 분 소요.",
             INTENT_BACKTEST: "이전에 생성된 전략으로 백테스트를 실행할까요?",
-            INTENT_OPTIMIZE: "현재 전략의 파라미터를 최적화할까요?",
             "STRATEGY_WFO":  "워크포워드(롤링) 분석을 실행할까요? (수분 소요)",
             "PNL_ANALYSIS":  "포지션별 PnL 분해 분석을 실행할까요?",
         }
         body = base_msgs.get(intent, "파이프라인을 실행할까요?")
-        if intent in {INTENT_CREATE, INTENT_MODIFY, INTENT_EVOLVE}:
+        if intent in {INTENT_CREATE, INTENT_MODIFY}:
             base = os.getenv("LITELLM_MODEL") or os.getenv("OLLAMA_MODEL") or ""
             quick = (os.getenv("QUICK_MODEL") or base).split("/")[-1]
             analysis = (os.getenv("ANALYSIS_MODEL") or base).split("/")[-1]

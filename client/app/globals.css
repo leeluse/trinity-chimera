@@ -42,7 +42,7 @@
 
 /* Markdown Content Styling */
 .markdown-content {
-  @apply leading-relaxed text-[12px];
+  @apply leading-relaxed text-[14px];
 }
 
 .markdown-content p {
@@ -301,7 +301,7 @@ input:focus, textarea:focus, select:focus {
   margin-bottom: 12px;
   color: var(--text-secondary);
   line-height: 1.6;
-  font-size: 11.5px;
+  font-size: 13.5px;
 }
 
 .markdown-content code {

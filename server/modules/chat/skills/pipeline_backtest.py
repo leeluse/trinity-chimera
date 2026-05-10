@@ -9,7 +9,7 @@ import pandas as pd
 
 from server.shared.llm.client import stream_quick_reply
 from server.modules.backtest.chat.chat_backtester import ChatBacktester
-from server.modules.evolution.scoring import evaluate_hard_gates, calculate_trinity_score
+from server.shared.market.trinity_scoring import evaluate_hard_gates, calculate_trinity_score
 from server.modules.chat.prompts import TIPS_PROMPT_TEMPLATE
 from server.modules.chat.skills._base import (
     format_sse,
@@ -40,20 +40,10 @@ async def run_backtest(
     constitution: Optional[Dict[str, Any]] = None,
     target_agent: str = "chat_global",
     chat_mutation_hint: str = "",
-    is_mining_mode: bool = False,
-    persona=None,
-    seed=None,
     prev_metrics: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[str, None]:
     try:
         skip_tips = bool((context or {}).get("skip_tips")) or _env_enabled("CHAT_BACKTEST_SKIP_TIPS", False)
-        if is_mining_mode:
-            async for ev in _run_mining_backtest(
-                strategy_code, strategy_title, request_message,
-                context, session_id, db, session_memory, persona, seed,
-            ):
-                yield ev
-            return
 
         engine = ChatBacktester()
         bt_res = await engine.run(strategy_code, request_message, context)

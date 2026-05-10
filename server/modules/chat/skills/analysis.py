@@ -3,7 +3,7 @@ import logging
 from typing import Any, AsyncGenerator, Dict, List
 
 from server.shared.llm.client import stream_analysis_reply, stream_quick_reply
-from server.modules.evolution.wiki_memory import EvolutionWikiMemory
+from server.shared.chat.wiki_memory import EvolutionWikiMemory
 from server.modules.chat.prompts import (
     EXPLAIN_STRATEGY_TEMPLATE,
     RISK_ANALYSIS_TEMPLATE,

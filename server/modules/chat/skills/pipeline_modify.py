@@ -9,7 +9,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from server.shared.llm.client import stream_quick_reply, stream_analysis_reply, stream_code_gen_reply
 from server.shared.market.strategy_loader import StrategyLoader, SecurityError
-from server.modules.evolution.wiki_memory import EvolutionWikiMemory
+from server.shared.chat.wiki_memory import EvolutionWikiMemory
 from server.modules.chat.prompts import (
     DESIGN_PROMPT_TEMPLATE,
     MODIFY_ANALYZE_TEMPLATE,
@@ -633,7 +633,7 @@ async def run_modify_pipeline(
                 strategy_code, strategy_title, message, fast_context, session_id, db, session_memory,
                 memory=memory, constitution=constitution, target_agent=target_agent,
                 chat_mutation_hint=chat_mutation_hint,
-                is_mining_mode=False, prev_metrics=prev_metrics,
+                prev_metrics=prev_metrics,
             ):
                 yield ev
             yield format_sse({"type": "done"})
@@ -788,7 +788,7 @@ async def run_modify_pipeline(
         strategy_code, strategy_title, message, context, session_id, db, session_memory,
         memory=memory, constitution=constitution, target_agent=target_agent,
         chat_mutation_hint=chat_mutation_hint,
-        is_mining_mode=False, prev_metrics=prev_metrics,
+        prev_metrics=prev_metrics,
     ):
         yield ev
     yield format_sse({"type": "done"})

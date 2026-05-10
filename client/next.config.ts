@@ -10,9 +10,6 @@ import type { NextConfig } from "next";
  * 해당 핸들러가 Bypass-Tunnel-Reminder 헤더를 자동으로 추가합니다.
  */
 const nextConfig: NextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     ignoreBuildErrors: true,
   },

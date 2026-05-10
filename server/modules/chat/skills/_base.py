@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from server.modules.evolution.constants import AGENT_IDS
+from server.shared.agents.constants import AGENT_IDS
 
 logger = logging.getLogger(__name__)
 

@@ -1,23 +1,27 @@
-# Trinity Chimery Obsidian Wiki
+# README — Trinity Chimera Wiki
 
-이 폴더는 `Trinity-Chimery` 프로젝트를 Obsidian에서 바로 탐색할 수 있도록 구성한 위키입니다.
+> **Last Updated**: 2026-05-11
 
-## 사용 방법
-1. Obsidian에서 `Open folder as vault` 선택
-2. `/Users/lsy/Desktop/project/trinity-chimery/wiki/obsidian` 경로 열기
-3. `[[Home]]` 노트부터 탐색 시작
+---
 
-## 구조
-- `00_Home`: 시작점(MOC)
-- `01_Product`: 제품 개요/기능/용어
-- `02_Architecture`: 시스템 구조/실행 흐름
-- `03_Backend`: FastAPI + 진화/채팅/백테스트 백엔드
-- `04_Frontend`: Next.js 대시보드/백테스트 UI
-- `05_Data`: DB 모델과 마켓 데이터 흐름
-- `06_Ops`: 실행/배포/운영 Runbook
-- `07_Development`: 테스트/코딩 가이드
-- `08_ChangeLog`: 최근 변경 이력
-- `90_Index`: 레포 트리/라우트 맵
+## 문서 목록
 
-## 기준 시점
-- 기준 코드베이스: 로컬 `main` 브랜치 (2026-04-16 기준)
+| 문서 | 경로 | 설명 |
+|---|---|---|
+| **Architecture Overview** | `02_Architecture/Architecture-Overview.md` | 전체 시스템 구성, 디렉터리, API 목록 |
+| **AI Chat Pipeline** | `AI Chat Pipeline.md` | 채팅 파이프라인, 인텐트 분류, SSE 이벤트 |
+| **Backtest System** | `Backtest-System.md` | 백테스트 엔진, 전략 목록, 최적화 |
+| **Evolution System** | `Evolution-System.md` | 자율 진화 루프, WIKI 메모리, Constitution |
+| **Terminal Hunter V16** | `04_Frontend/Terminal-Hunter.md` | Alpha Hunter 대시보드, WebSocket, Stage-Gate |
+| **Strategy Code Spec** | `Strategy-Code-Spec.md` | 전략 코드 작성 규칙 (generate_signal 인터페이스) |
+| **LLM Model Roles** | `LLM-Model-Roles.md` | LLM 공급자 설정, 역할 분리 |
+
+---
+
+## 주요 변경 이력
+
+| 날짜 | 변경 내용 |
+|---|---|
+| 2026-05-11 | 전체 Wiki 현행화 (레짐 모듈 제거, Hunter V16 추가) |
+| 2026-05-10 | Evolution-Memory 초기화, 서버 레짐 모듈 제거 |
+| 2026-05-09 | Next.js App Router 마이그레이션, Tailwind v4 |

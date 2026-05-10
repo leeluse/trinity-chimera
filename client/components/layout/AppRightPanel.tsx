@@ -2,45 +2,27 @@
 
 import { usePathname, useSearchParams } from "next/navigation";
 import { RightPanelShell } from "@/components/panel/RightPanelShell";
-
 import ChatInterface from "@/components/features/chat/ChatInterface";
 import AgentFilter from "@/components/panel/sections/AgentFilter";
 import { useDashboardStore } from "@/store/useDashboardStore";
-import { useMemo } from "react";
+import { Trophy } from "lucide-react";
 
 interface AppRightPanelProps {
   agentIds?: string[];
   names?: string[];
-
-  automationStatus?: any;
-  onToggleAutomation?: () => void;
   backtestContext?: any;
   onBacktestGenerated?: (data: any) => void;
   onApplyCode?: (code: string, name?: string, payload?: any) => void;
-
   botTrades?: any[];
-  scannerContent?: React.ReactNode;
 }
 
-// This is a unified panel that handles all right-side content based on context
 export function AppRightPanel({
-  // Shared Props
   agentIds = [],
   names = [],
-
-  automationStatus = null,
-  onToggleAutomation,
-
-  // Backtest Props
   backtestContext = null,
   onBacktestGenerated,
   onApplyCode,
-
-
   botTrades = [],
-
-  // Scanner Props
-  scannerContent = null,
 }: AppRightPanelProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -48,31 +30,12 @@ export function AppRightPanel({
   const { logActiveBot: activeBot, setLogActiveBot: setActiveBot } = useDashboardStore();
 
   const isBacktestPage = pathname === "/backtest";
-  const isScannerPage = pathname === "/scanner";
   const isTerminalPage = pathname === "/terminal";
   const isDashboardPage = pathname === "/";
 
-  // const isEvolutionView = view === "evolution"; // REmoved
-  const isLogsView = (view === "logs" || (view === "" && isDashboardPage)) && false; // Disabled logs for now as they were agent-specific
+  const isLogsView = (view === "logs" || (view === "" && isDashboardPage)) && false; 
   const isBacktestView = isBacktestPage && view === "";
-  const isScannerView = isScannerPage;
   const isTerminalView = isTerminalPage;
-
-  // Logic for filtering logs (borrowed from DashboardRightPanel)
-  const agentNameMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    agentIds.forEach((id: string, idx: number) => {
-      map[id] = names[idx] || id;
-    });
-    return map;
-  }, [agentIds, names]);
-
-  const filteredLogs = useMemo(() => {
-    const isAll = !activeBot || activeBot === "ALL" || activeBot === "전체";
-    const logs: any[] = []; // No logs for bots yet
-    if (isAll) return logs;
-    return logs;
-  }, [activeBot]);
 
   return (
     <RightPanelShell>
@@ -86,12 +49,8 @@ export function AppRightPanel({
         />
       )}
 
-      {/* 2. Main Content Slots */}
-
-
-
       {/* Chat / Backtest Interface */}
-      {isBacktestView && backtestContext && (
+      {isBacktestView && !!backtestContext && (
         <ChatInterface
           context={backtestContext}
           onBacktestGenerated={onBacktestGenerated}
@@ -99,24 +58,16 @@ export function AppRightPanel({
         />
       )}
 
-      {/* Scanner Sidebar Content */}
-      {isScannerView && scannerContent && (
-        <div className="flex-1 overflow-y-auto no-scrollbar">
-          {scannerContent}
-        </div>
-      )}
-
-      {/* Terminal Hunter Fusion Content - Now moved to main view */}
+      {/* Terminal View */}
       {isTerminalView && (
-        <div className="flex h-full items-center justify-center text-[10px] text-slate-600">
-          Selected Target Details (Empty)
-        </div>
-      )}
-
-      {/* Decision Logs (Standard Terminal List) - Hidden for now */}
-      {isLogsView && (
-        <div className="flex flex-col gap-4 p-4">
-          {/* ... */}
+        <div className="flex h-full flex-col bg-[#06070d] items-center justify-center p-8 text-center">
+           <Trophy size={32} className="text-violet-500/20 mb-4" />
+           <div className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">
+             Terminal Active
+           </div>
+           <div className="mt-2 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-600">
+             Performance metrics streaming...
+           </div>
         </div>
       )}
     </RightPanelShell>

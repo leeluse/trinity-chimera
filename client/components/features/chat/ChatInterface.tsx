@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo, memo, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from 'rehype-raw';
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown, Copy, Check, SlidersHorizontal } from "lucide-react";
+import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown, Copy, Check } from "lucide-react";
 import { fetchWithBypass } from "@/lib/api";
-import OptimizationMiniPanel from "@/components/features/backtest/OptimizationMiniPanel";
-import RegimeChatPanel from "@/components/features/chat/RegimeChatPanel";
 
 interface ChatMessage {
   id: string;
@@ -16,6 +15,7 @@ interface ChatMessage {
   content: string;
   type?: "text" | "strategy" | "backtest" | "thought" | "invocation" | "design" | "choice";
   data?: any;
+  createdAt?: string | number;
 }
 
 interface ChatInterfaceProps {
@@ -32,7 +32,6 @@ const EXAMPLE_PROMPTS = [
 const SKILL_STAGE_META: Record<string, { total: number; showProgress: boolean }> = {
   CREATE_STRATEGY: { total: 5, showProgress: true },
   MODIFY_STRATEGY: { total: 5, showProgress: true },
-  RUN_EVOLUTION: { total: 5, showProgress: true },
   RUN_BACKTEST: { total: 5, showProgress: true },
   EXPLAIN_STRATEGY: { total: 1, showProgress: false },
   RISK_ANALYSIS: { total: 1, showProgress: false },
@@ -131,7 +130,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
     // text 타입 내 <think> 태그 파싱 (대소문자 무관, 공백 허용)
     const thoughtRegex = /<(thought|think|think_process|reasoning)>([\s\S]*?)(?:<\/\1>|$)/gi;
     const match = thoughtRegex.exec(msg.content || "");
-    
+
     if (match) {
       thinkingContent = match[2].trim();
       mainContent = (msg.content || "").replace(match[0], "").trim();
@@ -142,6 +141,38 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
 
   isThinkingStreaming = !!isStreaming && !!thinkingContent;
 
+  const [displayedMain, setDisplayedMain] = useState(isStreaming ? "" : mainContent);
+  useEffect(() => {
+    if (!isStreaming) {
+      setDisplayedMain(mainContent);
+      return;
+    }
+    const interval = setInterval(() => {
+      setDisplayedMain((prev) => {
+        if (prev.length >= mainContent.length) return prev;
+        const step = Math.max(1, Math.floor((mainContent.length - prev.length) / 8));
+        return mainContent.slice(0, prev.length + step);
+      });
+    }, 20);
+    return () => clearInterval(interval);
+  }, [mainContent, isStreaming]);
+
+  const [displayedThinking, setDisplayedThinking] = useState(isStreaming ? "" : thinkingContent);
+  useEffect(() => {
+    if (!isStreaming) {
+      setDisplayedThinking(thinkingContent);
+      return;
+    }
+    const interval = setInterval(() => {
+      setDisplayedThinking((prev) => {
+        if (prev.length >= thinkingContent.length) return prev;
+        const step = Math.max(1, Math.floor((thinkingContent.length - prev.length) / 8));
+        return thinkingContent.slice(0, prev.length + step);
+      });
+    }, 20);
+    return () => clearInterval(interval);
+  }, [thinkingContent, isStreaming]);
+
   // 자동 스크롤: thought 컨텐츠 div ref
   const thoughtScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -150,12 +181,10 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
     }
   });
 
-  const displayThinkingContent = thinkingContent;
-
   return (
     <div className={`flex flex-col py-3 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
       {msg.role === 'user' ? (
-        <div className="bg-purple-600/20 border border-purple-500/20 rounded-2xl px-4 py-2.5 max-w-[85%] text-[12px] text-purple-100 shadow-sm animate-in slide-in-from-right-2 duration-300 markdown-content">
+        <div className="bg-purple-600/20 border border-purple-500/20 rounded-2xl px-4 py-2.5 max-w-[85%] text-[14px] text-purple-100 shadow-sm animate-in slide-in-from-right-2 duration-300 markdown-content">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeRaw]}
@@ -166,59 +195,58 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
         </div>
       ) : (
         <div className="w-full space-y-4 animate-in fade-in duration-500">
-            {msg.type === 'invocation' && (
-              <div className="flex flex-col gap-1.5 mb-3">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl w-fit">
-                  <Zap size={13} className="text-blue-400 fill-blue-400/20" />
-                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">실행: {msg.content}</span>
-                </div>
+          {msg.type === 'invocation' && (
+            <div className="flex flex-col gap-1.5 mb-3">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl w-fit">
+                <Zap size={13} className="text-blue-400 fill-blue-400/20" />
+                <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">실행: {msg.content}</span>
               </div>
-            )}
+            </div>
+          )}
 
-            {thinkingContent && (
-              <details className="group mb-1 max-w-[95%]" open={isThinkingStreaming}>
-                <summary className="flex items-center gap-2 px-3 py-2 bg-white/[0.03] border border-white/[0.05] rounded-xl cursor-pointer hover:bg-white/[0.06] transition-all list-none select-none">
-                  {isThinkingStreaming ? (
-                    <Loader2 size={12} className="text-amber-500 animate-spin flex-shrink-0" />
-                  ) : (
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500/40 flex-shrink-0" />
-                  )}
-                  <span className="text-[10px] font-bold tracking-widest uppercase text-amber-500/60 font-mono">
-                    {isThinkingStreaming ? "AI Reasoning (Streaming...)" : "AI Reasoning"}
-                  </span>
-                  <Plus size={10} className="ml-auto text-white/20 group-open:rotate-45 transition-transform flex-shrink-0" />
-                </summary>
-                <div
-                  ref={thoughtScrollRef}
-                  className="mt-2 px-4 py-3 bg-black/20 border border-white/[0.03] rounded-xl font-medium italic markdown-content max-h-72 overflow-y-auto custom-scrollbar transition-all opacity-80 text-[11px] leading-relaxed pb-8"
-                >
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeRaw]}
-                    components={MarkdownComponents}
-                  >
-                    {displayThinkingContent + (isThinkingStreaming ? " █" : "")}
-                  </ReactMarkdown>
-                </div>
-              </details>
-            )}
-
-            {mainContent && (
-              <div className={`text-[12px] text-slate-200 leading-relaxed px-1.5 markdown-content animate-in slide-in-from-left-1 duration-300 mb-4 ${
-                mainContent.length < 60 && /^[A-Z][A-Za-z0-9_]+$/.test(mainContent.trim()) ? 'strategy-title-header' : 
-                mainContent.length < 100 && mainContent.includes('|') ? 'metadata-summary-badge' : ''
-              }`}>
+          {thinkingContent && (
+            <details className="group mb-1 max-w-[95%]" open={isThinkingStreaming}>
+              <summary className="flex items-center gap-2 px-3 py-2 bg-white/[0.03] border border-white/[0.05] rounded-xl cursor-pointer hover:bg-white/[0.06] transition-all list-none select-none">
+                {isThinkingStreaming ? (
+                  <Loader2 size={12} className="text-amber-500 animate-spin flex-shrink-0" />
+                ) : (
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500/40 flex-shrink-0" />
+                )}
+                <span className="text-[10px] font-bold tracking-widest uppercase text-amber-500/60 font-mono">
+                  {isThinkingStreaming ? "AI Reasoning (Streaming...)" : "AI Reasoning"}
+                </span>
+                <Plus size={10} className="ml-auto text-white/20 group-open:rotate-45 transition-transform flex-shrink-0" />
+              </summary>
+              <div
+                ref={thoughtScrollRef}
+                className="mt-2 px-4 py-3 bg-black/20 border border-white/[0.03] rounded-xl font-medium italic markdown-content max-h-72 overflow-y-auto custom-scrollbar transition-all opacity-80 text-[11px] leading-relaxed pb-8"
+              >
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   rehypePlugins={[rehypeRaw]}
                   components={MarkdownComponents}
                 >
-                  {mainContent}
+                  {displayedThinking + (isThinkingStreaming ? " █" : "")}
                 </ReactMarkdown>
               </div>
-            )}
+            </details>
+          )}
 
-            {/* choice 메시지 타입 렌더링 제거 (자동 진행 방식으로 변경됨) */}
+          {mainContent && (
+            <div className={`text-[14px] text-slate-200 leading-relaxed px-1.5 markdown-content animate-in slide-in-from-left-1 duration-300 mb-4 ${mainContent.length < 60 && /^[A-Z][A-Za-z0-9_]+$/.test(mainContent.trim()) ? 'strategy-title-header' :
+                mainContent.length < 100 && mainContent.includes('|') ? 'metadata-summary-badge' : ''
+              }`}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw]}
+                components={MarkdownComponents}
+              >
+                {displayedMain}
+              </ReactMarkdown>
+            </div>
+          )}
+
+          {/* choice 메시지 타입 렌더링 제거 (자동 진행 방식으로 변경됨) */}
 
           {msg.type === 'design' && (
             <div className="flex flex-col bg-white/[0.03] border border-blue-500/20 rounded-xl p-5 shadow-2xl gap-4 backdrop-blur-md mb-8 mx-1">
@@ -254,7 +282,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
                 <p className="text-[11px] text-slate-400 leading-relaxed italic font-medium px-1">
                   {msg.data.description}
                 </p>
-                
+
                 {msg.data.code && (
                   <div className="mt-4 rounded-lg bg-black/40 border border-white/5 p-2 overflow-hidden relative group/stratcode">
                     <button
@@ -300,7 +328,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
                 <StatItem label="거래" value={msg.data.trades} />
                 <StatItem label="손익 비율" value={msg.data.pf} />
               </div>
-              
+
               <button
                 onClick={() => onShowCode(String(msg.data?.code || ""), "Mined Strategy", msg.data?.payload)}
                 className="mt-2 flex items-center justify-center gap-2 w-full px-4 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-lg text-[10px] font-bold text-slate-400 hover:bg-white/[0.1] hover:text-white transition-all"
@@ -316,15 +344,18 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
   );
 });
 
-export default function ChatInterface({ context = {}, onBacktestGenerated, onApplyCode }: ChatInterfaceProps) {
+export default function ChatInterface({
+  context = {},
+  onBacktestGenerated,
+  onApplyCode,
+}: ChatInterfaceProps) {
+  const pathname = usePathname();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [panelMode, setPanelMode] = useState<"pipeline" | "chat" | "optimize" | "regime">("pipeline");
+  const [panelMode, setPanelMode] = useState<"pipeline" | "chat">("chat");
   const [chatModel, setChatModel] = useState("deepseek-v4-flash");
   const [showModelSelect, setShowModelSelect] = useState(false);
-  const [autoBusy, setAutoBusy] = useState(false);
-  const [autoStatus, setAutoStatus] = useState<Record<string, any> | null>(null);
   const [statusText, setStatusText] = useState("AI 분석 중...");
   const [currentStage, setCurrentStage] = useState(0);
   const [totalStages, setTotalStages] = useState(0);
@@ -338,23 +369,37 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
   // 🆔 세션 ID 관리 (localStorage 유지)
   const sessionIdRef = useRef<string>("");
-  const [isGlobalMode, setIsGlobalMode] = useState(true);
+  const [isGlobalMode, setIsGlobalMode] = useState(false);
   const [sessionInput, setSessionInput] = useState("");
   const [isClearing, setIsClearing] = useState(false);
 
+  const sessionScope = useMemo(() => {
+    if (pathname === "/backtest") return "backtest";
+    if (pathname === "/terminal") return "terminal";
+    return "global";
+  }, [pathname]);
+
+  const allowGlobalMode = sessionScope === "global";
+  const sessionPrefix = `${sessionScope}-session-`;
+  const storageSessionKey = `chat_session_id:${sessionScope}`;
+
+  const createScopedSessionId = useCallback(() => {
+    return `${sessionPrefix}${Math.random().toString(36).slice(2, 11)}-${Date.now()}`;
+  }, [sessionPrefix]);
+
   const loadHistory = async (sid?: string, global: boolean = true) => {
     try {
-      const queryParams = new URLSearchParams({ 
+      const queryParams = new URLSearchParams({
         t: Date.now().toString(),
         limit: "200" // 글로벌 모드이므로 좀 더 많이 가져옴
       });
       if (!global && sid) {
         queryParams.set("session_id", sid);
       }
-      
+
       const res = await fetchWithBypass(
         `/api/chat/history?${queryParams.toString()}`,
-        { 
+        {
           timeoutMs: 15000,
           cache: "no-store",
           headers: {
@@ -374,6 +419,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
             content: m.content || "",
             type: (m.type === "analysis" ? "text" : (m.type === "design" ? "design" : (m.type || "text"))) as any,
             data: m.data ?? {},
+            createdAt: m.created_at ?? m.createdAt ?? m.timestamp,
           }));
         setMessages(historyMessages);
       }
@@ -383,21 +429,21 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   };
 
   useEffect(() => {
-    let sid = localStorage.getItem("chat_session_id");
-    if (!sid) {
-      sid = `session-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`;
-      localStorage.setItem("chat_session_id", sid);
+    let sid = localStorage.getItem(storageSessionKey);
+    if (!sid || !sid.startsWith(sessionPrefix)) {
+      sid = createScopedSessionId();
+      localStorage.setItem(storageSessionKey, sid);
     }
     sessionIdRef.current = sid;
     setSessionInput(sid);
-    
-    // 기본적으로 전체 히스토리(글로벌) 로드
-    loadHistory(undefined, true);
-  }, []);
+
+    setIsGlobalMode(false);
+    loadHistory(sid, false);
+  }, [createScopedSessionId, sessionPrefix, storageSessionKey]);
 
   const handleSwitchSession = (newSid: string) => {
     if (!newSid.trim()) return;
-    localStorage.setItem("chat_session_id", newSid.trim());
+    localStorage.setItem(storageSessionKey, newSid.trim());
     sessionIdRef.current = newSid.trim();
     setSessionInput(newSid.trim());
     setIsGlobalMode(false);
@@ -405,14 +451,15 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   };
 
   const toggleGlobalMode = () => {
+    if (!allowGlobalMode) return;
     const nextGlobal = !isGlobalMode;
     setIsGlobalMode(nextGlobal);
     loadHistory(sessionIdRef.current, nextGlobal);
   };
 
   const handleNewSession = () => {
-    const newSid = `session-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`;
-    localStorage.setItem("chat_session_id", newSid);
+    const newSid = createScopedSessionId();
+    localStorage.setItem(storageSessionKey, newSid);
     sessionIdRef.current = newSid;
     setSessionInput(newSid);
     setIsGlobalMode(false);
@@ -431,12 +478,29 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     return `${hh}:${mm}:${ss}`;
   };
 
+  const resolveMessageTs = (msg: ChatMessage): number | null => {
+    const candidates = [msg.createdAt, msg.data?.created_at, msg.data?.timestamp];
+    for (const candidate of candidates) {
+      if (candidate === undefined || candidate === null || candidate === "") continue;
+      const numeric = Number(candidate);
+      if (Number.isFinite(numeric) && numeric > 946684800000) return numeric;
+      const parsed = Date.parse(String(candidate));
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    const match = String(msg.id || "").match(/(?:^|[^\d])(\d{13})(?:[^\d]|$)/);
+    if (match) {
+      const ts = Number(match[1]);
+      if (Number.isFinite(ts) && ts > 946684800000) return ts;
+    }
+    return null;
+  };
+
   const chatLogLines = useMemo(() => {
     return messages
       .slice(-120)
       .map((msg) => {
-        const rawTs = Number(String(msg.id || "").split("-")[0]);
-        const ts = Number.isFinite(rawTs) ? rawTs : 0;
+        const ts = resolveMessageTs(msg);
+        const timeLabel = ts !== null ? formatHms(ts) : "--:--:--";
         const role = msg.role === "user" ? "USER" : "AI";
         let text = String(msg.content || "").replace(/\s+/g, " ").trim();
         if (!text && msg.type === "invocation") text = `[invoke] ${String(msg.data?.skill || "")}`;
@@ -444,97 +508,11 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
         if (!text && msg.type === "backtest") text = "[backtest] 완료";
         if (!text) text = `[${msg.type || "message"}]`;
         if (text.length > 240) text = `${text.slice(0, 240)}…`;
-        return `[${formatHms(ts)}] ${role} ${text}`;
+        return `[${timeLabel}] ${role} ${text}`;
       })
       .filter(Boolean);
   }, [messages]);
 
-  const fetchAutoStatus = useCallback(async () => {
-    try {
-      const res = await fetchWithBypass(`/api/chat/llm-loop/automation/status?t=${Date.now()}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      setAutoStatus(data?.status || null);
-    } catch (e) {
-      console.error("automation status fetch failed", e);
-    }
-  }, []);
-
-  useEffect(() => {
-    const ms = autoStatus?.running ? 1500 : 3500;
-    const timer = window.setInterval(fetchAutoStatus, ms);
-    return () => window.clearInterval(timer);
-  }, [fetchAutoStatus, autoStatus?.running]);
-
-  const openRegimePanel = useCallback(() => {
-    setPanelMode("regime");
-    fetchAutoStatus();
-  }, [fetchAutoStatus]);
-
-  const handleStartAuto = useCallback(async () => {
-    if (autoBusy) return;
-    setAutoBusy(true);
-    try {
-      const payload = {
-        symbol: String(context?.symbol || "BTCUSDT"),
-        timeframe: String(context?.timeframe || "15m"),
-        regime_timeframe: "1h",
-        start_date: String(context?.start_date || "2021-01-01"),
-        end_date: String(context?.end_date || "2026-01-31"),
-        strategies: ["Bull Strategy 01", "Bull Strategy 02", "Bull Strategy 03", "Bull Strategy 04"],
-        iterations: 1,
-        interval_minutes: 5,
-        fallback_minutes: 30,
-        apply_best_db: true,
-        parallel_strategies: 2,
-        run_immediately: true,
-      };
-      const res = await fetchWithBypass("/api/chat/llm-loop/automation/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      console.error("start automation failed", e);
-    } finally {
-      setAutoBusy(false);
-      fetchAutoStatus();
-    }
-  }, [autoBusy, context, fetchAutoStatus]);
-
-  const handleStopAuto = useCallback(async () => {
-    if (autoBusy) return;
-    setAutoBusy(true);
-    try {
-      const res = await fetchWithBypass("/api/chat/llm-loop/automation/stop", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ terminate_running: true }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      console.error("stop automation failed", e);
-    } finally {
-      setAutoBusy(false);
-      fetchAutoStatus();
-    }
-  }, [autoBusy, fetchAutoStatus]);
-
-  const autoStatusLabel = useMemo(() => {
-    const enabled = Boolean(autoStatus?.enabled);
-    const running = Boolean(autoStatus?.running);
-    return `AUTO: ${enabled ? "ON" : "OFF"}${running ? " · RUNNING" : ""}`;
-  }, [autoStatus]);
-
-  const autoMetaLabel = useMemo(() => {
-    const total = Number(autoStatus?.total_runs || 0);
-    const success = Number(autoStatus?.success_runs || 0);
-    const improved = Number(autoStatus?.improved_runs || 0);
-    return `성공 ${success}/${total} · 개선런 ${improved}/${total}`;
-  }, [autoStatus]);
   const loadSessions = async () => {
     try {
       const res = await fetchWithBypass("/api/chat/sessions?limit=20");
@@ -542,7 +520,14 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
         const text = await res.text();
         if (!text) return;
         const data = JSON.parse(text);
-        if (data.success) setSessions(data.sessions || []);
+        if (data.success) {
+          const rows = Array.isArray(data.sessions) ? data.sessions : [];
+          const filtered = rows.filter((session: any) => {
+            const sid = String(session?.session_id || "");
+            return sid.startsWith(sessionPrefix);
+          });
+          setSessions(filtered);
+        }
       }
     } catch (e) {
       console.error("Sessions fetch failed:", e);
@@ -565,7 +550,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     } else {
       loadSessions();
     }
-  }, [isLoading, (messages.length > 0 ? messages[messages.length-1].content.length : 0)]);
+  }, [isLoading, (messages.length > 0 ? messages[messages.length - 1].content.length : 0)]);
 
   const handleClearSession = async () => {
     const sid = sessionIdRef.current;
@@ -731,8 +716,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           try {
             const raw = line.replace("data: ", "").trim();
             if (!raw || raw === "[DONE]") continue;
-            if (!raw.startsWith("{")) continue; 
-            
+            if (!raw.startsWith("{")) continue;
+
             const event = JSON.parse(raw);
 
             switch (event.type) {
@@ -789,9 +774,9 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                     (stageId
                       ? last.id.startsWith(stageId)
                       : !last.id.includes("-invoke-") &&
-                        !last.id.includes("-design") &&
-                        !last.id.includes("-strategy") &&
-                        !last.id.includes("-backtest"));
+                      !last.id.includes("-design") &&
+                      !last.id.includes("-strategy") &&
+                      !last.id.includes("-backtest"));
 
                   if (canAppend) {
                     const next = [...prev];
@@ -941,7 +926,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     const newUserMsg: ChatMessage = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       role: "user",
-      content: userMessage
+      content: userMessage,
+      createdAt: Date.now(),
     };
 
     appendMessage(newUserMsg);
@@ -974,7 +960,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
       const response = await fetchWithBypass(url, {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
           "Accept": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -1014,12 +1000,12 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-          
+
           try {
             const raw = line.replace("data: ", "").trim();
             if (!raw) continue;
             const event = JSON.parse(raw);
-            
+
             switch (event.type) {
               case "status":
                 setStatusText(event.content);
@@ -1072,7 +1058,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                   const stageId = currentStageIdRef.current;
                   // 어시스턴트의 연속된 추론은 무조건 하나의 블록으로 병합
                   const canAppend = last && last.role === "assistant" && last.type === "thought";
-                  
+
                   if (canAppend) {
                     const next = [...prev];
                     next[next.length - 1] = { ...last, content: last.content + event.content };
@@ -1118,13 +1104,13 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                     payload: event.payload
                   },
                 });
-                
+
                 // [AUTO-APPLY] 백테스트 완료 시 발굴된 코드를 에디터에 즉시 자동 적용 (사용자 편의성)
                 const finalCode = event.data.code || event.strategy_code;
                 if (finalCode && onApplyCode) {
                   onApplyCode(finalCode, event.data?.title || "Mined Strategy", event.payload);
                 }
-                
+
                 if (event.payload && onBacktestGenerated) {
                   onBacktestGenerated(event.payload);
                 }
@@ -1259,18 +1245,19 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
       {/* 🆔 헤더 세션 컨트롤 바 */}
       <div className="px-4 py-3 border-b border-white/[0.05] bg-background/40 backdrop-blur-md flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <button
-            onClick={toggleGlobalMode}
-            className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border ${
-              isGlobalMode 
-                ? 'bg-purple-500/20 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.15)]' 
-                : 'bg-white/[0.03] border-white/[0.1] text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            {isGlobalMode ? 'Global On' : 'Session Only'}
-          </button>
-          
-          <select 
+          {allowGlobalMode && (
+            <button
+              onClick={toggleGlobalMode}
+              className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border ${isGlobalMode
+                  ? 'bg-purple-500/20 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.15)]'
+                  : 'bg-white/[0.03] border-white/[0.1] text-slate-500 hover:text-slate-300'
+                }`}
+            >
+              {isGlobalMode ? 'Global On' : 'Session Only'}
+            </button>
+          )}
+
+          <select
             value={isGlobalMode ? "" : sessionIdRef.current}
             onChange={(e) => e.target.value && handleSwitchSession(e.target.value)}
             className="bg-white/[0.03] border border-white/[0.08] rounded-lg px-2 py-1 text-[10px] text-slate-400 focus:ring-0 focus:border-purple-500/50 outline-none max-w-[150px] font-mono"
@@ -1282,6 +1269,22 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
               </option>
             ))}
           </select>
+
+          {/* Mode Toggle + Model Selector */}
+          <div className="flex items-center gap-2 ml-2 border-l border-white/10 pl-4">
+            {/* Pipeline 모드 ON/OFF 토글 */}
+            <button
+              onClick={() => setPanelMode(panelMode === "pipeline" ? "chat" : "pipeline")}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 border ${panelMode === "pipeline"
+                  ? 'bg-purple-600/40 text-purple-100 border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                  : 'bg-white/[0.04] text-slate-500 border-white/[0.06] hover:text-slate-300 hover:bg-white/[0.08]'
+                }`}
+            >
+              <GitBranch size={10} />
+              PIPELINE
+            </button>
+
+          </div>
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -1314,100 +1317,59 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
       {/* Chat Messages - Virtualized for Scale */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
-        {panelMode === "optimize" ? (
-          <div className="h-full overflow-y-auto no-scrollbar p-2">
-            <OptimizationMiniPanel
-              symbol={String(context?.symbol || "BTCUSDT")}
-              timeframe={String(context?.timeframe || "1h")}
-              startDate={String(context?.start_date || "")}
-              endDate={String(context?.end_date || "")}
-              strategy={String(context?.strategy || context?.strategy_title || "custom")}
-              strategyCode={String(context?.editor_code || context?.current_strategy?.code || "")}
-              busy={isLoading}
-              onApplyOptimizedCode={(code, payload) => {
-                if (onApplyCode) {
-                  onApplyCode(code, String(context?.strategy_title || context?.strategy || "Optimized Strategy"), payload);
-                }
-                if (payload && onBacktestGenerated) {
-                  onBacktestGenerated(payload);
-                }
-              }}
-            />
-          </div>
-        ) : panelMode === "regime" ? (
-          <RegimeChatPanel
-            context={context}
-            busy={isLoading}
-            autoBusy={autoBusy}
-            autoRunning={Boolean(autoStatus?.running)}
-            autoStatusLabel={autoStatusLabel}
-            autoMetaLabel={autoMetaLabel}
-            streamStatusLabel={isLoading ? statusText : ""}
-            streamElapsedSeconds={stageElapsedSeconds}
-            chatLogLines={chatLogLines}
-            autoLastError={String(autoStatus?.last_error || "")}
-            autoLastSummaryPath={String(autoStatus?.last_summary_path || "")}
-            autoLastStdoutTail={String(autoStatus?.last_stdout_tail || "")}
-            autoCurrentStdoutTail={String(autoStatus?.current_stdout_tail || "")}
-            onRunPrompt={(prompt) => handleSend(prompt)}
-            onStartAuto={handleStartAuto}
-            onStopAuto={handleStopAuto}
-          />
-        ) : (
-          <Virtuoso
-            ref={virtuosoRef}
-            data={messages}
-            followOutput="smooth"
-            className="custom-scrollbar"
-            alignToBottom
-            itemContent={(index: number, msg: ChatMessage) => (
-              <div className="px-4">
-                <MessageItem
-                  msg={msg}
-                  onShowCode={handleShowCode}
-                  onSendMessage={handleSend}
-                  isStreaming={index === messages.length - 1 && isLoading}
-                  onChoiceSelect={(choiceValue: string, originalMsg: ChatMessage, design?: any) => handleCodeGenModeChoice(choiceValue, originalMsg, design)}
-                  onDesignCodeRequest={handleDesignCodeRequest}
-                />
-              </div>
-            )}
-            components={{
-              Header: () => (
-                <div className="pt-4">
-                  {messages.length === 0 && !isLoading && !isGlobalMode && (
-                    <div className="flex flex-col gap-3 items-center justify-center space-y-4 opacity-80 py-10">
-                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center border border-purple-500/20 mb-2">
-                        <Zap size={24} className="text-purple-400 animate-pulse" />
-                      </div>
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Get Started with AI Strategy</h3>
-                      <div className="flex flex-col gap-2 w-full max-w-sm px-4">
-                        {EXAMPLE_PROMPTS.map((prompt, i) => (
-                          <button
-                            key={i}
-                            onClick={() => handleSend(prompt)}
-                            className="text-left px-5 py-3 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-purple-500/30 hover:bg-purple-500/5 transition-all group"
-                          >
-                            <p className="text-[11px] text-slate-400 group-hover:text-purple-300 leading-relaxed font-medium">
-                              {prompt}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
+        <Virtuoso
+          ref={virtuosoRef}
+          data={messages}
+          followOutput="smooth"
+          className="custom-scrollbar"
+          alignToBottom
+          itemContent={(index: number, msg: ChatMessage) => (
+            <div className="px-4">
+              <MessageItem
+                msg={msg}
+                onShowCode={handleShowCode}
+                onSendMessage={handleSend}
+                isStreaming={index === messages.length - 1 && isLoading}
+                onChoiceSelect={(choiceValue: string, originalMsg: ChatMessage, design?: any) => handleCodeGenModeChoice(choiceValue, originalMsg, design)}
+                onDesignCodeRequest={handleDesignCodeRequest}
+              />
+            </div>
+          )}
+          components={{
+            Header: () => (
+              <div className="pt-4">
+                {messages.length === 0 && !isLoading && !isGlobalMode && (
+                  <div className="flex flex-col gap-3 items-center justify-center space-y-4 opacity-80 py-10">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center border border-purple-500/20 mb-2">
+                      <Zap size={24} className="text-purple-400 animate-pulse" />
                     </div>
-                  )}
-                </div>
-              ),
-              Footer: () => <div className="h-0 pointer-events-none" />
-            }}
-          />
-        )}
+                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Get Started with AI Strategy</h3>
+                    <div className="flex flex-col gap-2 w-full max-w-sm px-4">
+                      {EXAMPLE_PROMPTS.map((prompt, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleSend(prompt)}
+                          className="text-left px-5 py-3 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-purple-500/30 hover:bg-purple-500/5 transition-all group"
+                        >
+                          <p className="text-[11px] text-slate-400 group-hover:text-purple-300 leading-relaxed font-medium">
+                            {prompt}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ),
+            Footer: () => <div className="h-0 pointer-events-none" />
+          }}
+        />
       </div>
 
       {/* Modern Integrated Chat Input Area */}
       <div className="px-5 pb-6 pt-2 bg-transparent">
         <div className="max-w-4xl mx-auto flex flex-col gap-3">
-          
+
           {/* Subtle Status Info */}
           {isLoading && (
             <div className="flex items-center gap-3 px-4 animate-in fade-in slide-in-from-bottom-1 duration-500">
@@ -1426,11 +1388,10 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                   {Array.from({ length: totalStages }, (_, idx) => idx + 1).map((s) => (
                     <div
                       key={s}
-                      className={`h-1.5 w-1.5 rounded-full transition-all duration-700 ease-out ${
-                        s <= currentStage
+                      className={`h-1.5 w-1.5 rounded-full transition-all duration-700 ease-out ${s <= currentStage
                           ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.8)] scale-110'
                           : 'bg-white/10'
-                      }`}
+                        }`}
                     />
                   ))}
                 </div>
@@ -1438,58 +1399,11 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
             </div>
           )}
 
-          {/* Mode Toggle + Model Selector */}
-          <div className="flex items-center gap-2 px-1">
-            {/* Pipeline / Chat 모드 토글 */}
-            <div className="flex items-center rounded-sm bg-white/[0.04] border border-white/[0.06] p-0.5 gap-0.5 font-mono">
-              <button
-                onClick={() => setPanelMode("pipeline")}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
-                  panelMode === "pipeline"
-                    ? 'bg-purple-600/40 text-purple-100 border border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <GitBranch size={10} />
-                PIPELINE
-              </button>
-              <button
-                onClick={() => setPanelMode("chat")}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
-                  panelMode === "chat"
-                    ? 'bg-white/10 text-white border border-white/20'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <MessageSquare size={10} />
-                CHAT
-              </button>
-              <button
-                onClick={() => setPanelMode("optimize")}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
-                  panelMode === "optimize"
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <SlidersHorizontal size={10} />
-                OPTIMIZE
-              </button>
-              <button
-                onClick={openRegimePanel}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
-                  panelMode === "regime"
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-[0_0_10px_rgba(34,211,238,0.2)]'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <Zap size={10} />
-                REGIME
-              </button>
-            </div>
 
-            {/* 모델 셀렉터 (Chat 모드일 때만 표시) */}
-            {panelMode === "chat" && (
+
+          {/* 모델 셀렉터 (Chat 모드일 때만 표시) */}
+          {panelMode === "chat" && (
+            <div className="flex items-center gap-2 px-1">
               <div className="relative" data-model-select>
                 <button
                   onClick={() => setShowModelSelect(v => !v)}
@@ -1506,65 +1420,60 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                       "minimax-m2.5",
                       "deepseek-v3.1-terminus"
                     ].map(m => (
-                    <button
-                      key={m}
-                      onClick={() => { setChatModel(m); setShowModelSelect(false); }}
-                      className={`w-full text-left px-3 py-2.5 text-[11px] font-mono transition-all duration-200 ${
-                        chatModel === m
-                          ? 'bg-white/[0.08] text-white'
-                          : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="truncate flex-1">{m}</span>
-                        {m === "minimax-m2.5" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-[9px] text-purple-400 font-sans whitespace-nowrap">핵심</span>}
-                        {m === "deepseek-v4-flash" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-green-500/10 text-[9px] text-green-400 font-sans whitespace-nowrap">⭐ 최고속</span>}
-                        {m === "minimax-m2.5" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-[9px] text-purple-400 font-sans whitespace-nowrap">안정</span>}
-                        {m === "deepseek-v3.1-terminus" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-blue-500/10 text-[9px] text-blue-400 font-sans whitespace-nowrap">강력</span>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            )}
-          </div>
-
-          {/* Integrated Input Bar */}
-          {panelMode !== "optimize" && panelMode !== "regime" && (
-            <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${
-              isLoading 
-                ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]' 
-                : 'border-white/[0.08] bg-white/[0.02] shadow-2xl hover:border-white/[0.12] focus-within:border-purple-500/30 focus-within:bg-white/[0.04]'
-            }`}>
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                disabled={isLoading}
-                placeholder={isLoading ? "" : "Explore AI Trading Ideas..."}
-                className="flex-1 bg-transparent border-none focus:ring-0 text-[13px] text-slate-100 placeholder:text-slate-600 resize-none py-2.5 px-4 max-h-40 overflow-y-auto custom-scrollbar"
-                rows={1}
-              />
-              
-              <button
-                onClick={() => handleSend()}
-                disabled={!input.trim() || isLoading}
-                className={`p-2.5 rounded-[18px] transition-all duration-300 flex items-center justify-center ${
-                  input.trim() && !isLoading 
-                    ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20 hover:scale-105 hover:bg-purple-500 active:scale-95' 
-                    : 'text-slate-700 opacity-40 cursor-not-allowed'
-                }`}
-              >
-                <Send size={18} fill={input.trim() && !isLoading ? "currentColor" : "none"} />
-              </button>
+                      <button
+                        key={m}
+                        onClick={() => { setChatModel(m); setShowModelSelect(false); }}
+                        className={`w-full text-left px-3 py-2.5 text-[11px] font-mono transition-all duration-200 ${chatModel === m
+                            ? 'bg-white/[0.08] text-white'
+                            : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200'
+                          }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="truncate flex-1">{m}</span>
+                          {m === "minimax-m2.5" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-[9px] text-purple-400 font-sans whitespace-nowrap">핵심</span>}
+                          {m === "deepseek-v4-flash" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-green-500/10 text-[9px] text-green-400 font-sans whitespace-nowrap">⭐ 최고속</span>}
+                          {m === "minimax-m2.5" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-[9px] text-purple-400 font-sans whitespace-nowrap">안정</span>}
+                          {m === "deepseek-v3.1-terminus" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-blue-500/10 text-[9px] text-blue-400 font-sans whitespace-nowrap">강력</span>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
+
+          {/* Integrated Input Bar */}
+          <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${isLoading
+              ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]'
+              : 'border-white/[0.08] bg-white/[0.02] shadow-2xl hover:border-white/[0.12] focus-within:border-purple-500/30 focus-within:bg-white/[0.04]'
+            }`}>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              disabled={isLoading}
+              placeholder={isLoading ? "" : "Explore AI Trading Ideas..."}
+              className="flex-1 bg-transparent border-none focus:ring-0 text-[13px] text-slate-100 placeholder:text-slate-600 resize-none py-2.5 px-4 max-h-40 overflow-y-auto custom-scrollbar"
+              rows={1}
+            />
+
+            <button
+              onClick={() => handleSend()}
+              disabled={!input.trim() || isLoading}
+              className={`p-2.5 rounded-[18px] transition-all duration-300 flex items-center justify-center ${input.trim() && !isLoading
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20 hover:scale-105 hover:bg-purple-500 active:scale-95'
+                  : 'text-slate-700 opacity-40 cursor-not-allowed'
+                }`}
+            >
+              <Send size={18} fill={input.trim() && !isLoading ? "currentColor" : "none"} />
+            </button>
+          </div>
         </div>
       </div>
     </div>

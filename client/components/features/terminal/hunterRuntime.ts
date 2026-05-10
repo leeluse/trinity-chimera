@@ -1,8 +1,6 @@
 /* eslint-disable */
 
-import { subscribeTickerBus } from "./sharedBinanceBus";
-
-export type HunterSortMode = 'total' | 'cross' | 'sqz' | 'whale' | 'combo';
+export type HunterSortMode = 'total' | 'cross' | 'sqz' | 'whale';
 
 export interface HunterWsState {
   bn: boolean;
@@ -27,6 +25,7 @@ export interface HunterRegime {
   longFlowRatio: number;
 }
 
+
 export interface HunterSignalTag {
   n: string;
   d: number;
@@ -44,7 +43,6 @@ export interface HunterRow {
   cvd: number;
   mult: number;
   chg9: number | null;
-  regimeMult: number;
   setupCount: number;
   sig: HunterSignalTag[];
   aGradeCount: number;
@@ -60,6 +58,14 @@ export interface HunterPreSignal {
   ts: number;
   title: string;
   desc: string;
+  score: number;
+}
+
+export interface CrimeSignalLike {
+  symbol: string;
+  type: string;
+  message: string;
+  timestamp: number;
   score: number;
 }
 
@@ -83,10 +89,10 @@ export interface HunterRuntimeSnapshot {
   statusText: string;
   ws: HunterWsState;
   summary: HunterSummary;
-  regime: HunterRegime;
   rows: HunterRow[];
   preSignals: HunterPreSignal[];
   leaderboard: HunterLeaderboardItem[];
+  regime: HunterRegime;
   updatedAt: number;
 }
 
@@ -98,6 +104,7 @@ export interface HunterRuntimeApi {
   toggleFreeze: () => void;
   setSort: (mode: HunterSortMode) => void;
   togglePin: (sym: string) => void;
+  pushCrimeSignals: (signals: CrimeSignalLike[]) => void;
 }
 
 const C = {
@@ -119,12 +126,21 @@ const C = {
 
   preCardMax: 40,
   preCardTtl: 600000,
-  regimeThrottle: 5000,
   sortDelay: 5000,
   warmupMs: 30000,
 
   latchDur: { 1: 60000, 2: 45000, 3: 30000 },
   hardResetThresh: 30,
+};
+
+
+const CRIME = {
+  ttlMs: 30 * 60 * 1000,
+  cooldownMs: {
+    CRIME_EARLY: 15 * 60 * 1000,
+    CRIME_BUILD: 20 * 60 * 1000,
+    CRIME_IGNITION: 10 * 60 * 1000,
+  } as Record<string, number>,
 };
 
 const TIER = {
@@ -138,21 +154,41 @@ function cloneSnapshot(s: HunterRuntimeSnapshot): HunterRuntimeSnapshot {
     ...s,
     ws: { ...s.ws },
     summary: { ...s.summary },
-    regime: { ...s.regime },
     rows: s.rows.map((r) => ({ ...r, sig: r.sig.map((x) => ({ ...x })) })),
     preSignals: s.preSignals.map((p) => ({ ...p })),
     leaderboard: s.leaderboard.map((l) => ({ ...l, tags: { ...l.tags } })),
   };
 }
 
+type RuntimeInstance = {
+  api: HunterRuntimeApi;
+  setCallback: (fn: (s: HunterRuntimeSnapshot) => void) => void;
+  emitNow: () => void;
+};
+let _singleton: RuntimeInstance | null = null;
+
 export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) => void) {
+  if (_singleton) {
+    _singleton.setCallback(onUpdate);
+    _singleton.emitNow();
+    return {
+      api: _singleton.api,
+      cleanup: () => { _singleton?.setCallback(() => {}); },
+    };
+  }
+
+  return _createRuntime(onUpdate);
+}
+
+function _createRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) => void) {
+  let _onUpdate = onUpdate;
   let running = false;
   let muted = false;
   let focusMode = false;
   let isFrozen = false;
   let sortMode: HunterSortMode = 'total';
 
-  let unsubGlobal: (() => void) | null = null;
+  let gWs: WebSocket | null = null;
   let bnWs: WebSocket | null = null;
   let oxWs: WebSocket | null = null;
   let byWs: WebSocket | null = null;
@@ -163,6 +199,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
   let fundIv: any = null;
   let oiIv: any = null;
   let lsrIv: any = null;
+  let cleanIv: any = null;
   let regimeIv: any = null;
 
   const M: Record<string, any> = {};
@@ -185,9 +222,17 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
 
   const preSigHistory: any[] = [];
   const preSigCooldown: Record<string, number> = {};
+  let crimeSignals: CrimeSignalLike[] = [];
+  const crimeCooldown: Record<string, number> = {};
+  let crimeDirty = false;
 
-  let lastRegimeUpdate = 0;
-  const regimeState = { btcAltDelta: 0, avgFunding: 0, ready: false };
+  const regimeState: HunterRegime = {
+    ready: false,
+    btcAltDelta: 0,
+    avgFunding: 0,
+    oiExpansionRate: 0,
+    longFlowRatio: 50,
+  };
 
   const ui: HunterRuntimeSnapshot = {
     running: false,
@@ -198,10 +243,10 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     statusText: '대기중',
     ws: { bn: false, okx: false, bybit: false, bitget: false },
     summary: { snipers: 0, s2plus: 0, s1: 0, bias: '—', pre: 0 },
-    regime: { ready: false, btcAltDelta: 0, avgFunding: 0, oiExpansionRate: 0, longFlowRatio: 50 },
     rows: [],
     preSignals: [],
     leaderboard: [],
+    regime: { ...regimeState },
     updatedAt: Date.now(),
   };
 
@@ -211,8 +256,9 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     ui.focusMode = focusMode;
     ui.frozen = isFrozen;
     ui.sortMode = sortMode;
+    ui.regime = { ...regimeState };
     ui.updatedAt = Date.now();
-    onUpdate(cloneSnapshot(ui));
+    _onUpdate(cloneSnapshot(ui));
   }
 
   function getSymTier(sym: string) {
@@ -236,9 +282,9 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
   }
 
   function playBeep(f: number) {
-    if (muted) return;
+    if (muted || typeof window === 'undefined') return;
     try {
-      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
       if (!Ctx) return;
       const c = new Ctx();
       const o = c.createOscillator();
@@ -252,20 +298,103 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
       o.onended = () => {
         try {
           void c.close();
-        } catch (_e) {}
+        } catch (_e) { }
       };
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
-  function clearTimer(refName: 'scanIv' | 'decayIv' | 'fundIv' | 'oiIv' | 'lsrIv' | 'regimeIv') {
-    const value = { scanIv, decayIv, fundIv, oiIv, lsrIv, regimeIv }[refName];
+  function clearTimer(refName: 'scanIv' | 'decayIv' | 'fundIv' | 'oiIv' | 'lsrIv' | 'cleanIv' | 'regimeIv') {
+    const value = { scanIv, decayIv, fundIv, oiIv, lsrIv, cleanIv, regimeIv }[refName];
     if (value) clearInterval(value);
     if (refName === 'scanIv') scanIv = null;
     if (refName === 'decayIv') decayIv = null;
     if (refName === 'fundIv') fundIv = null;
     if (refName === 'oiIv') oiIv = null;
     if (refName === 'lsrIv') lsrIv = null;
+    if (refName === 'cleanIv') cleanIv = null;
     if (refName === 'regimeIv') regimeIv = null;
+  }
+
+  function crimeToPreSignal(s: CrimeSignalLike): HunterPreSignal {
+    return {
+      sym: s.symbol,
+      type: `crime:${s.type}`,
+      dir: s.type === "EXIT_ALERT" || s.type === "TRAP_ALERT" ? -1 : 1,
+      ts: s.timestamp,
+      title: `CRIME ${s.type}`,
+      desc: s.message,
+      score: s.score,
+    };
+  }
+
+  function fireCrimeSignal(symbol: string, type: keyof typeof CRIME.cooldownMs, message: string, score: number) {
+    const now = Date.now();
+    const key = `${symbol}:${type}`;
+    const cd = CRIME.cooldownMs[type] ?? 15 * 60 * 1000;
+    if (crimeCooldown[key] && now - crimeCooldown[key] < cd) return;
+
+    crimeCooldown[key] = now;
+    crimeSignals.unshift({ symbol, type, message, timestamp: now, score });
+    crimeSignals = crimeSignals
+      .filter((s) => now - s.timestamp < CRIME.ttlMs)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, C.preCardMax);
+    crimeDirty = true;
+  }
+
+  function scanCrimeSetup(sym: string, sd: any, cvdT: number, mult: number) {
+    const m = M[sym];
+    if (!m || !OI[sym] || FR[sym] === undefined) return;
+
+    const oiPct = Number(OI[sym].pctChg || 0); // decimal, 0.015 = +1.5%
+    const funding = Number(FR[sym] || 0);       // decimal, -0.0005 = -0.05%
+    const hasLsr = LSR[sym] !== undefined;
+    const longPct = hasLsr ? Number(LSR[sym].longPct) : 0.5;
+    const shortRatio = 1 - longPct;
+    const trendAbs = Math.abs(Number(m.trend5m || 0));
+    const cvdIdx = Math.max(0, sd.cvdTotalHist.length - 30);
+    const cvdDelta = cvdT - (sd.cvdTotalHist[cvdIdx] ?? cvdT);
+    const depth = sd.bnBidVol + sd.bgBidVol + sd.bnAskVol + sd.bgAskVol;
+    const askShare = depth > 0 ? (sd.bnAskVol + sd.bgAskVol) / depth : 0.5;
+
+    // 0~100 approximate squeeze fuel. It is only for Crime badge messaging, not S1/S2/S3 scoring.
+    const oiFuel = Math.min(35, Math.max(0, oiPct * 1400));
+    const fundingFuel = funding < 0 ? Math.min(25, Math.abs(funding) * 50000) : 0;
+    const shortFuel = hasLsr ? Math.min(25, Math.max(0, (shortRatio - 0.5) * 250)) : 0;
+    const flowFuel = Math.min(15, Math.max(0, mult * 2 + (cvdDelta > 0 ? 5 : 0)));
+    const squeezeFuel = Math.round(Math.min(100, oiFuel + fundingFuel + shortFuel + flowFuel));
+
+    const flatEnough = trendAbs < 0.012;
+    const cvdOk = cvdDelta > 0;
+    const askThin = askShare < 0.46;
+
+    // LSR 데이터 없을 땐 shortRatio 조건 생략 — OI + 펀딩만으로 판단
+    if (oiPct > 0.008 && funding < -0.0002 && (!hasLsr || shortRatio > 0.52)) {
+      fireCrimeSignal(
+        sym,
+        'CRIME_EARLY',
+        `EARLY · OI ${(oiPct * 100).toFixed(2)}% · FR ${(funding * 100).toFixed(3)}%${hasLsr ? ` · SHORT ${(shortRatio * 100).toFixed(0)}%` : ''} · FUEL ${squeezeFuel}`,
+        squeezeFuel,
+      );
+    }
+
+    if (oiPct > 0.015 && funding < -0.0005 && (!hasLsr || shortRatio > 0.58) && flatEnough && cvdOk) {
+      fireCrimeSignal(
+        sym,
+        'CRIME_BUILD',
+        `BUILD · OI ${(oiPct * 100).toFixed(2)}% · CVD+ · 가격횡보${hasLsr ? ` · SHORT ${(shortRatio * 100).toFixed(0)}%` : ''} · FUEL ${squeezeFuel}`,
+        Math.max(70, squeezeFuel),
+      );
+    }
+
+    if (squeezeFuel >= 70 && oiPct > 0.012 && funding < -0.00035 && (!hasLsr || shortRatio > 0.55) && cvdOk && (askThin || mult > 3)) {
+      fireCrimeSignal(
+        sym,
+        'CRIME_IGNITION',
+        `IGNITION · FUEL ${squeezeFuel} · OI ${(oiPct * 100).toFixed(2)}% · ASK ${Math.round(askShare * 100)}%${hasLsr ? ` · SHORT ${(shortRatio * 100).toFixed(0)}%` : ''}`,
+        Math.max(85, squeezeFuel),
+      );
+    }
   }
 
   function closeWs(ws: WebSocket | null) {
@@ -276,28 +405,29 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
       ws.onclose = null;
       ws.onerror = null;
       ws.close();
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   function stopSystem() {
     running = false;
     ui.statusText = '중지됨';
+    resetLeaderboardHistory();
 
     clearTimer('scanIv');
     clearTimer('decayIv');
     clearTimer('fundIv');
     clearTimer('oiIv');
     clearTimer('lsrIv');
+    clearTimer('cleanIv');
     clearTimer('regimeIv');
 
-    unsubGlobal?.();
-    unsubGlobal = null;
-    setWs('wsBn', false);
+    closeWs(gWs);
     closeWs(bnWs);
     closeWs(oxWs);
     closeWs(byWs);
     closeWs(bgWs);
 
+    gWs = null;
     bnWs = null;
     oxWs = null;
     byWs = null;
@@ -315,7 +445,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
       const r = await fetch('https://fapi.binance.com/fapi/v1/klines?symbol=' + sym + '&interval=1d&limit=1');
       const d = await r.json();
       if (d && d[0]) P9[sym] = parseFloat(d[0][1]);
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   function subBn(s: string) {
@@ -546,18 +676,33 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
   }
 
   function openGlobal() {
-    unsubGlobal?.();
-    unsubGlobal = subscribeTickerBus((list) => {
-      for (const t of list) {
-        const m = M[t.s];
-        if (m) {
-          m.price         = parseFloat(t.c);
-          m.currentVol    = parseFloat(t.q);
-          m.totalQuoteVol = parseFloat(t.q);
-        }
-      }
-      setWs('wsBn', true);
-    });
+    gWs = new WebSocket('wss://fstream.binance.com/market/ws/!miniTicker@arr');
+
+    gWs.onopen = () => setWs('wsBn', true);
+
+    gWs.onmessage = (e) => {
+      try {
+        JSON.parse(e.data).forEach((t: any) => {
+          const m = M[t.s];
+          if (m) {
+            m.price = parseFloat(t.c);
+            m.currentVol = parseFloat(t.q);
+            m.totalQuoteVol = parseFloat(t.q);
+          }
+        });
+      } catch (_e) { }
+    };
+
+    gWs.onclose = () => {
+      setWs('wsBn', false);
+      if (running) setTimeout(openGlobal, 3000);
+    };
+
+    gWs.onerror = () => {
+      try {
+        gWs?.close();
+      } catch (_e) { }
+    };
   }
 
   function openBnSniper() {
@@ -580,7 +725,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
         if (d.e === 'aggTrade') onTrade(d);
         else if (d.e === 'depthUpdate' || (d.b && d.a)) onDepth(d);
         else if (d.e === 'forceOrder' || d.o) onLiq(d);
-      } catch (_e) {}
+      } catch (_e) { }
     };
 
     bnWs.onclose = () => {
@@ -590,7 +735,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     bnWs.onerror = () => {
       try {
         bnWs?.close();
-      } catch (_e) {}
+      } catch (_e) { }
     };
   }
 
@@ -621,7 +766,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
             });
           }
         }
-      } catch (_e) {}
+      } catch (_e) { }
     };
 
     oxWs.onclose = () => {
@@ -633,7 +778,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     oxWs.onerror = () => {
       try {
         oxWs?.close();
-      } catch (_e) {}
+      } catch (_e) { }
     };
   }
 
@@ -663,7 +808,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
             });
           }
         }
-      } catch (_e) {}
+      } catch (_e) { }
     };
 
     byWs.onclose = () => {
@@ -675,7 +820,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     byWs.onerror = () => {
       try {
         byWs?.close();
-      } catch (_e) {}
+      } catch (_e) { }
     };
   }
 
@@ -756,7 +901,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
           sd.bgBidVol = bV;
           sd.bgAskVol = aV;
         }
-      } catch (_e) {}
+      } catch (_e) { }
     };
 
     bgWs.onclose = () => {
@@ -768,7 +913,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     bgWs.onerror = () => {
       try {
         bgWs?.close();
-      } catch (_e) {}
+      } catch (_e) { }
     };
   }
 
@@ -801,28 +946,6 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     return { active: count >= 1, dir, count, earliestTs, types };
   }
 
-  function getRegimeMult(dir: number) {
-    if (!regimeState.ready || dir === 0) return 1.0;
-    let mult = 1.0;
-    const d = regimeState.btcAltDelta;
-    const f = regimeState.avgFunding;
-
-    if (dir > 0) {
-      if (d > 1.0) mult *= 1.3;
-      else if (d < -1.0) mult *= 0.5;
-
-      if (f > 0.03) mult *= 0.6;
-      else if (f < -0.03) mult *= 1.4;
-    } else {
-      if (d < -1.0) mult *= 1.3;
-      else if (d > 1.0) mult *= 0.5;
-
-      if (f < -0.03) mult *= 0.6;
-      else if (f > 0.03) mult *= 1.4;
-    }
-
-    return Math.max(0.3, Math.min(2.0, mult));
-  }
 
   function calcStageScore(sd: any, sym: string, now: number) {
     const s = sd.scores;
@@ -858,11 +981,8 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
 
     let raw = setupRaw + triggerRaw * triggerMult + momentumRaw * momentumMult + contextRaw;
     const rawDir = Math.sign(raw) || 0;
-    const regimeMult = getRegimeMult(rawDir);
-    raw *= regimeMult;
-
     const total = Math.max(-180, Math.min(180, Math.round(raw)));
-    return { total, stage, setupInfo, regimeMult, rawDir };
+    return { total, stage, setupInfo, rawDir };
   }
 
   function macroRadar() {
@@ -999,16 +1119,28 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
 
   function cleanPreSignals() {
     const n = Date.now();
-    const l = preSigHistory.length;
-    for (let i = l - 1; i >= 0; i--) {
+    const preLen = preSigHistory.length;
+    const crimeLen = crimeSignals.length;
+
+    for (let i = preLen - 1; i >= 0; i--) {
       if (n - preSigHistory[i].ts > C.preCardTtl) preSigHistory.splice(i, 1);
     }
 
-    if (!isFrozen && preSigHistory.length !== l) syncPreSignals();
+    crimeSignals = crimeSignals.filter((s) => n - s.timestamp < C.preCardTtl);
+
+    if (!isFrozen && (preSigHistory.length !== preLen || crimeSignals.length !== crimeLen)) syncPreSignals();
   }
 
   function syncPreSignals() {
-    ui.preSignals = preSigHistory.map((p) => ({ ...p })).slice(0, C.preCardMax);
+    const now = Date.now();
+
+    crimeSignals = crimeSignals.filter((s) => now - s.timestamp < C.preCardTtl);
+
+    ui.preSignals = [
+      ...crimeSignals.map(crimeToPreSignal),
+      ...preSigHistory.map((p) => ({ ...p })),
+    ].slice(0, C.preCardMax);
+
     ui.summary.pre = ui.preSignals.length;
   }
 
@@ -1041,7 +1173,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
           firePreSignal(d.symbol, 'miDiv', mi < 0 ? 1 : -1, '📡 MI 괴리', '선물괴리 ' + (mi * 100).toFixed(3) + '%', 0);
         }
       });
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   async function pollOI() {
@@ -1066,7 +1198,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
           OI[s].prev = v;
         }
       });
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   async function pollLSR() {
@@ -1087,7 +1219,46 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
           LSR[r.value.s] = { longPct: parseFloat(r.value.d.longAccount) };
         }
       });
-    } catch (_e) {}
+    } catch (_e) { }
+  }
+
+  async function pollRegime() {
+    try {
+      const syms = Object.keys(SD);
+      if (syms.length < 5) return;
+
+      // 1. Avg Funding
+      const funds = Object.values(FR);
+      if (funds.length > 0) {
+        regimeState.avgFunding = funds.reduce((a, b) => a + b, 0) / funds.length;
+      }
+
+      // 2. OI Expansion
+      const ois = Object.values(OI).map((o: any) => o.pctChg).filter(v => isFinite(v));
+      if (ois.length > 0) {
+        regimeState.oiExpansionRate = ois.reduce((a, b) => a + b, 0) / ois.length;
+      }
+
+      // 3. Long Flow (LSR)
+      const lsrs = Object.values(LSR).map((l: any) => l.longPct).filter(v => isFinite(v));
+      if (lsrs.length > 0) {
+        regimeState.longFlowRatio = (lsrs.reduce((a, b) => a + b, 0) / lsrs.length) * 100;
+      }
+
+      // 4. BTC vs ALT Delta
+      const btc = M['BTCUSDT'];
+      if (btc && btc.price > 0) {
+        const btcChg = btc.trend5m || 0;
+        const alts = Object.keys(M).filter(s => s !== 'BTCUSDT' && M[s].trend5m != null);
+        if (alts.length > 0) {
+          const altAvgChg = alts.reduce((s, k) => s + (M[k].trend5m || 0), 0) / alts.length;
+          regimeState.btcAltDelta = (altAvgChg - btcChg) * 1000; // scaling for display
+        }
+      }
+
+      regimeState.ready = true;
+      emit();
+    } catch (_e) { }
   }
 
   function renderSummary(list: any[]) {
@@ -1107,7 +1278,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
       ui.summary.bias = '—';
     }
 
-    ui.summary.pre = preSigHistory.length;
+    ui.summary.pre = Math.min(C.preCardMax, preSigHistory.length + crimeSignals.length);
   }
 
   function renderTable(list: any[]) {
@@ -1220,52 +1391,6 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     });
 
     ui.leaderboard = lbItems;
-  }
-
-  function renderRegime() {
-    let btcChg: number | null = null;
-    const altChgs: number[] = [];
-
-    for (const sym in M) {
-      const p9 = P9[sym];
-      if (p9 && M[sym].price) {
-        const chg = ((M[sym].price - p9) / p9) * 100;
-        if (sym === 'BTCUSDT') btcChg = chg;
-        else if (M[sym].inSniper) altChgs.push(chg);
-      }
-    }
-
-    if (btcChg !== null && altChgs.length) {
-      const d = altChgs.reduce((a, b) => a + b, 0) / altChgs.length - btcChg;
-      regimeState.btcAltDelta = d;
-      regimeState.ready = true;
-      ui.regime.btcAltDelta = d;
-      ui.regime.ready = true;
-    }
-
-    const frs = Object.keys(SD)
-      .filter((s) => isFinite(FR[s]))
-      .map((s) => FR[s]);
-    if (frs.length) {
-      const p = (frs.reduce((a, b) => a + b, 0) / frs.length) * 100;
-      regimeState.avgFunding = p;
-      ui.regime.avgFunding = p;
-    }
-
-    const oiEntries = Object.keys(SD).filter((s) => OI[s] && OI[s].prev > 0 && isFinite(OI[s].pctChg));
-    if (oiEntries.length) {
-      const r = (oiEntries.filter((s) => OI[s].pctChg > 0.005).length / oiEntries.length) * 100;
-      ui.regime.oiExpansionRate = r;
-    }
-
-    const cut10 = Date.now() - 600000;
-    const r10 = sigHist.filter((s) => s.time >= cut10);
-    if (r10.length) {
-      const pos = r10.filter((s) => s.score > 0).reduce((a, b) => a + Math.abs(b.score), 0);
-      const neg = r10.filter((s) => s.score < 0).reduce((a, b) => a + Math.abs(b.score), 0);
-      const tot = pos + neg || 1;
-      ui.regime.longFlowRatio = (pos / tot) * 100;
-    }
   }
 
   function decayLoop() {
@@ -1409,6 +1534,8 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
         if (Math.abs(s[k]) < 1) s[k] = 0;
       });
 
+      scanCrimeSetup(sym, sd, cvdT, mult);
+
       const stageResult = calcStageScore(sd, sym, now);
       const rawTotal = stageResult.total;
       const rawStage = stageResult.stage;
@@ -1455,8 +1582,15 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
 
       const ag = aGradeState[sym];
       if (tcDir !== 0) {
-        if (ag.lastDir !== tcDir) ag.count = 1;
-        else if (!ag.activeNow) ag.count++;
+        if (ag.lastDir !== tcDir) {
+          ag.count = 1;
+          trackSig(sym, 'aGrade', 60 * tcDir);
+          playBeep(tcDir > 0 ? 1200 : 900);
+        } else if (!ag.activeNow) {
+          ag.count++;
+          trackSig(sym, 'aGrade', 60 * tcDir);
+          playBeep(tcDir > 0 ? 1200 : 900);
+        }
 
         ag.lastDir = tcDir;
         ag.lastTs = now;
@@ -1513,24 +1647,34 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
         ag,
         sig: sgs,
         setupInfo: stageResult.setupInfo,
-        regimeMult: stageResult.regimeMult,
       });
     }
 
     if (!isFrozen) {
+      if (crimeDirty) {
+        syncPreSignals();
+        crimeDirty = false;
+      }
       renderSummary(rl);
       renderTable(rl);
-      if (now - lastRegimeUpdate > C.regimeThrottle) {
-        lastRegimeUpdate = now;
-        renderRegime();
-      }
       emit();
     }
+  }
+
+  function resetLeaderboardHistory() {
+    sigHist = [];
+    actAlerts.clear();
+    currentTopCoins = new Set<string>();
+    currentLeaderboard = {};
+    displayedOrder = [];
+    lastSortTime = 0;
+    ui.leaderboard = [];
   }
 
   async function startSystem() {
     if (running) return;
 
+    resetLeaderboardHistory();
     running = true;
     ui.statusText = '로딩중...';
     emit();
@@ -1538,7 +1682,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     try {
       let fl: any[];
       try {
-        const ctrl = window.AbortController ? new AbortController() : null;
+        const ctrl = (typeof window !== 'undefined' && (window as any).AbortController) ? new AbortController() : null;
         const tid = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null;
         const r = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo', ctrl ? { signal: ctrl.signal } : {});
         if (tid) clearTimeout(tid);
@@ -1588,8 +1732,11 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
       }, 60000);
       lsrIv = setInterval(() => {
         void pollLSR();
-      }, 60000);
-      regimeIv = setInterval(cleanPreSignals, 10000);
+      }, 120000);
+      regimeIv = setInterval(() => {
+        void pollRegime();
+      }, 5000);
+      cleanIv = setInterval(cleanPreSignals, 10000);
 
       setTimeout(() => {
         void pollFunding();
@@ -1606,6 +1753,7 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
       emit();
     }
   }
+
 
   function toggleMute() {
     muted = !muted;
@@ -1636,6 +1784,31 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     emit();
   }
 
+  function pushCrimeSignals(signals: CrimeSignalLike[]) {
+    if (!Array.isArray(signals) || signals.length === 0) return;
+
+    const seen = new Set(crimeSignals.map((s) => `${s.symbol}:${s.type}:${s.timestamp}`));
+
+    signals.forEach((s) => {
+      if (!s?.symbol || !s?.type || !s?.timestamp) return;
+
+      const key = `${s.symbol}:${s.type}:${s.timestamp}`;
+      if (seen.has(key)) return;
+
+      seen.add(key);
+      crimeSignals.unshift(s);
+    });
+
+    crimeSignals = crimeSignals
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, C.preCardMax);
+
+    if (!isFrozen) {
+      syncPreSignals();
+      emit();
+    }
+  }
+
   const api: HunterRuntimeApi = {
     startSystem,
     stopSystem,
@@ -1644,14 +1817,22 @@ export function mountHunterRuntime(onUpdate: (snapshot: HunterRuntimeSnapshot) =
     toggleFreeze,
     setSort,
     togglePin,
+    pushCrimeSignals,
   };
 
   emit();
 
+  const instance: RuntimeInstance = {
+    api,
+    setCallback: (fn) => { _onUpdate = fn; },
+    emitNow: () => emit(),
+  };
+  _singleton = instance;
+
   return {
     api,
-    cleanup: () => {
-      stopSystem();
-    },
+    cleanup: () => { _singleton?.setCallback(() => {}); },
   };
 }
+
+

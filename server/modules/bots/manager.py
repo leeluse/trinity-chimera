@@ -23,7 +23,18 @@ class BotManager:
         return cls._instance
 
     def __init__(self):
-        self._db = SupabaseManager()
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
+        try:
+            self._db = SupabaseManager()
+        except Exception as exc:
+            self._db = None
+            logger.warning("BotManager DB disabled: %s", exc)
+
+    @property
+    def db_available(self) -> bool:
+        return self._db is not None
 
     @classmethod
     def set_scheduler(cls, scheduler: AsyncIOScheduler):
@@ -32,6 +43,9 @@ class BotManager:
 
     async def load_active_bots(self):
         """DB에서 활성 봇 로드 및 초기화"""
+        if self._db is None:
+            logger.info("Skipping active bot load: database is unavailable")
+            return
         try:
             bots = await self._db.list_bots(limit=100)
 
@@ -77,6 +91,9 @@ class BotManager:
 
     async def start_bot(self, bot_id: str) -> bool:
         """봇 시작"""
+        if self._db is None:
+            logger.warning("Cannot start bot %s: database is unavailable", bot_id)
+            return False
         try:
             bot_data = await self._db.get_bot(bot_id)
             if not bot_data:
@@ -117,6 +134,9 @@ class BotManager:
 
     async def stop_bot(self, bot_id: str) -> bool:
         """봇 중지"""
+        if self._db is None:
+            logger.warning("Cannot stop bot %s: database is unavailable", bot_id)
+            return False
         try:
             # is_active = False로 설정
             await self._db.update_bot(bot_id, {"is_active": False})
@@ -143,6 +163,9 @@ class BotManager:
         from datetime import datetime
 
         logger.debug(f"Running tick for {len(self._active_bots)} active bots")
+
+        if self._db is None:
+            return
 
         for bot_id, simulator in list(self._active_bots.items()):
             try:

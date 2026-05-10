@@ -21,15 +21,27 @@ import {
   ExecutionLog
 } from "@/components";
 import { AppRightPanel } from "@/components/layout/AppRightPanel";
-import RegimePanel from "@/components/features/backtest/RegimePanel";
-import { useDashboardQueries } from "@/hooks/useDashboardQueries";
 
 // Externalized
 import { Results, TimeFrame } from "@/types/backtest";
 import { cardClass } from "@/styles/common";
 
-const REGIME_VALIDATION_START = "2021-01-01";
-const REGIME_VALIDATION_END = "2026-01-31";
+const toDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const shiftMonths = (date: Date, months: number) => {
+  const shifted = new Date(date);
+  shifted.setMonth(shifted.getMonth() + months);
+  return shifted;
+};
+
+const today = new Date();
+const DEFAULT_END_DATE = toDateInputValue(today);
+const DEFAULT_START_DATE = toDateInputValue(shiftMonths(today, -1));
 
 const parseResults = (payload: any): Results => ({
   netProfitAmt: Number(payload?.results?.total_pnl ?? 0),
@@ -63,33 +75,28 @@ const parseResults = (payload: any): Results => ({
   longCount: Number(payload?.results?.long_count ?? 0),
   shortCount: Number(payload?.results?.short_count ?? 0),
   equityCurve: payload?.equity_curve || [],
+  candles: payload?.candles || [],
 });
 
 export default function BacktestPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const tabParam = (searchParams.get("tab") || "").toLowerCase();
-  const isRegimeRoute = tabParam === "regime";
-  const [activeAgent, setActiveAgent] = useState("ALL");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [timeFrame, setTimeFrame] = useState<TimeFrame>("1h");
   const [strategy, setStrategy] = useState("");
   const [strategies, setStrategies] = useState<any[]>([]);
-  const [startDate, setStartDate] = useState("2024-01-01");
-  const [endDate, setEndDate] = useState("2024-04-15");
+  const [startDate, setStartDate] = useState(DEFAULT_START_DATE);
+  const [endDate, setEndDate] = useState(DEFAULT_END_DATE);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
   const [strategyTitle, setStrategyTitle] = useState("");
-
-  const { evolutionEvents, decisionLogs, automationStatus, toggleAutomation } = useDashboardQueries();
 
   const [aiOpen, setAiOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiReport, setAiReport] = useState("");
 
   const [activeTab, setActiveTab] = useState("지표");
-  const effectiveActiveTab = isRegimeRoute ? "레짐" : activeTab;
   const [strategyCode, setStrategyCode] = useState("");
   const [codeLoading, setCodeLoading] = useState(false);
 
@@ -117,15 +124,15 @@ export default function BacktestPage() {
   useEffect(() => {
     if (!chartContainerRef.current) return;
     const chart = createChart(chartContainerRef.current, {
-      layout: { 
-        background: { color: "transparent" }, 
-        textColor: "#94a3b8", 
+      layout: {
+        background: { color: "transparent" },
+        textColor: "#94a3b8",
         fontSize: 10,
         fontFamily: "'JetBrains Mono', monospace"
       },
-      grid: { 
-        vertLines: { color: "rgba(189, 147, 249, 0.03)" }, 
-        horzLines: { color: "rgba(189, 147, 249, 0.03)" } 
+      grid: {
+        vertLines: { color: "rgba(189, 147, 249, 0.03)" },
+        horzLines: { color: "rgba(189, 147, 249, 0.03)" }
       },
       width: chartContainerRef.current.clientWidth,
       height: 450,
@@ -133,15 +140,15 @@ export default function BacktestPage() {
         borderColor: "rgba(189, 147, 249, 0.1)",
       },
     });
-    const series = chart.addSeries(CandlestickSeries, { 
-      upColor: "#6075ffff", 
-      downColor: "#ffa2f1ff", 
-      borderVisible: false, 
-      wickUpColor: "#6075ffff", 
-      wickDownColor: "#ffa2f1ff" 
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: "#6075ffff",
+      downColor: "#ffa2f1ff",
+      borderVisible: false,
+      wickUpColor: "#6075ffff",
+      wickDownColor: "#ffa2f1ff"
     });
-    chartRef.current = chart; 
-    candleSeriesRef.current = series; 
+    chartRef.current = chart;
+    candleSeriesRef.current = series;
     markerSeriesRef.current = createSeriesMarkers(series, []);
     return () => chart.remove();
   }, []);
@@ -154,7 +161,7 @@ export default function BacktestPage() {
     if (payload.candles && candleSeriesRef.current) {
       candleSeriesRef.current.setData(payload.candles);
     }
-    
+
     if (payload.markers && markerSeriesRef.current) {
       markerSeriesRef.current.setMarkers(payload.markers);
     }
@@ -168,15 +175,15 @@ export default function BacktestPage() {
     setLoading(true);
     try {
       const isKnown = strategies.some(s => s.key === strategy);
-      const params = new URLSearchParams({ 
-        symbol, 
-        interval: timeFrame, 
-        strategy, 
-        start_date: startDate, 
-        end_date: endDate, 
-        include_candles: "true" 
+      const params = new URLSearchParams({
+        symbol,
+        interval: timeFrame,
+        strategy,
+        start_date: startDate,
+        end_date: endDate,
+        include_candles: "true"
       });
-      
+
       if (!isKnown && strategyCode) {
         params.append("code", strategyCode);
       } else if (strategyCode) {
@@ -198,15 +205,15 @@ export default function BacktestPage() {
 
     const currentLabel = strategies.find(s => s.key === strategy)?.label;
     const defaultTitle = strategyTitle || currentLabel || strategy || "";
-    
+
     // 배포 시점에 항상 이름을 묻도록 함 (사용자 요청)
     const customTitle = window.prompt("🚀 배포할 전략의 이름을 입력하세요:", defaultTitle);
-    
+
     if (customTitle === null) return; // 취소 버튼 클릭 시 중단
-    
+
     const title = customTitle.trim() || `${defaultTitle}_deployed`;
     setStrategyTitle(title);
-    
+
     setLoading(true);
     try {
       const res = await fetchWithBypass("/api/chat/deploy", {
@@ -217,7 +224,7 @@ export default function BacktestPage() {
           title: title
         })
       });
-      
+
       const data = await res.json();
       if (data.success) {
         alert(`✅ 전략이 성공적으로 배포되었습니다!\nID: ${data.strategy_key}`);
@@ -240,7 +247,7 @@ export default function BacktestPage() {
   const applyGeneratedCode = (code: string, name?: string, payload?: any) => {
     setStrategyCode(code);
     if (name) {
-      setStrategy(name); 
+      setStrategy(name);
       setStrategyTitle(name);
     }
     if (payload) {
@@ -278,6 +285,13 @@ export default function BacktestPage() {
     setStrategy(newStrategy);
     const label = strategies.find(s => s.key === newStrategy)?.label || newStrategy;
     setStrategyTitle(label);
+  };
+
+  const handleRangePreset = (months: number) => {
+    const end = new Date();
+    const start = shiftMonths(end, -months);
+    setStartDate(toDateInputValue(start));
+    setEndDate(toDateInputValue(end));
   };
 
   useEffect(() => {
@@ -344,10 +358,6 @@ export default function BacktestPage() {
         <AppRightPanel
           agentIds={[]}
           names={[]}
-          evolutionEvents={evolutionEvents}
-          decisionLogs={decisionLogs}
-          automationStatus={automationStatus}
-          onToggleAutomation={toggleAutomation}
           backtestContext={backtestContext}
           onBacktestGenerated={applyBacktestPayload}
           onApplyCode={applyGeneratedCode}
@@ -355,91 +365,79 @@ export default function BacktestPage() {
       </PageLayout.Side>
 
       <PageLayout.Main>
-        {isRegimeRoute ? (
-          <div className="flex flex-col flex-1 relative p-4 overflow-hidden">
-            <RegimePanel
+        <PageHeader
+          statusText={loading ? "Simulating..." : "Ready"}
+          statusColor="blue"
+        />
+
+        <div className="flex flex-col flex-1 relative p-4 overflow-hidden">
+          <div className="flex flex-col gap-4 relative z-10 overflow-y-auto no-scrollbar pr-1">
+            <BacktestChart
+              chartContainerRef={chartContainerRef}
+              results={results}
+              loading={loading}
               symbol={symbol}
-              startDate={REGIME_VALIDATION_START}
-              endDate={REGIME_VALIDATION_END}
-              busy={loading}
-            />
-          </div>
-        ) : (
-          <>
-            <PageHeader
-              statusText={loading ? "Simulating..." : "Ready"}
-              statusColor="blue"
+              timeFrame={timeFrame}
+              cardClass={cardClass}
             />
 
-            <div className="flex flex-col flex-1 relative p-4 overflow-hidden">
-              <div className="flex flex-col gap-4 relative z-10 overflow-y-auto no-scrollbar pr-1">
-                <BacktestChart
-                  chartContainerRef={chartContainerRef}
-                  results={results}
-                  loading={loading}
-                  symbol={symbol}
-                  timeFrame={timeFrame}
-                  cardClass={cardClass}
+            <BacktestHeader
+              symbol={symbol} setSymbol={setSymbol}
+              timeframe={timeFrame} setTimeframe={setTimeFrame}
+              startDate={startDate} setStartDate={setStartDate}
+              endDate={endDate} setEndDate={setEndDate}
+              onRangePreset={handleRangePreset}
+              strategy={strategy} strategies={strategies} setStrategy={handleStrategyChange}
+              strategyTitle={strategyTitle} setStrategyTitle={setStrategyTitle}
+              onRun={handleStartTest}
+              onDeploy={handleDeploy}
+              onCopy={handleCopyResults}
+              activeTab={activeTab}
+              onTabChange={handleTabChange}
+              loading={loading}
+            />
+
+            {activeTab === "지표" && (
+              <>
+                <StatsGrid results={results} fmtMoney={fmtMoney} />
+                <EquityChart results={results} />
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full max-w-[1600px] mx-auto">
+                  <PerformanceDetails results={results} />
+                  <TradeAnalysis results={results} />
+                </div>
+              </>
+            )}
+
+            {activeTab === "거래 내역" && (
+              <div className="bg-white/[0.02] border border-white/[0.05] rounded-xl overflow-hidden flex flex-col min-h-[500px]">
+                <ExecutionLog
+                  trades={results?.trades || []}
+                  totalTradesCount={results?.totalTradesCount || 0}
+                  fmtMoney={fmtMoney}
                 />
-
-                <BacktestHeader
-                  symbol={symbol} setSymbol={setSymbol}
-                  timeframe={timeFrame} setTimeframe={setTimeFrame}
-                  startDate={startDate} setStartDate={setStartDate}
-                  endDate={endDate} setEndDate={setEndDate}
-                  strategy={strategy} strategies={strategies} setStrategy={handleStrategyChange}
-                  strategyTitle={strategyTitle} setStrategyTitle={setStrategyTitle}
-                  onRun={handleStartTest}
-                  onDeploy={handleDeploy}
-                  onCopy={handleCopyResults}
-                  activeTab={effectiveActiveTab}
-                  onTabChange={handleTabChange}
-                  loading={loading}
-                />
-
-                {effectiveActiveTab === "지표" && (
-                  <>
-                    <StatsGrid results={results} fmtMoney={fmtMoney} />
-                    <EquityChart results={results} />
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full max-w-[1600px] mx-auto">
-                      <PerformanceDetails results={results} />
-                      <TradeAnalysis results={results} />
-                    </div>
-                  </>
-                )}
-
-                {effectiveActiveTab === "거래 내역" && (
-                  <div className="bg-white/[0.02] border border-white/[0.05] rounded-xl overflow-hidden flex flex-col min-h-[500px]">
-                    <ExecutionLog 
-                      trades={results?.trades || []} 
-                      totalTradesCount={results?.totalTradesCount || 0} 
-                      fmtMoney={fmtMoney} 
-                    />
-                  </div>
-                )}
-
-                {effectiveActiveTab === "코드" && (
-                  <div ref={codeSectionRef}>
-                    <StrategyCodeSection
-                      strategyName={strategies.find(s => s.key === strategy)?.label || strategy}
-                      code={strategyCode}
-                      onChange={setStrategyCode}
-                      loading={codeLoading}
-                    />
-                  </div>
-                )}
-
               </div>
-            </div>
+            )}
 
-            <AiAnalysisModal
-              isOpen={aiOpen}
-              onClose={() => setAiOpen(false)}
-              isLoading={aiLoading}
-              report={aiReport}
-            />
-          </>
-        )}
+            {activeTab === "코드" && (
+              <div ref={codeSectionRef}>
+                <StrategyCodeSection
+                  strategyName={strategies.find(s => s.key === strategy)?.label || strategy}
+                  code={strategyCode}
+                  onChange={setStrategyCode}
+                  loading={codeLoading}
+                />
+              </div>
+            )}
+
+          </div>
+        </div>
+
+        <AiAnalysisModal
+          isOpen={aiOpen}
+          onClose={() => setAiOpen(false)}
+          isLoading={aiLoading}
+          report={aiReport}
+        />
       </PageLayout.Main>
     </PageLayout>
   );

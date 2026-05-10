@@ -14,7 +14,7 @@ from inspect import iscoroutinefunction
 from typing import Dict, List, Optional, Callable, Any, Awaitable, Union
 from threading import Lock
 
-from server.modules.evolution.constants import AGENT_IDS
+from server.shared.agents.constants import AGENT_IDS
 
 logger = logging.getLogger(__name__)
 

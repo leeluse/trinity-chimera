@@ -448,7 +448,6 @@ class EvolutionLLMClient:
         """
         metrics = pkg.get("metrics", {})
         trinity_score = float(metrics.get("trinity_score") or 0.0)
-        market_regime = pkg.get("market_regime", "Unknown")
         evolution_count = int(pkg.get("evolution_count", 0))
 
         # 환경 변수로 강제 모드 오버라이드
@@ -459,17 +458,6 @@ class EvolutionLLMClient:
         if forced_mode in ("parameter_tuning", "mode1", "1"):
             return "parameter_tuning"
 
-        # 조건 1: 시장 레짐 변화 → 구조 전환 필요
-        last_regime = getattr(self, "_last_regime_cache", {}).get(pkg.get("agent_id", ""), "")
-        if last_regime and last_regime != market_regime and market_regime not in ("Unknown", ""):
-            logger.info(f"Regime shift detected ({last_regime} → {market_regime}): FREE_GENERATION triggered.")
-            if not hasattr(self, "_last_regime_cache"):
-                self._last_regime_cache = {}
-            self._last_regime_cache[pkg.get("agent_id", "")] = market_regime
-            return "free_generation"
-        if not hasattr(self, "_last_regime_cache"):
-            self._last_regime_cache = {}
-        self._last_regime_cache[pkg.get("agent_id", "")] = market_regime
 
         # 조건 2: 점수가 나쁘고 여러 번 시도했지만 개선 없음
         if trinity_score < 50 and evolution_count >= 3:
@@ -499,7 +487,6 @@ class EvolutionLLMClient:
         loss_logs = pkg.get("loss_period_logs", "No specific loss logs available")
         history = pkg.get("evolution_history", "No history available")
         rank_info = pkg.get("competitive_rank", "Unknown")
-        regime = pkg.get("market_regime", "Unknown")
         volatility = pkg.get("market_volatility", "Unknown")
 
         def _m(key, fmt=""):
@@ -530,7 +517,7 @@ class EvolutionLLMClient:
 - Max Drawdown: {_m('mdd', '.4f')}
 
 #### 3. Market Context
-- Regime: {regime} | Volatility: {volatility}
+- Volatility: {volatility}
 """
 
         core_instructions = """
@@ -545,7 +532,7 @@ class EvolutionLLMClient:
 """
         
         if is_free_gen:
-            mode_instructions = f"\n### MODE 2: FREE GENERATION\n현재 시장 레짐({regime})에 최적화된 완전히 새로운 로직 구조를 설계하라. 지표와 필터를 과감하게 변경하라."
+            mode_instructions = f"\n### MODE 2: FREE GENERATION\n현재 시장 상황에 최적화된 완전히 새로운 로직 구조를 설계하라. 지표와 필터를 과감하게 변경하라."
         else:
             mode_instructions = f"\n### MODE 1: PARAMETER TUNING\n기존 로직의 뼈대는 유지하되, 현재 변동성({volatility})에 맞춰 최적의 임계값과 파라미터(lookback 등)를 정교하게 튜닝하라."
 

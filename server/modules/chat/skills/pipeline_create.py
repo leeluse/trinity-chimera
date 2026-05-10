@@ -1,15 +1,13 @@
 """CREATE_STRATEGY 파이프라인 (설계 → 코드 → 백테스트)"""
 import logging
 import os
-import random
 import re
 import time
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import AsyncGenerator, Dict, Optional
 
 from server.shared.llm.client import stream_analysis_reply, stream_code_gen_reply
 from server.shared.market.strategy_loader import StrategyLoader, SecurityError
-from server.modules.evolution.wiki_memory import EvolutionWikiMemory
-from server.modules.evolution.constants import BANNED_INDICATORS, PERSONAS, CROSS_DOMAIN_SEEDS
+from server.shared.chat.wiki_memory import EvolutionWikiMemory
 from server.modules.chat.prompts import (
     DESIGN_PROMPT_TEMPLATE,
     CODE_PROMPT_TEMPLATE,
@@ -35,9 +33,6 @@ _CODE_GEN_ERROR_RE = re.compile(r"\[코드 생성 오류:\s*(.+?)\]", re.IGNOREC
 
 def _build_direct_design_brief(
     message: str,
-    is_mining: bool,
-    persona: Optional[Dict[str, Any]],
-    seed: Optional[str],
 ) -> str:
     lines = [
         f'사용자 요청: "{(message or "").strip()}"',
@@ -45,20 +40,9 @@ def _build_direct_design_brief(
         "[공통 설계 제약]",
         "- 사전 추론 단계 없이 바로 YAML 설계를 작성한다.",
         "- train_df 기반 적응형 임계값을 최소 1개 이상 포함한다.",
-        "- 시장 레짐 필터를 포함하고, 과도한 AND 적층(3개 초과)을 피한다.",
+        "- 과도한 AND 적층(3개 초과)을 피한다.",
         "- 롱/숏 시그널은 구조적으로 일관되게 대칭 설계한다.",
     ]
-    if is_mining and persona:
-        lines.extend([
-            "",
-            "[에볼루션 채굴 컨텍스트]",
-            f"- 페르소나: {persona.get('name', '')}",
-            f"- 세계관: {persona.get('worldview', '')}",
-            f"- 스타일: {persona.get('style', '')}",
-            f"- 크로스 도메인 씨드: {seed or ''}",
-            f"- 금지 지표: {', '.join(BANNED_INDICATORS)}",
-            "- 목표: 독창성이 있으면서도 전체 구간 신호 빈도(>=50건)가 가능한 구조",
-        ])
     return "\n".join(lines).strip()
 
 
@@ -103,7 +87,6 @@ async def run_create_pipeline(
     _history,
     db,
     session_memory: Dict[str, Any],
-    is_mining: bool = False,
     code_gen_mode: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     memory = EvolutionWikiMemory()
@@ -115,14 +98,7 @@ async def run_create_pipeline(
 
     analysis_model = ((os.getenv("ANALYSIS_MODEL") or os.getenv("LITELLM_MODEL") or "Expert Reasoner").split("/")[-1]).strip()
     code_model = ((os.getenv("CODE_GEN_MODEL") or os.getenv("LITELLM_MODEL") or "DeepSeek Coder").split("/")[-1]).strip()
-
-    persona = seed = None
-    if is_mining:
-        persona = random.choice(PERSONAS)
-        seed = random.choice(CROSS_DOMAIN_SEEDS)
-        stage1_label = f"💎 {persona['name']} 기반 전략 설계도 작성 중... ({analysis_model})"
-    else:
-        stage1_label = f"📋 전략 설계도 작성 중... ({analysis_model})"
+    stage1_label = f"📋 전략 설계도 작성 중... ({analysis_model})"
 
     # ──────────────────────────────────────────────────────────────
     # code_gen_mode가 이미 있으면 Stage 1 생략 → 캐시된 설계로 바로 Stage 2
@@ -146,7 +122,7 @@ async def run_create_pipeline(
         yield format_sse({"type": "stage", "stage": 1, "label": stage1_label})
         yield format_sse({"type": "thought", "content": "사전 추론 단계는 생략하고, 요청을 바로 설계도로 변환 중입니다..."})
 
-        design_brief = _build_direct_design_brief(message, is_mining, persona, seed)
+        design_brief = _build_direct_design_brief(message)
         prompt2 = DESIGN_PROMPT_TEMPLATE.format(reasoning=design_brief) + guardrail_block
         design_full = ""
         async for chunk in stream_analysis_reply(prompt2):
@@ -259,7 +235,6 @@ async def run_create_pipeline(
         strategy_code, strategy_title, message, context, session_id, db, session_memory,
         memory=memory, constitution=constitution, target_agent=target_agent,
         chat_mutation_hint=chat_mutation_hint,
-        is_mining_mode=is_mining, persona=persona, seed=seed,
     ):
         yield ev
 
@@ -313,7 +288,6 @@ async def run_create_pipeline(
                 strategy_code_r, title_r, message, context, session_id, db, session_memory,
                 memory=memory, constitution=constitution, target_agent=target_agent,
                 chat_mutation_hint=chat_mutation_hint,
-                is_mining_mode=is_mining, persona=persona, seed=seed,
             ):
                 yield ev
         else:

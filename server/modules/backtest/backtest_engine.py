@@ -69,7 +69,7 @@ class ValidationResult:
     period_results: list[PeriodResult] = field(default_factory=list)
     wfo_results: list[PeriodResult] = field(default_factory=list)
     monte_carlo: dict = field(default_factory=dict)
-    regime_results: dict = field(default_factory=dict)  # bull/bear/sideways별
+    condition_results: dict = field(default_factory=dict)  # bull/bear/sideways별
     is_robust: bool = False
     verdict: str = ""
 
@@ -96,11 +96,11 @@ class ValidationResult:
                 f"  5% VaR:       {mc['var_5pct']:+.1%}",
                 f"  파산 확률:    {mc['ruin_prob']:.1%}",
             ]
-        if self.regime_results:
+        if self.condition_results:
             lines.append(f"\n  [ 시장 상황별 성과 ]")
-            for regime, r in self.regime_results.items():
+            for cond, r in self.condition_results.items():
                 lines.append(
-                    f"  {regime:10s} | 수익:{r['mean_return']:+.1%} "
+                    f"  {cond:10s} | 수익:{r['mean_return']:+.1%} "
                     f"Sharpe:{r['mean_sharpe']:.2f}"
                 )
         lines.append('='*55)
@@ -449,18 +449,18 @@ class MonteCarloValidator:
 # 시장 구간 분류
 # ─────────────────────────────────────────────
 
-def classify_regimes(df: pd.DataFrame, window: int = 100) -> pd.Series:
+def classify_market_conditions(df: pd.DataFrame, window: int = 100) -> pd.Series:
     """
-    단순 규칙 기반 Regime 분류 (HMM 없이 빠르게):
+    단순 규칙 기반 시장 상황 분류 (HMM 없이 빠르게):
       - bull    : 롤링 수익률 > +5%
       - bear    : 롤링 수익률 < -5%
       - sideways: 그 외
     """
     roll_ret = df["close"].pct_change(window)
-    regime = pd.Series("sideways", index=df.index)
-    regime[roll_ret > 0.05] = "bull"
-    regime[roll_ret < -0.05] = "bear"
-    return regime
+    cond = pd.Series("sideways", index=df.index)
+    cond[roll_ret > 0.05] = "bull"
+    cond[roll_ret < -0.05] = "bear"
+    return cond
 
 
 # ─────────────────────────────────────────────
@@ -571,11 +571,11 @@ class BacktestEngine:
         if len(combined_rets) > 30:
             result.monte_carlo = self.mc.run(combined_rets)
 
-        # 4. Regime별 성과
+        # 4. 시장 상황별 성과
         msg3 = "[3/4] 시장 구간별 분석..."
         print(msg3)
         if callback: callback(msg3)
-        result.regime_results = self._analyze_by_regime(strategy_fn)
+        result.condition_results = self._analyze_by_market_condition(strategy_fn)
 
         # 5. 최종 테스트 (선택)
         if run_test_set:
@@ -608,19 +608,19 @@ class BacktestEngine:
         result.is_robust, result.verdict = self._judge(result)
         return result
 
-    def _analyze_by_regime(self, strategy_fn: Callable) -> dict:
-        regimes = classify_regimes(self.df)
+    def _analyze_by_market_condition(self, strategy_fn: Callable) -> dict:
+        conditions = classify_market_conditions(self.df)
         wfo_df = self.df.iloc[self.train_end:self.wfo_end]
-        wfo_regimes = regimes.iloc[self.train_end:self.wfo_end]
+        wfo_conditions = conditions.iloc[self.train_end:self.wfo_end]
 
-        regime_stats = {}
-        for reg in ["bull", "bear", "sideways"]:
-            mask = wfo_regimes == reg
+        condition_stats = {}
+        for cond_name in ["bull", "bear", "sideways"]:
+            mask = wfo_conditions == cond_name
             if mask.sum() < 100:
                 continue
             sub_df = wfo_df[mask]
 
-            # Regime 구간을 연속 슬라이스로 분할해서 각각 실행
+            # 구간을 연속 슬라이스로 분할해서 각각 실행
             sharpes, rets = [], []
             segments = self._get_segments(mask)
             for seg_df in segments:
@@ -631,19 +631,19 @@ class BacktestEngine:
                     signal = strategy_fn(train_df, seg_df)
                     r, _, *_ = self.sim.run(seg_df, signal)
                     if len(r) > 0:
-                        m = compute_metrics(r, 0, reg, "", "")
+                        m = compute_metrics(r, 0, cond_name, "", "")
                         sharpes.append(m.sharpe)
                         rets.append(m.total_return)
                 except Exception:
                     pass
 
             if sharpes:
-                regime_stats[reg] = {
+                condition_stats[cond_name] = {
                     "mean_sharpe": float(np.mean(sharpes)),
                     "mean_return": float(np.mean(rets)),
                     "n_segments": len(sharpes),
                 }
-        return regime_stats
+        return condition_stats
 
     def _get_segments(self, mask: pd.Series, min_len: int = 50) -> list:
         """Boolean mask → 연속 구간 DataFrame 리스트"""
