@@ -130,7 +130,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
     // text 타입 내 <think> 태그 파싱 (대소문자 무관, 공백 허용)
     const thoughtRegex = /<(thought|think|think_process|reasoning)>([\s\S]*?)(?:<\/\1>|$)/gi;
     const match = thoughtRegex.exec(msg.content || "");
-    
+
     if (match) {
       thinkingContent = match[2].trim();
       mainContent = (msg.content || "").replace(match[0], "").trim();
@@ -141,6 +141,38 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
 
   isThinkingStreaming = !!isStreaming && !!thinkingContent;
 
+  const [displayedMain, setDisplayedMain] = useState(isStreaming ? "" : mainContent);
+  useEffect(() => {
+    if (!isStreaming) {
+      setDisplayedMain(mainContent);
+      return;
+    }
+    const interval = setInterval(() => {
+      setDisplayedMain((prev) => {
+        if (prev.length >= mainContent.length) return prev;
+        const step = Math.max(1, Math.floor((mainContent.length - prev.length) / 8));
+        return mainContent.slice(0, prev.length + step);
+      });
+    }, 20);
+    return () => clearInterval(interval);
+  }, [mainContent, isStreaming]);
+
+  const [displayedThinking, setDisplayedThinking] = useState(isStreaming ? "" : thinkingContent);
+  useEffect(() => {
+    if (!isStreaming) {
+      setDisplayedThinking(thinkingContent);
+      return;
+    }
+    const interval = setInterval(() => {
+      setDisplayedThinking((prev) => {
+        if (prev.length >= thinkingContent.length) return prev;
+        const step = Math.max(1, Math.floor((thinkingContent.length - prev.length) / 8));
+        return thinkingContent.slice(0, prev.length + step);
+      });
+    }, 20);
+    return () => clearInterval(interval);
+  }, [thinkingContent, isStreaming]);
+
   // 자동 스크롤: thought 컨텐츠 div ref
   const thoughtScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -149,12 +181,10 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
     }
   });
 
-  const displayThinkingContent = thinkingContent;
-
   return (
     <div className={`flex flex-col py-3 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
       {msg.role === 'user' ? (
-        <div className="bg-purple-600/20 border border-purple-500/20 rounded-2xl px-4 py-2.5 max-w-[85%] text-[12px] text-purple-100 shadow-sm animate-in slide-in-from-right-2 duration-300 markdown-content">
+        <div className="bg-purple-600/20 border border-purple-500/20 rounded-2xl px-4 py-2.5 max-w-[85%] text-[14px] text-purple-100 shadow-sm animate-in slide-in-from-right-2 duration-300 markdown-content">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeRaw]}
@@ -165,59 +195,58 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
         </div>
       ) : (
         <div className="w-full space-y-4 animate-in fade-in duration-500">
-            {msg.type === 'invocation' && (
-              <div className="flex flex-col gap-1.5 mb-3">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl w-fit">
-                  <Zap size={13} className="text-blue-400 fill-blue-400/20" />
-                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">실행: {msg.content}</span>
-                </div>
+          {msg.type === 'invocation' && (
+            <div className="flex flex-col gap-1.5 mb-3">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl w-fit">
+                <Zap size={13} className="text-blue-400 fill-blue-400/20" />
+                <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">실행: {msg.content}</span>
               </div>
-            )}
+            </div>
+          )}
 
-            {thinkingContent && (
-              <details className="group mb-1 max-w-[95%]" open={isThinkingStreaming}>
-                <summary className="flex items-center gap-2 px-3 py-2 bg-white/[0.03] border border-white/[0.05] rounded-xl cursor-pointer hover:bg-white/[0.06] transition-all list-none select-none">
-                  {isThinkingStreaming ? (
-                    <Loader2 size={12} className="text-amber-500 animate-spin flex-shrink-0" />
-                  ) : (
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500/40 flex-shrink-0" />
-                  )}
-                  <span className="text-[10px] font-bold tracking-widest uppercase text-amber-500/60 font-mono">
-                    {isThinkingStreaming ? "AI Reasoning (Streaming...)" : "AI Reasoning"}
-                  </span>
-                  <Plus size={10} className="ml-auto text-white/20 group-open:rotate-45 transition-transform flex-shrink-0" />
-                </summary>
-                <div
-                  ref={thoughtScrollRef}
-                  className="mt-2 px-4 py-3 bg-black/20 border border-white/[0.03] rounded-xl font-medium italic markdown-content max-h-72 overflow-y-auto custom-scrollbar transition-all opacity-80 text-[11px] leading-relaxed pb-8"
-                >
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeRaw]}
-                    components={MarkdownComponents}
-                  >
-                    {displayThinkingContent + (isThinkingStreaming ? " █" : "")}
-                  </ReactMarkdown>
-                </div>
-              </details>
-            )}
-
-            {mainContent && (
-              <div className={`text-[12px] text-slate-200 leading-relaxed px-1.5 markdown-content animate-in slide-in-from-left-1 duration-300 mb-4 ${
-                mainContent.length < 60 && /^[A-Z][A-Za-z0-9_]+$/.test(mainContent.trim()) ? 'strategy-title-header' : 
-                mainContent.length < 100 && mainContent.includes('|') ? 'metadata-summary-badge' : ''
-              }`}>
+          {thinkingContent && (
+            <details className="group mb-1 max-w-[95%]" open={isThinkingStreaming}>
+              <summary className="flex items-center gap-2 px-3 py-2 bg-white/[0.03] border border-white/[0.05] rounded-xl cursor-pointer hover:bg-white/[0.06] transition-all list-none select-none">
+                {isThinkingStreaming ? (
+                  <Loader2 size={12} className="text-amber-500 animate-spin flex-shrink-0" />
+                ) : (
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500/40 flex-shrink-0" />
+                )}
+                <span className="text-[10px] font-bold tracking-widest uppercase text-amber-500/60 font-mono">
+                  {isThinkingStreaming ? "AI Reasoning (Streaming...)" : "AI Reasoning"}
+                </span>
+                <Plus size={10} className="ml-auto text-white/20 group-open:rotate-45 transition-transform flex-shrink-0" />
+              </summary>
+              <div
+                ref={thoughtScrollRef}
+                className="mt-2 px-4 py-3 bg-black/20 border border-white/[0.03] rounded-xl font-medium italic markdown-content max-h-72 overflow-y-auto custom-scrollbar transition-all opacity-80 text-[11px] leading-relaxed pb-8"
+              >
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   rehypePlugins={[rehypeRaw]}
                   components={MarkdownComponents}
                 >
-                  {mainContent}
+                  {displayedThinking + (isThinkingStreaming ? " █" : "")}
                 </ReactMarkdown>
               </div>
-            )}
+            </details>
+          )}
 
-            {/* choice 메시지 타입 렌더링 제거 (자동 진행 방식으로 변경됨) */}
+          {mainContent && (
+            <div className={`text-[14px] text-slate-200 leading-relaxed px-1.5 markdown-content animate-in slide-in-from-left-1 duration-300 mb-4 ${mainContent.length < 60 && /^[A-Z][A-Za-z0-9_]+$/.test(mainContent.trim()) ? 'strategy-title-header' :
+                mainContent.length < 100 && mainContent.includes('|') ? 'metadata-summary-badge' : ''
+              }`}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw]}
+                components={MarkdownComponents}
+              >
+                {displayedMain}
+              </ReactMarkdown>
+            </div>
+          )}
+
+          {/* choice 메시지 타입 렌더링 제거 (자동 진행 방식으로 변경됨) */}
 
           {msg.type === 'design' && (
             <div className="flex flex-col bg-white/[0.03] border border-blue-500/20 rounded-xl p-5 shadow-2xl gap-4 backdrop-blur-md mb-8 mx-1">
@@ -253,7 +282,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
                 <p className="text-[11px] text-slate-400 leading-relaxed italic font-medium px-1">
                   {msg.data.description}
                 </p>
-                
+
                 {msg.data.code && (
                   <div className="mt-4 rounded-lg bg-black/40 border border-white/5 p-2 overflow-hidden relative group/stratcode">
                     <button
@@ -299,7 +328,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
                 <StatItem label="거래" value={msg.data.trades} />
                 <StatItem label="손익 비율" value={msg.data.pf} />
               </div>
-              
+
               <button
                 onClick={() => onShowCode(String(msg.data?.code || ""), "Mined Strategy", msg.data?.payload)}
                 className="mt-2 flex items-center justify-center gap-2 w-full px-4 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-lg text-[10px] font-bold text-slate-400 hover:bg-white/[0.1] hover:text-white transition-all"
@@ -324,7 +353,7 @@ export default function ChatInterface({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [panelMode, setPanelMode] = useState<"pipeline" | "chat">("pipeline");
+  const [panelMode, setPanelMode] = useState<"pipeline" | "chat">("chat");
   const [chatModel, setChatModel] = useState("deepseek-v4-flash");
   const [showModelSelect, setShowModelSelect] = useState(false);
   const [statusText, setStatusText] = useState("AI 분석 중...");
@@ -360,17 +389,17 @@ export default function ChatInterface({
 
   const loadHistory = async (sid?: string, global: boolean = true) => {
     try {
-      const queryParams = new URLSearchParams({ 
+      const queryParams = new URLSearchParams({
         t: Date.now().toString(),
         limit: "200" // 글로벌 모드이므로 좀 더 많이 가져옴
       });
       if (!global && sid) {
         queryParams.set("session_id", sid);
       }
-      
+
       const res = await fetchWithBypass(
         `/api/chat/history?${queryParams.toString()}`,
-        { 
+        {
           timeoutMs: 15000,
           cache: "no-store",
           headers: {
@@ -521,7 +550,7 @@ export default function ChatInterface({
     } else {
       loadSessions();
     }
-  }, [isLoading, (messages.length > 0 ? messages[messages.length-1].content.length : 0)]);
+  }, [isLoading, (messages.length > 0 ? messages[messages.length - 1].content.length : 0)]);
 
   const handleClearSession = async () => {
     const sid = sessionIdRef.current;
@@ -687,8 +716,8 @@ export default function ChatInterface({
           try {
             const raw = line.replace("data: ", "").trim();
             if (!raw || raw === "[DONE]") continue;
-            if (!raw.startsWith("{")) continue; 
-            
+            if (!raw.startsWith("{")) continue;
+
             const event = JSON.parse(raw);
 
             switch (event.type) {
@@ -745,9 +774,9 @@ export default function ChatInterface({
                     (stageId
                       ? last.id.startsWith(stageId)
                       : !last.id.includes("-invoke-") &&
-                        !last.id.includes("-design") &&
-                        !last.id.includes("-strategy") &&
-                        !last.id.includes("-backtest"));
+                      !last.id.includes("-design") &&
+                      !last.id.includes("-strategy") &&
+                      !last.id.includes("-backtest"));
 
                   if (canAppend) {
                     const next = [...prev];
@@ -931,7 +960,7 @@ export default function ChatInterface({
 
       const response = await fetchWithBypass(url, {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
           "Accept": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -971,12 +1000,12 @@ export default function ChatInterface({
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-          
+
           try {
             const raw = line.replace("data: ", "").trim();
             if (!raw) continue;
             const event = JSON.parse(raw);
-            
+
             switch (event.type) {
               case "status":
                 setStatusText(event.content);
@@ -1029,7 +1058,7 @@ export default function ChatInterface({
                   const stageId = currentStageIdRef.current;
                   // 어시스턴트의 연속된 추론은 무조건 하나의 블록으로 병합
                   const canAppend = last && last.role === "assistant" && last.type === "thought";
-                  
+
                   if (canAppend) {
                     const next = [...prev];
                     next[next.length - 1] = { ...last, content: last.content + event.content };
@@ -1075,13 +1104,13 @@ export default function ChatInterface({
                     payload: event.payload
                   },
                 });
-                
+
                 // [AUTO-APPLY] 백테스트 완료 시 발굴된 코드를 에디터에 즉시 자동 적용 (사용자 편의성)
                 const finalCode = event.data.code || event.strategy_code;
                 if (finalCode && onApplyCode) {
                   onApplyCode(finalCode, event.data?.title || "Mined Strategy", event.payload);
                 }
-                
+
                 if (event.payload && onBacktestGenerated) {
                   onBacktestGenerated(event.payload);
                 }
@@ -1219,17 +1248,16 @@ export default function ChatInterface({
           {allowGlobalMode && (
             <button
               onClick={toggleGlobalMode}
-              className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border ${
-                isGlobalMode 
-                  ? 'bg-purple-500/20 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.15)]' 
+              className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border ${isGlobalMode
+                  ? 'bg-purple-500/20 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.15)]'
                   : 'bg-white/[0.03] border-white/[0.1] text-slate-500 hover:text-slate-300'
-              }`}
+                }`}
             >
               {isGlobalMode ? 'Global On' : 'Session Only'}
             </button>
           )}
-          
-          <select 
+
+          <select
             value={isGlobalMode ? "" : sessionIdRef.current}
             onChange={(e) => e.target.value && handleSwitchSession(e.target.value)}
             className="bg-white/[0.03] border border-white/[0.08] rounded-lg px-2 py-1 text-[10px] text-slate-400 focus:ring-0 focus:border-purple-500/50 outline-none max-w-[150px] font-mono"
@@ -1241,6 +1269,22 @@ export default function ChatInterface({
               </option>
             ))}
           </select>
+
+          {/* Mode Toggle + Model Selector */}
+          <div className="flex items-center gap-2 ml-2 border-l border-white/10 pl-4">
+            {/* Pipeline 모드 ON/OFF 토글 */}
+            <button
+              onClick={() => setPanelMode(panelMode === "pipeline" ? "chat" : "pipeline")}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 border ${panelMode === "pipeline"
+                  ? 'bg-purple-600/40 text-purple-100 border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                  : 'bg-white/[0.04] text-slate-500 border-white/[0.06] hover:text-slate-300 hover:bg-white/[0.08]'
+                }`}
+            >
+              <GitBranch size={10} />
+              PIPELINE
+            </button>
+
+          </div>
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -1325,7 +1369,7 @@ export default function ChatInterface({
       {/* Modern Integrated Chat Input Area */}
       <div className="px-5 pb-6 pt-2 bg-transparent">
         <div className="max-w-4xl mx-auto flex flex-col gap-3">
-          
+
           {/* Subtle Status Info */}
           {isLoading && (
             <div className="flex items-center gap-3 px-4 animate-in fade-in slide-in-from-bottom-1 duration-500">
@@ -1344,11 +1388,10 @@ export default function ChatInterface({
                   {Array.from({ length: totalStages }, (_, idx) => idx + 1).map((s) => (
                     <div
                       key={s}
-                      className={`h-1.5 w-1.5 rounded-full transition-all duration-700 ease-out ${
-                        s <= currentStage
+                      className={`h-1.5 w-1.5 rounded-full transition-all duration-700 ease-out ${s <= currentStage
                           ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.8)] scale-110'
                           : 'bg-white/10'
-                      }`}
+                        }`}
                     />
                   ))}
                 </div>
@@ -1356,36 +1399,11 @@ export default function ChatInterface({
             </div>
           )}
 
-          {/* Mode Toggle + Model Selector */}
-          <div className="flex items-center gap-2 px-1">
-            {/* Pipeline / Chat 모드 토글 */}
-            <div className="flex items-center rounded-sm bg-white/[0.04] border border-white/[0.06] p-0.5 gap-0.5 font-mono">
-              <button
-                onClick={() => setPanelMode("pipeline")}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
-                  panelMode === "pipeline"
-                    ? 'bg-purple-600/40 text-purple-100 border border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <GitBranch size={10} />
-                PIPELINE
-              </button>
-              <button
-                onClick={() => setPanelMode("chat")}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
-                  panelMode === "chat"
-                    ? 'bg-white/10 text-white border border-white/20'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <MessageSquare size={10} />
-                CHAT
-              </button>
-            </div>
 
-            {/* 모델 셀렉터 (Chat 모드일 때만 표시) */}
-            {panelMode === "chat" && (
+
+          {/* 모델 셀렉터 (Chat 모드일 때만 표시) */}
+          {panelMode === "chat" && (
+            <div className="flex items-center gap-2 px-1">
               <div className="relative" data-model-select>
                 <button
                   onClick={() => setShowModelSelect(v => !v)}
@@ -1402,36 +1420,34 @@ export default function ChatInterface({
                       "minimax-m2.5",
                       "deepseek-v3.1-terminus"
                     ].map(m => (
-                    <button
-                      key={m}
-                      onClick={() => { setChatModel(m); setShowModelSelect(false); }}
-                      className={`w-full text-left px-3 py-2.5 text-[11px] font-mono transition-all duration-200 ${
-                        chatModel === m
-                          ? 'bg-white/[0.08] text-white'
-                          : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="truncate flex-1">{m}</span>
-                        {m === "minimax-m2.5" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-[9px] text-purple-400 font-sans whitespace-nowrap">핵심</span>}
-                        {m === "deepseek-v4-flash" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-green-500/10 text-[9px] text-green-400 font-sans whitespace-nowrap">⭐ 최고속</span>}
-                        {m === "minimax-m2.5" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-[9px] text-purple-400 font-sans whitespace-nowrap">안정</span>}
-                        {m === "deepseek-v3.1-terminus" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-blue-500/10 text-[9px] text-blue-400 font-sans whitespace-nowrap">강력</span>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
+                      <button
+                        key={m}
+                        onClick={() => { setChatModel(m); setShowModelSelect(false); }}
+                        className={`w-full text-left px-3 py-2.5 text-[11px] font-mono transition-all duration-200 ${chatModel === m
+                            ? 'bg-white/[0.08] text-white'
+                            : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200'
+                          }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="truncate flex-1">{m}</span>
+                          {m === "minimax-m2.5" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-[9px] text-purple-400 font-sans whitespace-nowrap">핵심</span>}
+                          {m === "deepseek-v4-flash" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-green-500/10 text-[9px] text-green-400 font-sans whitespace-nowrap">⭐ 최고속</span>}
+                          {m === "minimax-m2.5" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-[9px] text-purple-400 font-sans whitespace-nowrap">안정</span>}
+                          {m === "deepseek-v3.1-terminus" && <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-blue-500/10 text-[9px] text-blue-400 font-sans whitespace-nowrap">강력</span>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            )}
-          </div>
+          )}
 
           {/* Integrated Input Bar */}
-          <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${
-            isLoading 
-              ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]' 
+          <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${isLoading
+              ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]'
               : 'border-white/[0.08] bg-white/[0.02] shadow-2xl hover:border-white/[0.12] focus-within:border-purple-500/30 focus-within:bg-white/[0.04]'
-          }`}>
+            }`}>
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -1446,15 +1462,14 @@ export default function ChatInterface({
               className="flex-1 bg-transparent border-none focus:ring-0 text-[13px] text-slate-100 placeholder:text-slate-600 resize-none py-2.5 px-4 max-h-40 overflow-y-auto custom-scrollbar"
               rows={1}
             />
-            
+
             <button
               onClick={() => handleSend()}
               disabled={!input.trim() || isLoading}
-              className={`p-2.5 rounded-[18px] transition-all duration-300 flex items-center justify-center ${
-                input.trim() && !isLoading 
-                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20 hover:scale-105 hover:bg-purple-500 active:scale-95' 
+              className={`p-2.5 rounded-[18px] transition-all duration-300 flex items-center justify-center ${input.trim() && !isLoading
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20 hover:scale-105 hover:bg-purple-500 active:scale-95'
                   : 'text-slate-700 opacity-40 cursor-not-allowed'
-              }`}
+                }`}
             >
               <Send size={18} fill={input.trim() && !isLoading ? "currentColor" : "none"} />
             </button>

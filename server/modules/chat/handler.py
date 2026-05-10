@@ -10,7 +10,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from server.shared.llm.client import generate_chat_reply, stream_chat_reply
 from server.shared.db.supabase import SupabaseManager
 from server.modules.engine.runtime import invalidate_strategy_cache
-from server.modules.chat.prompts import SYSTEM_PROMPT, CLASSIFICATION_SYSTEM, CLASSIFICATION_MESSAGE
+from server.modules.chat.prompts import SYSTEM_PROMPT, CLASSIFICATION_SYSTEM, CLASSIFICATION_MESSAGE, DIRECT_CHAT_SYSTEM
 from server.modules.chat.skills import (
     dispatch_analysis,
     run_create_pipeline,
@@ -735,14 +735,7 @@ class ChatHandler:
         resolved_model = (model or os.getenv("LITELLM_MODEL") or os.getenv("OLLAMA_MODEL") or None)
         logger.info("[chat] direct_chat_reply session=%s model=%s", session_id, resolved_model or "default")
         use_context = _should_use_direct_chat_context(message, context, history)
-        direct_chat_system = (
-            "너는 퀀트 트레이딩 비서다.\n"
-            "규칙:\n"
-            "1. 사용자가 명시적으로 요청하지 않으면 현재 전략, 백테스트, 시장 컨텍스트를 먼저 분석하지 마라.\n"
-            "2. 짧은 인사나 잡담에는 인사/짧은 답만 하라.\n"
-            "3. 직전 대화가 전략 분석 중이더라도, 사용자가 이어달라고 하지 않으면 임의로 계속 이어 쓰지 마라.\n"
-            "4. 질문이 명확할 때만 필요한 범위에서만 전략/시장 문맥을 활용하라."
-        )
+        direct_chat_system = DIRECT_CHAT_SYSTEM
         effective_context = context if use_context else None
         effective_history = history if use_context else []
         logger.info(
