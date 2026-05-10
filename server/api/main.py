@@ -80,7 +80,7 @@ if _env_flag("EVOLUTION_FILE_LOG_ENABLED", False):
         backup_count = 3
     backup_count = max(1, min(backup_count, 30))
 
-    log_subjects = ["server.modules.evolution", "server.shared.llm"]
+    log_subjects = ["server.shared.llm"]
     evo_file_handler = TimedRotatingFileHandler(
         filename=logs_dir / "loop.log",
         when="midnight",

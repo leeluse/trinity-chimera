@@ -5,16 +5,14 @@ import { usePathname } from "next/navigation";
 import { 
   LayoutDashboard, 
   History, 
-  Settings, 
-  BarChart3
+  Terminal as TerminalIcon
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/" },
+  { icon: TerminalIcon, label: "Terminal", href: "/terminal" },
   { icon: History, label: "Backtest", href: "/backtest" },
-  { icon: BarChart3, label: "Stats", href: "/stats" },
-  { icon: Settings, label: "Settings", href: "/settings" },
 ];
 
 export function NavigationSidebar() {

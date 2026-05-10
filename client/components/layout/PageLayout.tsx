@@ -14,8 +14,8 @@ interface PageLayoutProps {
 const Main = ({ children }: { children: ReactNode }) => <>{children}</>;
 const Side = ({ children }: { children: ReactNode }) => <>{children}</>;
 
-export default function PageLayout({ 
-  children, 
+export default function PageLayout({
+  children,
   fullHeight = true, // Default to true for unified app feel
   rightWidth = "lg:w-[400px]"
 }: PageLayoutProps) {

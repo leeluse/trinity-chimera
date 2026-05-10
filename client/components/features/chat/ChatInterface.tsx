@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo, memo, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from 'rehype-raw';
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown, Copy, Check, SlidersHorizontal } from "lucide-react";
+import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown, Copy, Check } from "lucide-react";
 import { fetchWithBypass } from "@/lib/api";
-import OptimizationMiniPanel from "@/components/features/backtest/OptimizationMiniPanel";
-import RegimeChatPanel from "@/components/features/chat/RegimeChatPanel";
 
 interface ChatMessage {
   id: string;
@@ -16,6 +15,7 @@ interface ChatMessage {
   content: string;
   type?: "text" | "strategy" | "backtest" | "thought" | "invocation" | "design" | "choice";
   data?: any;
+  createdAt?: string | number;
 }
 
 interface ChatInterfaceProps {
@@ -32,7 +32,6 @@ const EXAMPLE_PROMPTS = [
 const SKILL_STAGE_META: Record<string, { total: number; showProgress: boolean }> = {
   CREATE_STRATEGY: { total: 5, showProgress: true },
   MODIFY_STRATEGY: { total: 5, showProgress: true },
-  RUN_EVOLUTION: { total: 5, showProgress: true },
   RUN_BACKTEST: { total: 5, showProgress: true },
   EXPLAIN_STRATEGY: { total: 1, showProgress: false },
   RISK_ANALYSIS: { total: 1, showProgress: false },
@@ -316,15 +315,18 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
   );
 });
 
-export default function ChatInterface({ context = {}, onBacktestGenerated, onApplyCode }: ChatInterfaceProps) {
+export default function ChatInterface({
+  context = {},
+  onBacktestGenerated,
+  onApplyCode,
+}: ChatInterfaceProps) {
+  const pathname = usePathname();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [panelMode, setPanelMode] = useState<"pipeline" | "chat" | "optimize" | "regime">("pipeline");
+  const [panelMode, setPanelMode] = useState<"pipeline" | "chat">("pipeline");
   const [chatModel, setChatModel] = useState("deepseek-v4-flash");
   const [showModelSelect, setShowModelSelect] = useState(false);
-  const [autoBusy, setAutoBusy] = useState(false);
-  const [autoStatus, setAutoStatus] = useState<Record<string, any> | null>(null);
   const [statusText, setStatusText] = useState("AI 분석 중...");
   const [currentStage, setCurrentStage] = useState(0);
   const [totalStages, setTotalStages] = useState(0);
@@ -338,9 +340,23 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
   // 🆔 세션 ID 관리 (localStorage 유지)
   const sessionIdRef = useRef<string>("");
-  const [isGlobalMode, setIsGlobalMode] = useState(true);
+  const [isGlobalMode, setIsGlobalMode] = useState(false);
   const [sessionInput, setSessionInput] = useState("");
   const [isClearing, setIsClearing] = useState(false);
+
+  const sessionScope = useMemo(() => {
+    if (pathname === "/backtest") return "backtest";
+    if (pathname === "/terminal") return "terminal";
+    return "global";
+  }, [pathname]);
+
+  const allowGlobalMode = sessionScope === "global";
+  const sessionPrefix = `${sessionScope}-session-`;
+  const storageSessionKey = `chat_session_id:${sessionScope}`;
+
+  const createScopedSessionId = useCallback(() => {
+    return `${sessionPrefix}${Math.random().toString(36).slice(2, 11)}-${Date.now()}`;
+  }, [sessionPrefix]);
 
   const loadHistory = async (sid?: string, global: boolean = true) => {
     try {
@@ -374,6 +390,7 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
             content: m.content || "",
             type: (m.type === "analysis" ? "text" : (m.type === "design" ? "design" : (m.type || "text"))) as any,
             data: m.data ?? {},
+            createdAt: m.created_at ?? m.createdAt ?? m.timestamp,
           }));
         setMessages(historyMessages);
       }
@@ -383,21 +400,21 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   };
 
   useEffect(() => {
-    let sid = localStorage.getItem("chat_session_id");
-    if (!sid) {
-      sid = `session-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`;
-      localStorage.setItem("chat_session_id", sid);
+    let sid = localStorage.getItem(storageSessionKey);
+    if (!sid || !sid.startsWith(sessionPrefix)) {
+      sid = createScopedSessionId();
+      localStorage.setItem(storageSessionKey, sid);
     }
     sessionIdRef.current = sid;
     setSessionInput(sid);
-    
-    // 기본적으로 전체 히스토리(글로벌) 로드
-    loadHistory(undefined, true);
-  }, []);
+
+    setIsGlobalMode(false);
+    loadHistory(sid, false);
+  }, [createScopedSessionId, sessionPrefix, storageSessionKey]);
 
   const handleSwitchSession = (newSid: string) => {
     if (!newSid.trim()) return;
-    localStorage.setItem("chat_session_id", newSid.trim());
+    localStorage.setItem(storageSessionKey, newSid.trim());
     sessionIdRef.current = newSid.trim();
     setSessionInput(newSid.trim());
     setIsGlobalMode(false);
@@ -405,14 +422,15 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
   };
 
   const toggleGlobalMode = () => {
+    if (!allowGlobalMode) return;
     const nextGlobal = !isGlobalMode;
     setIsGlobalMode(nextGlobal);
     loadHistory(sessionIdRef.current, nextGlobal);
   };
 
   const handleNewSession = () => {
-    const newSid = `session-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`;
-    localStorage.setItem("chat_session_id", newSid);
+    const newSid = createScopedSessionId();
+    localStorage.setItem(storageSessionKey, newSid);
     sessionIdRef.current = newSid;
     setSessionInput(newSid);
     setIsGlobalMode(false);
@@ -431,12 +449,29 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     return `${hh}:${mm}:${ss}`;
   };
 
+  const resolveMessageTs = (msg: ChatMessage): number | null => {
+    const candidates = [msg.createdAt, msg.data?.created_at, msg.data?.timestamp];
+    for (const candidate of candidates) {
+      if (candidate === undefined || candidate === null || candidate === "") continue;
+      const numeric = Number(candidate);
+      if (Number.isFinite(numeric) && numeric > 946684800000) return numeric;
+      const parsed = Date.parse(String(candidate));
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    const match = String(msg.id || "").match(/(?:^|[^\d])(\d{13})(?:[^\d]|$)/);
+    if (match) {
+      const ts = Number(match[1]);
+      if (Number.isFinite(ts) && ts > 946684800000) return ts;
+    }
+    return null;
+  };
+
   const chatLogLines = useMemo(() => {
     return messages
       .slice(-120)
       .map((msg) => {
-        const rawTs = Number(String(msg.id || "").split("-")[0]);
-        const ts = Number.isFinite(rawTs) ? rawTs : 0;
+        const ts = resolveMessageTs(msg);
+        const timeLabel = ts !== null ? formatHms(ts) : "--:--:--";
         const role = msg.role === "user" ? "USER" : "AI";
         let text = String(msg.content || "").replace(/\s+/g, " ").trim();
         if (!text && msg.type === "invocation") text = `[invoke] ${String(msg.data?.skill || "")}`;
@@ -444,97 +479,11 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
         if (!text && msg.type === "backtest") text = "[backtest] 완료";
         if (!text) text = `[${msg.type || "message"}]`;
         if (text.length > 240) text = `${text.slice(0, 240)}…`;
-        return `[${formatHms(ts)}] ${role} ${text}`;
+        return `[${timeLabel}] ${role} ${text}`;
       })
       .filter(Boolean);
   }, [messages]);
 
-  const fetchAutoStatus = useCallback(async () => {
-    try {
-      const res = await fetchWithBypass(`/api/chat/llm-loop/automation/status?t=${Date.now()}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      setAutoStatus(data?.status || null);
-    } catch (e) {
-      console.error("automation status fetch failed", e);
-    }
-  }, []);
-
-  useEffect(() => {
-    const ms = autoStatus?.running ? 1500 : 3500;
-    const timer = window.setInterval(fetchAutoStatus, ms);
-    return () => window.clearInterval(timer);
-  }, [fetchAutoStatus, autoStatus?.running]);
-
-  const openRegimePanel = useCallback(() => {
-    setPanelMode("regime");
-    fetchAutoStatus();
-  }, [fetchAutoStatus]);
-
-  const handleStartAuto = useCallback(async () => {
-    if (autoBusy) return;
-    setAutoBusy(true);
-    try {
-      const payload = {
-        symbol: String(context?.symbol || "BTCUSDT"),
-        timeframe: String(context?.timeframe || "15m"),
-        regime_timeframe: "1h",
-        start_date: String(context?.start_date || "2021-01-01"),
-        end_date: String(context?.end_date || "2026-01-31"),
-        strategies: ["Bull Strategy 01", "Bull Strategy 02", "Bull Strategy 03", "Bull Strategy 04"],
-        iterations: 1,
-        interval_minutes: 5,
-        fallback_minutes: 30,
-        apply_best_db: true,
-        parallel_strategies: 2,
-        run_immediately: true,
-      };
-      const res = await fetchWithBypass("/api/chat/llm-loop/automation/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      console.error("start automation failed", e);
-    } finally {
-      setAutoBusy(false);
-      fetchAutoStatus();
-    }
-  }, [autoBusy, context, fetchAutoStatus]);
-
-  const handleStopAuto = useCallback(async () => {
-    if (autoBusy) return;
-    setAutoBusy(true);
-    try {
-      const res = await fetchWithBypass("/api/chat/llm-loop/automation/stop", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ terminate_running: true }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      console.error("stop automation failed", e);
-    } finally {
-      setAutoBusy(false);
-      fetchAutoStatus();
-    }
-  }, [autoBusy, fetchAutoStatus]);
-
-  const autoStatusLabel = useMemo(() => {
-    const enabled = Boolean(autoStatus?.enabled);
-    const running = Boolean(autoStatus?.running);
-    return `AUTO: ${enabled ? "ON" : "OFF"}${running ? " · RUNNING" : ""}`;
-  }, [autoStatus]);
-
-  const autoMetaLabel = useMemo(() => {
-    const total = Number(autoStatus?.total_runs || 0);
-    const success = Number(autoStatus?.success_runs || 0);
-    const improved = Number(autoStatus?.improved_runs || 0);
-    return `성공 ${success}/${total} · 개선런 ${improved}/${total}`;
-  }, [autoStatus]);
   const loadSessions = async () => {
     try {
       const res = await fetchWithBypass("/api/chat/sessions?limit=20");
@@ -542,7 +491,14 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
         const text = await res.text();
         if (!text) return;
         const data = JSON.parse(text);
-        if (data.success) setSessions(data.sessions || []);
+        if (data.success) {
+          const rows = Array.isArray(data.sessions) ? data.sessions : [];
+          const filtered = rows.filter((session: any) => {
+            const sid = String(session?.session_id || "");
+            return sid.startsWith(sessionPrefix);
+          });
+          setSessions(filtered);
+        }
       }
     } catch (e) {
       console.error("Sessions fetch failed:", e);
@@ -941,7 +897,8 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
     const newUserMsg: ChatMessage = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       role: "user",
-      content: userMessage
+      content: userMessage,
+      createdAt: Date.now(),
     };
 
     appendMessage(newUserMsg);
@@ -1259,16 +1216,18 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
       {/* 🆔 헤더 세션 컨트롤 바 */}
       <div className="px-4 py-3 border-b border-white/[0.05] bg-background/40 backdrop-blur-md flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <button
-            onClick={toggleGlobalMode}
-            className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border ${
-              isGlobalMode 
-                ? 'bg-purple-500/20 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.15)]' 
-                : 'bg-white/[0.03] border-white/[0.1] text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            {isGlobalMode ? 'Global On' : 'Session Only'}
-          </button>
+          {allowGlobalMode && (
+            <button
+              onClick={toggleGlobalMode}
+              className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border ${
+                isGlobalMode 
+                  ? 'bg-purple-500/20 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.15)]' 
+                  : 'bg-white/[0.03] border-white/[0.1] text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {isGlobalMode ? 'Global On' : 'Session Only'}
+            </button>
+          )}
           
           <select 
             value={isGlobalMode ? "" : sessionIdRef.current}
@@ -1314,94 +1273,53 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
 
       {/* Chat Messages - Virtualized for Scale */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
-        {panelMode === "optimize" ? (
-          <div className="h-full overflow-y-auto no-scrollbar p-2">
-            <OptimizationMiniPanel
-              symbol={String(context?.symbol || "BTCUSDT")}
-              timeframe={String(context?.timeframe || "1h")}
-              startDate={String(context?.start_date || "")}
-              endDate={String(context?.end_date || "")}
-              strategy={String(context?.strategy || context?.strategy_title || "custom")}
-              strategyCode={String(context?.editor_code || context?.current_strategy?.code || "")}
-              busy={isLoading}
-              onApplyOptimizedCode={(code, payload) => {
-                if (onApplyCode) {
-                  onApplyCode(code, String(context?.strategy_title || context?.strategy || "Optimized Strategy"), payload);
-                }
-                if (payload && onBacktestGenerated) {
-                  onBacktestGenerated(payload);
-                }
-              }}
-            />
-          </div>
-        ) : panelMode === "regime" ? (
-          <RegimeChatPanel
-            context={context}
-            busy={isLoading}
-            autoBusy={autoBusy}
-            autoRunning={Boolean(autoStatus?.running)}
-            autoStatusLabel={autoStatusLabel}
-            autoMetaLabel={autoMetaLabel}
-            streamStatusLabel={isLoading ? statusText : ""}
-            streamElapsedSeconds={stageElapsedSeconds}
-            chatLogLines={chatLogLines}
-            autoLastError={String(autoStatus?.last_error || "")}
-            autoLastSummaryPath={String(autoStatus?.last_summary_path || "")}
-            autoLastStdoutTail={String(autoStatus?.last_stdout_tail || "")}
-            autoCurrentStdoutTail={String(autoStatus?.current_stdout_tail || "")}
-            onRunPrompt={(prompt) => handleSend(prompt)}
-            onStartAuto={handleStartAuto}
-            onStopAuto={handleStopAuto}
-          />
-        ) : (
-          <Virtuoso
-            ref={virtuosoRef}
-            data={messages}
-            followOutput="smooth"
-            className="custom-scrollbar"
-            alignToBottom
-            itemContent={(index: number, msg: ChatMessage) => (
-              <div className="px-4">
-                <MessageItem
-                  msg={msg}
-                  onShowCode={handleShowCode}
-                  onSendMessage={handleSend}
-                  isStreaming={index === messages.length - 1 && isLoading}
-                  onChoiceSelect={(choiceValue: string, originalMsg: ChatMessage, design?: any) => handleCodeGenModeChoice(choiceValue, originalMsg, design)}
-                  onDesignCodeRequest={handleDesignCodeRequest}
-                />
-              </div>
-            )}
-            components={{
-              Header: () => (
-                <div className="pt-4">
-                  {messages.length === 0 && !isLoading && !isGlobalMode && (
-                    <div className="flex flex-col gap-3 items-center justify-center space-y-4 opacity-80 py-10">
-                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center border border-purple-500/20 mb-2">
-                        <Zap size={24} className="text-purple-400 animate-pulse" />
-                      </div>
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Get Started with AI Strategy</h3>
-                      <div className="flex flex-col gap-2 w-full max-w-sm px-4">
-                        {EXAMPLE_PROMPTS.map((prompt, i) => (
-                          <button
-                            key={i}
-                            onClick={() => handleSend(prompt)}
-                            className="text-left px-5 py-3 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-purple-500/30 hover:bg-purple-500/5 transition-all group"
-                          >
-                            <p className="text-[11px] text-slate-400 group-hover:text-purple-300 leading-relaxed font-medium">
-                              {prompt}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
+        <Virtuoso
+          ref={virtuosoRef}
+          data={messages}
+          followOutput="smooth"
+          className="custom-scrollbar"
+          alignToBottom
+          itemContent={(index: number, msg: ChatMessage) => (
+            <div className="px-4">
+              <MessageItem
+                msg={msg}
+                onShowCode={handleShowCode}
+                onSendMessage={handleSend}
+                isStreaming={index === messages.length - 1 && isLoading}
+                onChoiceSelect={(choiceValue: string, originalMsg: ChatMessage, design?: any) => handleCodeGenModeChoice(choiceValue, originalMsg, design)}
+                onDesignCodeRequest={handleDesignCodeRequest}
+              />
+            </div>
+          )}
+          components={{
+            Header: () => (
+              <div className="pt-4">
+                {messages.length === 0 && !isLoading && !isGlobalMode && (
+                  <div className="flex flex-col gap-3 items-center justify-center space-y-4 opacity-80 py-10">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center border border-purple-500/20 mb-2">
+                      <Zap size={24} className="text-purple-400 animate-pulse" />
                     </div>
-                  )}
-                </div>
-              ),
-              Footer: () => <div className="h-0 pointer-events-none" />
-            }}
-          />
-        )}
+                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Get Started with AI Strategy</h3>
+                    <div className="flex flex-col gap-2 w-full max-w-sm px-4">
+                      {EXAMPLE_PROMPTS.map((prompt, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleSend(prompt)}
+                          className="text-left px-5 py-3 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-purple-500/30 hover:bg-purple-500/5 transition-all group"
+                        >
+                          <p className="text-[11px] text-slate-400 group-hover:text-purple-300 leading-relaxed font-medium">
+                            {prompt}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ),
+            Footer: () => <div className="h-0 pointer-events-none" />
+          }}
+        />
       </div>
 
       {/* Modern Integrated Chat Input Area */}
@@ -1464,28 +1382,6 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
                 <MessageSquare size={10} />
                 CHAT
               </button>
-              <button
-                onClick={() => setPanelMode("optimize")}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
-                  panelMode === "optimize"
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <SlidersHorizontal size={10} />
-                OPTIMIZE
-              </button>
-              <button
-                onClick={openRegimePanel}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 ${
-                  panelMode === "regime"
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-[0_0_10px_rgba(34,211,238,0.2)]'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <Zap size={10} />
-                REGIME
-              </button>
             </div>
 
             {/* 모델 셀렉터 (Chat 모드일 때만 표시) */}
@@ -1531,40 +1427,38 @@ export default function ChatInterface({ context = {}, onBacktestGenerated, onApp
           </div>
 
           {/* Integrated Input Bar */}
-          {panelMode !== "optimize" && panelMode !== "regime" && (
-            <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${
-              isLoading 
-                ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]' 
-                : 'border-white/[0.08] bg-white/[0.02] shadow-2xl hover:border-white/[0.12] focus-within:border-purple-500/30 focus-within:bg-white/[0.04]'
-            }`}>
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                disabled={isLoading}
-                placeholder={isLoading ? "" : "Explore AI Trading Ideas..."}
-                className="flex-1 bg-transparent border-none focus:ring-0 text-[13px] text-slate-100 placeholder:text-slate-600 resize-none py-2.5 px-4 max-h-40 overflow-y-auto custom-scrollbar"
-                rows={1}
-              />
-              
-              <button
-                onClick={() => handleSend()}
-                disabled={!input.trim() || isLoading}
-                className={`p-2.5 rounded-[18px] transition-all duration-300 flex items-center justify-center ${
-                  input.trim() && !isLoading 
-                    ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20 hover:scale-105 hover:bg-purple-500 active:scale-95' 
-                    : 'text-slate-700 opacity-40 cursor-not-allowed'
-                }`}
-              >
-                <Send size={18} fill={input.trim() && !isLoading ? "currentColor" : "none"} />
-              </button>
-            </div>
-          )}
+          <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${
+            isLoading 
+              ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]' 
+              : 'border-white/[0.08] bg-white/[0.02] shadow-2xl hover:border-white/[0.12] focus-within:border-purple-500/30 focus-within:bg-white/[0.04]'
+          }`}>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              disabled={isLoading}
+              placeholder={isLoading ? "" : "Explore AI Trading Ideas..."}
+              className="flex-1 bg-transparent border-none focus:ring-0 text-[13px] text-slate-100 placeholder:text-slate-600 resize-none py-2.5 px-4 max-h-40 overflow-y-auto custom-scrollbar"
+              rows={1}
+            />
+            
+            <button
+              onClick={() => handleSend()}
+              disabled={!input.trim() || isLoading}
+              className={`p-2.5 rounded-[18px] transition-all duration-300 flex items-center justify-center ${
+                input.trim() && !isLoading 
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20 hover:scale-105 hover:bg-purple-500 active:scale-95' 
+                  : 'text-slate-700 opacity-40 cursor-not-allowed'
+              }`}
+            >
+              <Send size={18} fill={input.trim() && !isLoading ? "currentColor" : "none"} />
+            </button>
+          </div>
         </div>
       </div>
     </div>

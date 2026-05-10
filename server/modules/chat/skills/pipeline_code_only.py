@@ -6,7 +6,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from server.shared.llm.client import stream_code_gen_reply
 from server.shared.market.strategy_loader import StrategyLoader, SecurityError
-from server.modules.evolution.wiki_memory import EvolutionWikiMemory
+from server.shared.chat.wiki_memory import EvolutionWikiMemory
 from server.modules.chat.prompts import CODE_PROMPT_TEMPLATE
 from server.modules.chat.skills._base import (
     format_sse,

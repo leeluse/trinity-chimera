@@ -34,6 +34,7 @@ interface EquityChartProps {
 
 export default function EquityChart({ results }: EquityChartProps) {
   const chartRef = useRef<any>(null);
+  const startingCapital = 10000;
 
   const generateData = (): ChartData<"line"> => {
     // 1. 결과가 없을 때 더미 데이터 표시
@@ -57,24 +58,47 @@ export default function EquityChart({ results }: EquityChartProps) {
 
     // 2. 엔진에서 보낸 equityCurve가 있으면 최우선으로 사용
     if (results.equityCurve && results.equityCurve.length > 0) {
-      return {
-        labels: results.equityCurve.map(d => {
-          const date = new Date(d.time * 1000);
-          return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:00`;
-        }),
-        datasets: [
-          {
-            label: "자산 곡선",
-            data: results.equityCurve.map(d => 10000 * d.value),
-            borderColor: "#9f7aea",
-            backgroundColor: "rgba(159, 122, 234, 0.05)",
-            borderWidth: 1.5,
+      const labels = results.equityCurve.map(d => {
+        const date = new Date(d.time * 1000);
+        return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:00`;
+      });
+
+      const equityValues = results.equityCurve.map(d => startingCapital * d.value);
+      const datasets: ChartData<"line">["datasets"] = [
+        {
+          label: "자산 곡선",
+          data: equityValues,
+          borderColor: "#9f7aea",
+          backgroundColor: "rgba(159, 122, 234, 0.05)",
+          borderWidth: 1.5,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          tension: 0.1,
+          fill: true,
+        }
+      ];
+
+      if (results.candles && results.candles.length > 0) {
+        const firstClose = Number(results.candles[0]?.close || 0);
+        if (firstClose > 0) {
+          datasets.push({
+            label: "매수 후 보유",
+            data: results.candles.map((candle) => startingCapital * (Number(candle.close || 0) / firstClose)),
+            borderColor: "rgba(16, 185, 129, 0.9)",
+            backgroundColor: "transparent",
+            borderWidth: 1.2,
             pointRadius: 0,
-            pointHoverRadius: 4,
-            tension: 0.1,
-            fill: true,
-          }
-        ]
+            pointHoverRadius: 3,
+            tension: 0.08,
+            borderDash: [6, 4],
+            fill: false,
+          });
+        }
+      }
+
+      return {
+        labels,
+        datasets,
       };
     }
 

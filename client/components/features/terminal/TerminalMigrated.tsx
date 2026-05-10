@@ -7,7 +7,7 @@ import { useTerminalStore } from "./terminalStore";
 import { cn } from "@/lib/utils";
 
 export default function TerminalMigrated() {
-  const { hunterSummary: hSummary, filteredResults, globalMetrics } = useTerminalStore();
+  const { filteredResults, globalMetrics } = useTerminalStore();
 
   return (
     <div className="h-screen w-full overflow-hidden bg-[#030508] text-slate-200">

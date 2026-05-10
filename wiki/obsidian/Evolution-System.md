@@ -1,103 +1,113 @@
 # Evolution System
 
-## 핵심 컴포넌트
-- Orchestrator: `server/modules/evolution/orchestrator.py`
-- Trigger: `server/modules/evolution/trigger.py`
-- State Manager: `server/modules/evolution/agents.py`
-- LLM Brain: `server/modules/evolution/llm.py`
-- Evolution Backtest: `server/modules/backtest/evolution/evolution_engine.py`
-
-## 실행 단계
-1. per-agent Lock 확인 (중복 실행 방지)
-2. LLM Circuit Breaker 확인 (연속 실패 시 대기)
-3. 트리거 조건 확인
-4. 현재 전략 로딩(Supabase)
-5. LLM 코드 생성 (`generate_signal` 함수 방식)
-6. 후보 코드 검증 (Quick Gate → Full Gate)
-7. 점수 비교 후 채택/거절
-8. 상태를 IDLE로 복귀
-
-## 상태 머신
-- `IDLE`
-- `TRIGGERED`
-- `GENERATING`
-- `VALIDATING`
-- `COMMITTING`
-
-## 이벤트 로깅
-`AgentStateManager`가 `add_event()`로 메모리 로그(deque maxlen=600) 유지.
-
-## 트리거 정책
-`EvolutionTrigger.check_trigger()`는 heartbeat 분(min) 간격으로 동작.
-환경 변수: `EVOLUTION_HEARTBEAT_MINUTES`
-
-## 점수 기준
-`server/modules/evolution/scoring.py`
-- `calculate_trinity_score()`
-- `evaluate_improvement(baseline, candidate)`
+> **Last Updated**: 2026-05-11
+> **현재 상태**: ⚠️ 비활성화 — 코드는 존재하나 서버에 연결되지 않음
 
 ---
 
-## 안정성 개선 (2026-04-17)
+## 1. 현황 요약
 
-### 1. per-agent async Lock
-`EvolutionOrchestrator._agent_locks[agent_id]`로 에이전트별 동시 실행을 차단한다.
-같은 에이전트가 이미 실행 중이면 즉시 return → 중복 폭탄(duplicate flood) 방지.
+| 항목 | 상태 |
+|---|---|
+| `main.py` evolution 라우터 등록 | ❌ 미등록 (`/api/agents/...` 없음) |
+| APScheduler 자율 루프 | ❌ 없음 |
+| 채팅 `INTENT_EVOLVE` 감지 시 동작 | ⚠️ `run_create_pipeline(is_mining=True)` — 일반 전략 생성과 동일 |
+| Evolution Wiki Memory 기록 | ❌ 루프 없으므로 기록 미누적 |
+| `/api/agents/...` 엔드포인트 | ❌ 응답 없음 (라우터 미포함) |
 
-```python
-# orchestrator.py
-lock = self._agent_locks.setdefault(agent_id, asyncio.Lock())
-if lock.locked(): return           # 이미 실행 중
-async with lock:
-    await self._run_evolution_cycle_inner(...)
+**결론**: 에볼루션 모듈 코드(`server/modules/evolution/`)는 존재하나 현재 아무 곳에도 연결되어 있지 않습니다.  
+채팅에서 "에볼루션 채굴" 인텐트가 감지되어도 내부적으로 `is_mining=True` 플래그를 넘기는 **일반 전략 생성 파이프라인**으로 처리됩니다.
+
+---
+
+## 2. 코드 위치 (참조용)
+
+```
+server/modules/evolution/
+├── router.py            # APIRouter (main.py에 미등록)
+├── orchestrator.py      # EvolutionOrchestrator (미호출)
+├── self_improvement.py  # SelfImprovementService (미호출)
+├── scoring.py           # calculate_trinity_score (engine/router.py에서 사용)
+├── constants.py         # AGENT_IDS, ACTIVE_AGENT_IDS
+└── wiki_memory.py       # EvolutionWikiMemory (루프 없으므로 비활성)
+
+wiki/obsidian/03_Backend/Evolution-Memory/
+├── Strategy-Constitution.md   # 채택 기준 JSON (파싱 코드 있음)
+├── Experiment-Ledger.md       # 실험 이력 (비어 있음 — 2026-05-10 초기화)
+├── Failure-Patterns.md        # 실패 패턴 (비어 있음 — 2026-05-10 초기화)
+├── Accepted-Strategies.md     # 채택 전략 (없음)
+└── state.json                 # 런타임 상태 (초기화됨)
 ```
 
-### 2. LLM Circuit Breaker
-연속 5회 LLM 실패 시 300초(5분) 자동 대기. 성공 시 카운터 리셋.
-- `self._llm_consecutive_failures` : 연속 실패 횟수
-- `self._llm_backoff_until` : 해제 시각(epoch)
-- 임계값 환경변수로 조정 가능 (`_LLM_FAILURE_THRESHOLD`, `_LLM_BACKOFF_SECONDS`)
+---
 
-### 3. LLM 프롬프트 통일 (함수 방식)
-`strategy_from_code()`는 `generate_signal(train_df, test_df)` 함수를 **1순위**로 처리한다.
-클래스 방식(행별 루프)은 2순위이며 느리고 오류가 많다.
-프롬프트를 함수 방식으로 통일하여 코드 생성 성공률을 높였다.
+## 3. 재활성화 방법 (메모)
 
-→ 자세한 내용은 [[Strategy-Code-Spec]] 참고
+다시 활성화하려면 아래 두 가지가 필요합니다:
+
+**① `main.py`에 라우터 등록**
+```python
+from server.modules.evolution.router import router as evolution_router, dashboard_router
+app.include_router(evolution_router, prefix="/api")
+app.include_router(dashboard_router, prefix="/api")
+```
+
+**② APScheduler에 루프 등록 (선택)**
+```python
+# startup_event() 안에 추가
+from server.modules.evolution.orchestrator import get_evolution_orchestrator
+evo = get_evolution_orchestrator()
+scheduler.add_job(
+    lambda: asyncio.create_task(evo.run_evolution_cycle("momentum_hunter")),
+    "interval", minutes=30, id="evo_loop", coalesce=True, max_instances=1,
+)
+```
 
 ---
 
-## 코드 품질 개선 (2026-04-20)
+## 4. Strategy Constitution (채택 기준 — 코드 내 기본값)
 
-### 1. Self-Critique 루프
+`Strategy-Constitution.md` 내 JSON 블록이 런타임에 파싱됩니다. 파일이 없거나 파싱 실패 시 아래 기본값으로 동작합니다.
 
-코드 생성 후 `StrategyLoader.validate_code()` 통과 시 `_self_critique()` 추가 검증.
-temperature=0.1 (결정론적)으로 3가지 YES/NO 질문을 검사한다:
+```json
+{
+  "hard_gates": {
+    "min_win_rate": 0.35,
+    "min_profit_factor": 1.05,
+    "min_total_return": -0.10,
+    "max_drawdown": 0.35,
+    "min_total_trades": 15,
+    "min_sharpe_ratio": -0.10
+  },
+  "quick_gates": {
+    "min_win_rate": 0.30,
+    "min_profit_factor": 1.01,
+    "min_total_return": -0.20,
+    "max_drawdown": 0.40,
+    "min_total_trades": 8,
+    "min_sharpe_ratio": -0.50
+  },
+  "budgets": {
+    "max_candidates_per_cycle": 2,
+    "max_llm_calls_per_cycle": 2
+  },
+  "memory": {
+    "recent_failures_for_prompt": 5,
+    "recent_successes_for_prompt": 3,
+    "dedupe_window": 120
+  }
+}
+```
 
-| 질문 | 실패 조건 | 재생성 지시 |
-|---|---|---|
-| Q1: 숏(-1) 신호 존재? | NO | 양방향 신호 구현 강제 |
-| Q2: AND 조건 4개 이상? | YES | 조건 3개 이하로 축소 |
-| Q3: 미정의 변수 참조? | YES | 선언 전 참조 금지 |
+---
 
-실패 시 `last_error`에 추가하고 재시도. `max_retries` 소진 시 마지막 코드를 반환(실행 보장).
+## 5. scoring.py — 현재 사용 중인 부분
 
-### 2. Few-Shot 코드 스니펫 주입
+`server/modules/evolution/scoring.py`의 `calculate_trinity_score`는 **에볼루션 루프와 무관하게** `engine/router.py` 리더보드에서 호출됩니다.
 
-`memory_context["best_code_snippet"]`에 저장된 최고 성능 전략의 핵심 코드 블록을
-프롬프트 Section 10에 참고용으로 주입 (`_assemble_prompt()`).
+```python
+# engine/router.py
+from server.modules.evolution.scoring import calculate_trinity_score
+```
 
-- `wiki_memory.py::get_best_code_snippet(agent_id)` — 에이전트별 최고 채택 전략 코드 반환
-- `wiki_memory.py::_extract_signal_block(code, max_lines=25)` — sig 생성 블록 추출
-- `wiki_memory.py::log_accepted(..., code=)` — 채택 시 `code_snippet` 저장
-
-### 3. Temperature 분리
-
-- 코드 생성 호출: `temperature=0.3`
-- Self-critique: `temperature=0.1`
-
-→ 자세한 모델별 temperature는 [[LLM-Model-Roles]] 참고
-
-## 주의 포인트
-- `router.py`에서 `force_trigger` 인자를 사용하는 호출이 있으며, 오케스트레이터 함수 시그니처(`force`)와 동기화 확인 필요.
-- 진화 루프 실행 본체가 `_run_evolution_cycle_inner()`로 분리되어 있음에 주의.
+이 함수는 현재 정상 작동 중입니다.

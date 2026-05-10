@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Play, Zap, Save, Copy } from "lucide-react";
+import { ChevronDown, Play, Zap, Save, Copy, SlidersHorizontal } from "lucide-react";
 import { SYMBOLS } from "@/constants";
 
 interface BacktestHeaderProps {
@@ -12,6 +12,7 @@ interface BacktestHeaderProps {
   setStartDate: (d: string) => void;
   endDate: string;
   setEndDate: (d: string) => void;
+  onRangePreset: (months: number) => void;
   strategy: string;
   strategies: any[];
   setStrategy: (s: string) => void;
@@ -30,6 +31,7 @@ export default function BacktestHeader({
   timeframe, setTimeframe,
   startDate, setStartDate,
   endDate, setEndDate,
+  onRangePreset,
   strategy,
   strategies,
   setStrategy,
@@ -43,6 +45,11 @@ export default function BacktestHeader({
   loading
 }: BacktestHeaderProps) {
   const TABS = ["코드", "지표", "거래 내역"];
+  const RANGE_PRESETS = [
+    { label: "1개월", months: 1 },
+    { label: "6개월", months: 6 },
+    { label: "1년", months: 12 },
+  ];
 
   return (
     <div className="flex flex-col gap-3 p-3 border-b border-white/[0.05] relative z-20">
@@ -93,6 +100,18 @@ export default function BacktestHeader({
           />
         </div>
 
+        <div className="flex items-center gap-1 p-1 bg-white/[0.02] border border-white/5 rounded-xl">
+          {RANGE_PRESETS.map((preset) => (
+            <button
+              key={preset.months}
+              onClick={() => onRangePreset(preset.months)}
+              className="px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-tight text-slate-400 hover:text-white hover:bg-white/[0.06] transition-all"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+
         <div className="flex-1" />
 
         {/* Action Buttons */}
@@ -112,6 +131,14 @@ export default function BacktestHeader({
           >
             <Zap size={14} className="fill-current" />
             배포
+          </button>
+          <button
+            type="button"
+            disabled
+            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500/8 border border-emerald-500/15 rounded-xl text-xs font-bold text-emerald-300/50 cursor-not-allowed opacity-60"
+          >
+            <SlidersHorizontal size={14} />
+            최적화
           </button>
         </div>
       </div>

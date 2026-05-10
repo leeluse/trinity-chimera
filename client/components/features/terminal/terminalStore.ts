@@ -1,6 +1,5 @@
 import { create } from 'zustand';
-
-import type { HunterRow, HunterRegime, HunterLeaderboardItem } from './hunterRuntime';
+import type { HunterRow, HunterLeaderboardItem } from './hunterRuntime';
 
 export interface HunterAlert {
   sym: string;
@@ -80,11 +79,17 @@ interface TerminalState {
   sort: { col: keyof TerminalResult | string; dir: number };
   engineApi: any | null;
   hunterRows: HunterRow[];
-  hunterRegime: HunterRegime | null;
   hunterAlert: HunterAlert | null;
 
   hunterLeaderboard: HunterLeaderboardItem[];
   hunterSummary: { snipers: number; s2plus: number; s1: number; bias: string; pre: number };
+  hunterRegime: {
+    ready: boolean;
+    btcAltDelta: number;
+    avgFunding: number;
+    oiExpansionRate: number;
+    longFlowRatio: number;
+  };
   // Actions
   setResults: (results: TerminalResult[]) => void;
   updateGlobalMetrics: (metrics: Partial<GlobalMetrics>) => void;
@@ -97,10 +102,10 @@ interface TerminalState {
   setSelectedSymbol: (symbol: string | null) => void;
   setEngineApi: (api: any) => void;
   setHunterRows: (rows: HunterRow[]) => void;
-  setHunterRegime: (regime: HunterRegime) => void;
   setHunterAlert: (alert: HunterAlert | null) => void;
   setHunterLeaderboard: (leaderboard: HunterLeaderboardItem[]) => void;
   setHunterSummary: (summary: { snipers: number; s2plus: number; s1: number; bias: string; pre: number }) => void;
+  setHunterRegime: (regime: TerminalState['hunterRegime']) => void;
   
   // Computed
   applyFilters: () => void;
@@ -132,10 +137,16 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   sort: { col: 'alphaScore', dir: -1 },
   engineApi: null,
   hunterRows: [],
-  hunterRegime: null,
   hunterAlert: null,
   hunterLeaderboard: [],
   hunterSummary: { snipers: 0, s2plus: 0, s1: 0, bias: '—', pre: 0 },
+  hunterRegime: {
+    ready: false,
+    btcAltDelta: 0,
+    avgFunding: 0,
+    oiExpansionRate: 0,
+    longFlowRatio: 50,
+  },
 
   setResults: (results) => {
     set({ results });
@@ -174,10 +185,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   setSelectedSymbol: (selectedSymbol) => set({ selectedSymbol }),
 
   setHunterRows: (hunterRows) => set({ hunterRows }),
-  setHunterRegime: (hunterRegime) => set({ hunterRegime }),
   setHunterAlert: (hunterAlert) => set({ hunterAlert }),
   setHunterLeaderboard: (hunterLeaderboard) => set({ hunterLeaderboard }),
   setHunterSummary: (hunterSummary) => set({ hunterSummary }),
+  setHunterRegime: (hunterRegime) => set({ hunterRegime }),
 
   applyFilters: () => {
     const { results, activeFilter, searchQuery, sort } = get();

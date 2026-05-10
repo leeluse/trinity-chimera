@@ -31,7 +31,6 @@ export { default as CodeModal } from "./features/backtest/CodeModal";
 export { default as StrategyCodeSection } from "./features/backtest/StrategyCodeSection";
 export { default as PerformanceDetails } from "./features/backtest/PerformanceDetails";
 export { default as TradeAnalysis } from "./features/backtest/TradeAnalysis";
-export { default as OptimizationMiniPanel } from "./features/backtest/OptimizationMiniPanel";
 
 // Bots
 export { default as BotList } from "./bots/BotList";

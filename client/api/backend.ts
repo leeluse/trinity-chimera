@@ -12,22 +12,6 @@ export class BackendAPI {
 
 
 
-  static async getAutomationStatus(): Promise<{ enabled: boolean, status: string }> {
-    const response = await fetchWithBypass(`${API_BASE_URL}/system/automation`);
-    if (!response.ok) throw new Error("Failed to fetch automation status");
-    return response.json();
-  }
-
-  static async setAutomationStatus(enabled: boolean): Promise<{ success: boolean, enabled: boolean }> {
-    const response = await fetchWithBypass(`${API_BASE_URL}/system/automation`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-    });
-    if (!response.ok) throw new Error("자동화 상태 변경 실패");
-    return response.json();
-  }
-
   static async fetchStrategies(): Promise<any[]> {
     try {
       const res = await fetchWithBypass(`${API_BASE_URL}/backtest/strategies`);

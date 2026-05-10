@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { useTerminalStore } from "./terminalStore";
 import {
   Play, Square, Pause, Target, Volume2, VolumeX, Activity, Cpu, Zap, Trophy,
-  BarChart3, Binary, Flame, Crosshair, Rocket
+  BarChart3, Binary, Flame, Crosshair, Rocket, Globe
 } from "lucide-react";
 import {
   mountHunterRuntime,
@@ -41,7 +41,15 @@ const INITIAL: HunterRuntimeSnapshot = {
 };
 
 export default function TerminalHunterPanel() {
-  const { setSelectedSymbol, setHunterRows, setHunterRegime, setHunterAlert, setHunterLeaderboard, setHunterSummary } = useTerminalStore();
+  const { 
+    setSelectedSymbol, 
+    setHunterRows, 
+    setHunterRegime, 
+    setHunterAlert, 
+    setHunterLeaderboard, 
+    setHunterSummary 
+  } = useTerminalStore();
+  
   const [tab, setTab] = useState<HunterTab>("lb");
   const [state, setState] = useState<HunterRuntimeSnapshot>(INITIAL);
   const runtimeRef = useRef<ReturnType<typeof mountHunterRuntime> | null>(null);
@@ -71,8 +79,6 @@ export default function TerminalHunterPanel() {
 
   const onStart = () => {
     void runtimeRef.current?.api.startSystem();
-
-
   };
   const onStop = () => { runtimeRef.current?.api.stopSystem(); };
   const onToggleFreeze = () => { runtimeRef.current?.api.toggleFreeze(); };
@@ -221,14 +227,13 @@ export default function TerminalHunterPanel() {
 
       {/* ── Tabs ── */}
       <div className="flex items-center gap-2 overflow-x-auto border-b border-white/[0.06] bg-[#080910] px-5 py-3 no-scrollbar">
-        <TabBtn active={tab === "lb"} onClick={() => setTab("lb")} icon={<Trophy size={14} />}>리더보드</TabBtn>
-        <TabBtn active={tab === "rg"} onClick={() => setTab("rg")} icon={<BarChart3 size={14} />}>레짐</TabBtn>
+        <TabBtn active={tab === "lb"} onClick={() => setTab("lb")} icon={<Trophy size={14} />}>실시간 시그널</TabBtn>
+        <TabBtn active={tab === "rg"} onClick={() => setTab("rg")} icon={<Globe size={14} />}>시장 상황</TabBtn>
       </div>
 
       {/* ── Content ── */}
       <div className="flex-1 overflow-y-auto bg-[#06070d] no-scrollbar">
-        {/* ── Leaderboard tab ── */}
-        {tab === "lb" && (
+        {tab === "lb" ? (
           <div className="flex h-full flex-col">
             {/* Sort bar */}
             <div className="border-b border-white/[0.06] bg-[#080910] px-4 py-2">
@@ -298,43 +303,60 @@ export default function TerminalHunterPanel() {
               ))}
             </div>
           </div>
-        )}
-
-        {/* ── Regime tab ── */}
-        {tab === "rg" && (
-          <div className="space-y-3 p-4">
-            <div className="mb-2 flex items-center gap-3">
-              <BarChart3 size={18} className="text-violet-300" />
-              <div className="text-[12px] font-black uppercase tracking-[0.2em] text-violet-50">Market Regime Matrix</div>
+        ) : (
+          <div className="flex h-full flex-col p-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <RegimeCell 
+                label="BTC vs ALT Delta" 
+                value={(state.regime.btcAltDelta > 0 ? "+" : "") + state.regime.btcAltDelta.toFixed(2)} 
+                sub="Market Bias" 
+                tone={state.regime.btcAltDelta > 0 ? "text-violet-300" : "text-pink-300"} 
+                bar={clamp((state.regime.btcAltDelta + 5) / 10, 0, 1)}
+              />
+              <RegimeCell 
+                label="Average Funding" 
+                value={(state.regime.avgFunding * 100).toFixed(4) + "%"} 
+                sub="Funding Heat" 
+                tone={state.regime.avgFunding > 0.0001 ? "text-pink-300" : "text-violet-300"} 
+                bar={clamp(Math.abs(state.regime.avgFunding) / 0.001, 0, 1)}
+              />
+              <RegimeCell 
+                label="OI Expansion" 
+                value={(state.regime.oiExpansionRate * 100).toFixed(2) + "%"} 
+                sub="Position Build" 
+                tone={state.regime.oiExpansionRate > 0.005 ? "text-fuchsia-300" : "text-violet-200/60"} 
+                bar={clamp(state.regime.oiExpansionRate / 0.02, 0, 1)}
+              />
+              <RegimeCell 
+                label="Long Flow Ratio" 
+                value={state.regime.longFlowRatio.toFixed(1) + "%"} 
+                sub="LSR Sentiment" 
+                tone={state.regime.longFlowRatio > 50 ? "text-violet-300" : "text-pink-300"} 
+                bar={state.regime.longFlowRatio / 100}
+              />
             </div>
-            <RegimeCell
-              label="BTC vs ALT Relative Strength"
-              value={`${state.regime.btcAltDelta >= 0 ? "+" : ""}${state.regime.btcAltDelta.toFixed(2)}%`}
-              sub={state.regime.btcAltDelta > 0.5 ? "Dominant Alpha in Majors" : state.regime.btcAltDelta < -0.5 ? "Alt-Season Rotation Active" : "Neutral Market Structure"}
-              tone={state.regime.btcAltDelta > 0.5 ? "text-fuchsia-300" : state.regime.btcAltDelta < -0.5 ? "text-violet-300" : "text-violet-200/60"}
-              bar={clamp((state.regime.btcAltDelta + 5) / 10, 0, 1)}
-            />
-            <RegimeCell
-              label="Average Funding (Sniper Universe)"
-              value={`${state.regime.avgFunding >= 0 ? "+" : ""}${state.regime.avgFunding.toFixed(4)}%`}
-              sub={Math.abs(state.regime.avgFunding) > 0.05 ? "EXTREME SKEW" : Math.abs(state.regime.avgFunding) > 0.03 ? "ELEVATED BIAS" : "STANDARD RANGE"}
-              tone={Math.abs(state.regime.avgFunding) > 0.03 ? "text-fuchsia-300" : "text-violet-200/60"}
-              bar={clamp((state.regime.avgFunding + 0.2) / 0.4, 0, 1)}
-            />
-            <RegimeCell
-              label="OI Expansion Velocity"
-              value={`${state.regime.oiExpansionRate.toFixed(1)}%`}
-              sub={state.regime.oiExpansionRate > 60 ? "Aggressive Position Loading" : "Organic Growth"}
-              tone={state.regime.oiExpansionRate > 60 ? "text-violet-300" : "text-violet-200/60"}
-              bar={clamp(state.regime.oiExpansionRate / 100, 0, 1)}
-            />
-            <RegimeCell
-              label="Signal Flow Ratio (L/S)"
-              value={`${state.regime.longFlowRatio.toFixed(0)}%`}
-              sub={state.regime.longFlowRatio > 60 ? "Bullish Momentum Dominant" : state.regime.longFlowRatio < 40 ? "Bearish Pressure" : "Equilibrium"}
-              tone={state.regime.longFlowRatio > 60 ? "text-violet-300" : state.regime.longFlowRatio < 40 ? "text-pink-300" : "text-violet-200/60"}
-              bar={clamp(state.regime.longFlowRatio / 100, 0, 1)}
-            />
+
+            <div className="mt-8">
+              <div className="mb-4 flex items-center gap-2">
+                <Trophy size={16} className="text-violet-300" />
+                <span className="text-[12px] font-black uppercase tracking-widest text-slate-200">최근 30분 누적 리더보드</span>
+              </div>
+              <div className="space-y-2">
+                {state.leaderboard.slice(0, 10).map((lb, idx) => (
+                  <LeaderboardCard 
+                    key={lb.sym} 
+                    lb={lb} 
+                    idx={idx} 
+                    onSelect={() => setSelectedSymbol(lb.sym)} 
+                  />
+                ))}
+                {state.leaderboard.length === 0 && (
+                  <div className="py-12 text-center text-[10px] font-bold uppercase tracking-widest text-slate-600">
+                    데이터 집계 중...
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -508,7 +530,6 @@ function SniperRow({ row, crimeSignals, onSelect, focusMode }: {
 
         <div className="relative z-10 flex flex-col items-end gap-1 font-mono text-[8px] font-black uppercase text-slate-600">
           <span>A {row.score > 0 ? "+" : ""}{Math.round(row.score * 0.3)}</span>
-          <span>RM ×{row.regimeMult.toFixed(2)}</span>
         </div>
       </button>
     </div>
@@ -560,6 +581,9 @@ export function LeaderboardCard({ lb, idx, onSelect }: {
               <span className="rounded-sm border border-white/[0.06] bg-white/[0.025] px-1 py-[1px] text-[8px] font-black uppercase tracking-wider text-slate-600">
                 USDT
               </span>
+              <span className={cn("rounded-sm border px-1 py-[1px] font-mono text-[8px] font-black", stageBadgeInlineCls(lb.stage, isBuy ? 1 : -1))}>
+                S{lb.stage}
+              </span>
               {lb.aGradeCount > 0 && (
                 <span className="rounded-sm border border-violet-300/18 bg-violet-500/8 px-1.5 py-[1px] text-[8px] font-black uppercase tracking-wider text-violet-200/65">
                   A×{lb.aGradeCount}
@@ -584,24 +608,8 @@ export function LeaderboardCard({ lb, idx, onSelect }: {
           </div>
         </div>
 
-        <div className="flex shrink-0 items-start gap-2">
-          {lb.stage > 0 && (
-            <div className={cn(
-              "rounded-md border px-2 py-1 text-center",
-              isBuy
-                ? "border-violet-300/22 bg-violet-500/8"
-                : "border-pink-300/22 bg-pink-500/8"
-            )}>
-              <div className={cn("text-[8px] font-black uppercase tracking-wider", isBuy ? "text-violet-200/55" : "text-pink-200/55")}>
-                {isBuy ? "LONG" : "SHORT"}
-              </div>
-              <div className="mt-0.5 flex items-center justify-center gap-1">
-                <span className={cn("text-[9px] font-black", isBuy ? "text-violet-100" : "text-pink-300")}>{isBuy ? "▲" : "▼"}</span>
-                <span className={cn("font-mono text-[10px] font-black", stageLabelColor(lb.stage))}>S{lb.stage}</span>
-              </div>
-            </div>
-          )}
-          <div className={cn("w-[48px] text-right font-mono text-[16px] font-black leading-none", isBuy ? "text-slate-100" : "text-pink-300")}>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className={cn("text-right font-mono text-[16px] font-black leading-none", isBuy ? "text-slate-100" : "text-pink-300")}>
             {lb.scoreSum > 0 ? "+" : ""}{lb.scoreSum}
           </div>
         </div>
@@ -653,6 +661,15 @@ function stageLabelText(stage: number): string {
  ───────────────────────────────────────────────────────── */
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function stageBadgeInlineCls(stage: number, dir: number): string {
+  if (stage === 3) return "border-amber-400/60 bg-amber-500/15 text-amber-300";
+  if (stage === 2) return dir >= 0
+    ? "border-blue-400/60 bg-blue-500/15 text-blue-300"
+    : "border-rose-400/60 bg-rose-500/15 text-rose-300";
+  if (stage === 1) return "border-orange-400/50 bg-orange-500/10 text-orange-300";
+  return "border-white/10 bg-white/[0.025] text-slate-600";
 }
 
 export function stageBadgeCls(stage: number, dir: number): string {

@@ -6,7 +6,7 @@ import pandas as pd
 from server.shared.market.provider import fetch_ohlcv_dataframe
 from server.modules.backtest.backtest_engine import BacktestEngine, strategy_from_code
 from server.modules.engine.utils import safe_float
-from server.modules.evolution.scoring import calculate_trinity_score
+from server.shared.market.trinity_scoring import calculate_trinity_score
 
 logger = logging.getLogger(__name__)
 

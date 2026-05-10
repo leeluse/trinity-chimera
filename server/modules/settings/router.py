@@ -20,6 +20,7 @@ class ModelSettings(BaseModel):
     evo_model: str
     evo_api_key: str
 
+
 @router.get("/settings")
 async def get_settings():
     """현재 .env에 설정된 주요 모델 정보 반환"""
@@ -66,3 +67,4 @@ async def update_settings(settings: ModelSettings):
         return {"success": True, "message": "설정이 저장되었습니다. 일부 핵심 엔진 반영을 위해 서버 재시작이 필요할 수 있습니다."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

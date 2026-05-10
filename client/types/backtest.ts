@@ -66,6 +66,7 @@ export type Results = {
   longCount?: number;
   shortCount?: number;
   equityCurve?: { time: number; value: number }[];
+  candles?: Candle[];
 };
 
 export type LeaderboardRow = {

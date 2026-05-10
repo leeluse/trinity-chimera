@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+import httpx
 from supabase import create_client, Client
 from postgrest import APIError
 from dotenv import load_dotenv
@@ -13,6 +14,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 logger = logging.getLogger(__name__)
+
+
+def _is_connectivity_error(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)):
+        return True
+    text = str(exc or "").lower()
+    return (
+        "nodename nor servname provided" in text
+        or "temporary failure in name resolution" in text
+        or "connection refused" in text
+        or "timed out" in text
+    )
 
 class SupabaseManager:
     """
@@ -414,7 +427,7 @@ class SupabaseManager:
                 query = query.eq("source", source)
             res = query.execute()
             return res.data or []
-        except APIError as e:
+        except Exception as e:
             print(f"Error listing strategies: {e}")
             return []
 
@@ -728,7 +741,10 @@ class SupabaseManager:
             res = await asyncio.to_thread(_query)
             return res.data or []
         except Exception as e:
-            logger.exception("Error listing bots: %s", e)
+            if _is_connectivity_error(e):
+                logger.warning("Supabase unavailable while listing bots: %s", e)
+            else:
+                logger.exception("Error listing bots: %s", e)
             return []
 
     async def get_bot(self, bot_id: str) -> Optional[Dict[str, Any]]:
@@ -745,7 +761,10 @@ class SupabaseManager:
             res = await asyncio.to_thread(_query)
             return res.data
         except Exception as e:
-            logger.exception("Error getting bot %s: %s", bot_id, e)
+            if _is_connectivity_error(e):
+                logger.warning("Supabase unavailable while loading bot %s: %s", bot_id, e)
+            else:
+                logger.exception("Error getting bot %s: %s", bot_id, e)
             return None
 
     async def update_bot(self, bot_id: str, bot_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -764,7 +783,10 @@ class SupabaseManager:
             data_out = res.data or []
             return data_out[0] if data_out else None
         except Exception as e:
-            logger.exception("Error updating bot %s: %s", bot_id, e)
+            if _is_connectivity_error(e):
+                logger.warning("Supabase unavailable while updating bot %s: %s", bot_id, e)
+            else:
+                logger.exception("Error updating bot %s: %s", bot_id, e)
             return None
 
     async def delete_bot(self, bot_id: str) -> bool:
@@ -775,5 +797,8 @@ class SupabaseManager:
             )
             return True
         except Exception as e:
-            logger.exception("Error deleting bot %s: %s", bot_id, e)
+            if _is_connectivity_error(e):
+                logger.warning("Supabase unavailable while deleting bot %s: %s", bot_id, e)
+            else:
+                logger.exception("Error deleting bot %s: %s", bot_id, e)
             return False
