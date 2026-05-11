@@ -37,6 +37,8 @@ def test_insert_lines():
     p = patches[0]
     # 삽입: end_line = start_line - 1 (삭제 0줄)
     assert p["start_line"] == p["end_line"] + 1
+    assert p["start_line"] == 2
+    assert p["end_line"] == 1
     assert p["new_content"] == "b"
 
 
