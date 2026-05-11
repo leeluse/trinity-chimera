@@ -652,8 +652,14 @@ async def run_modify_pipeline(
             yield format_sse({"type": "analysis", "content": brief})
 
             strategy_data = {"title": strategy_title, "code": strategy_code, "params": {"agent_title": strategy_title}}
-            yield format_sse({"type": "strategy", "data": strategy_data})
             await db.save_chat_message(session_id, "assistant", strategy_title, "strategy", strategy_data)
+
+            line_patches = _compute_line_patches(prev_code, strategy_code)
+            patch_err = _validate_line_patches(line_patches, prev_code)
+            if line_patches and not patch_err:
+                yield format_sse({"type": "patch", "data": {"patches": line_patches, "title": strategy_title}})
+            else:
+                yield format_sse({"type": "strategy", "data": strategy_data})
 
             yield format_sse({"type": "stage", "stage": 4, "label": "📈 수정 전략 백테스트 및 비교 중..."})
             if prev_metrics:
