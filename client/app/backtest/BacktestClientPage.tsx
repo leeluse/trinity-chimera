@@ -261,6 +261,7 @@ export default function BacktestPage() {
   };
 
   const applyPatch = useCallback((patches: LinePatch[], _title?: string) => {
+    if (!patches?.length) return;
     setStrategyCode(prev => {
       const lines = prev.split("\n");
       const sorted = [...patches].sort((a, b) => b.start_line - a.start_line);
