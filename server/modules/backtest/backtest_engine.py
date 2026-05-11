@@ -16,7 +16,7 @@ Usage:
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, Optional
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -218,25 +218,52 @@ class RealisticSimulator:
 
     def __init__(
         self,
-        fee_rate: float = 0.001,      # 편도 수수료 (0.1%)
-        slippage: float = 0.0005,     # 슬리피지 (0.05%)
-        funding_rate: float = 0.0001, # 펀딩비 (8h당 0.01%)
-        max_position: float = 1.0,    # 최대 포지션 비율
-        use_kelly: bool = True,       # Kelly 포지션 사이징
-        freq: int = 24,               # 하루 봉 수 (1h=24, 15m=96)
+        fee_rate: float = 0.001,
+        slippage: float = 0.0005,
+        funding_rate: float = 0.0001,
+        max_position: float = 1.0,
+        use_kelly: bool = True,
+        freq: int = 24,
+        maker_fee_rate: float = 0.0002,
+        taker_fee_rate: float = 0.00055,
+        maker_ratio: float = 0.15,
+        base_spread: float = 0.0002,
+        slippage_vol_mult: float = 1.5,
+        slippage_liq_mult: float = 1.0,
+        spread_vol_mult: float = 1.25,
+        maintenance_margin: float = 0.005,
+        liquidation_penalty: float = 0.002,
+        min_notional: float = 5.0,
+        min_qty: float = 0.001,
+        qty_step: float = 0.001,
+        price_tick: float = 0.01,
+        starting_capital: float = 10000.0,
     ):
         self.fee_rate = fee_rate
-        self.slippage = slippage
+        self.base_slippage = slippage
         self.funding_rate = funding_rate
         self.max_position = max_position
         self.use_kelly = use_kelly
         self.freq = max(1, int(freq))
 
-    def run(self, df: pd.DataFrame, signal: pd.Series) -> tuple[pd.Series, int, list[float], pd.Series, pd.Series, pd.Series]:
-        """
-        signal: +1 / 0 / -1 시리즈 (df.index와 같은 인덱스)
-        반환: (전체수익률, 거래수입, 개별매매리스트, 비용Series, 롱수익Series, 숏수익Series)
-        """
+        self.maker_fee_rate = max(0.0, maker_fee_rate)
+        self.taker_fee_rate = max(0.0, taker_fee_rate)
+        self.maker_ratio = float(np.clip(maker_ratio, 0.0, 1.0))
+        self.base_spread = max(0.0, base_spread)
+        self.slippage_vol_mult = max(0.0, slippage_vol_mult)
+        self.slippage_liq_mult = max(0.0, slippage_liq_mult)
+        self.spread_vol_mult = max(0.0, spread_vol_mult)
+        self.maintenance_margin = max(0.0, maintenance_margin)
+        self.liquidation_penalty = max(0.0, liquidation_penalty)
+
+        self.min_notional = max(0.0, min_notional)
+        self.min_qty = max(0.0, min_qty)
+        self.qty_step = max(1e-12, qty_step)
+        self.price_tick = max(1e-12, price_tick)
+        self.starting_capital = max(1.0, float(starting_capital))
+
+    @staticmethod
+    def _normalize_signal(df: pd.DataFrame, signal: Any) -> pd.Series:
         if signal is None:
             signal = pd.Series(0, index=df.index, dtype=int)
         elif not isinstance(signal, pd.Series):
@@ -258,58 +285,293 @@ class RealisticSimulator:
         if not signal.index.equals(df.index):
             signal = signal.reindex(df.index).fillna(0.0)
         signal = pd.to_numeric(signal, errors="coerce").fillna(0.0)
-        signal = pd.Series(np.sign(signal).astype(int), index=df.index, dtype=int)
+        return pd.Series(np.sign(signal).astype(int), index=df.index, dtype=int)
 
-        close = df["close"].reindex(signal.index)
-        price_ret = close.pct_change().fillna(0)
+    @staticmethod
+    def _round_to_tick(price: float, tick: float) -> float:
+        if tick <= 0:
+            return price
+        return round(price / tick) * tick
 
-        position = signal.shift(1).fillna(0)
-        position = position.clip(-self.max_position, self.max_position)
+    def _round_down_to_step(self, value: float, step: float) -> float:
+        if step <= 0:
+            return value
+        return np.floor(value / step) * step
 
-        pos_change = position.diff().abs().fillna(0)
-        total_cost = pos_change * (self.fee_rate + self.slippage)
-        bar_hours = 24 / self.freq
-        funding_cost = position.abs() * self.funding_rate * (bar_hours / 8)
+    def _apply_exchange_constraints(self, target_lev: float, price: float, account_equity: float) -> float:
+        if price <= 0 or account_equity <= 0:
+            return 0.0
+        side = 1.0 if target_lev >= 0 else -1.0
+        abs_lev = abs(target_lev)
+        if abs_lev <= 0:
+            return 0.0
 
-        # 포지션별 수익률 분리
-        long_returns = (position[position > 0] * price_ret[position > 0]).fillna(0)
-        short_returns = (position[position < 0] * price_ret[position < 0]).fillna(0)
+        desired_qty = (abs_lev * account_equity) / price
+        if desired_qty < self.min_qty:
+            return 0.0
 
-        strategy_ret = position * price_ret - total_cost - funding_cost
+        adj_qty = self._round_down_to_step(desired_qty, self.qty_step)
+        notional = adj_qty * price
+        if adj_qty < self.min_qty or notional < self.min_notional:
+            return 0.0
 
-        trade_results = []
-        in_trade = False
-        trade_start_val = 1.0
-        unit_funding_per_bar = self.funding_rate * (bar_hours / 8)
-        
-        for i in range(1, len(position)):
-            curr_pos = position.iloc[i]
-            prev_pos = position.iloc[i-1]
-            trade_cost = self.fee_rate + self.slippage
+        adj_lev = (adj_qty * price) / max(account_equity, 1e-12)
+        adj_lev = min(adj_lev, self.max_position)
+        return side * adj_lev
 
-            if curr_pos != prev_pos:
-                if in_trade:
-                    close_cost = abs(prev_pos) * trade_cost
-                    trade_start_val *= (1 - close_cost)
-                    trade_results.append(trade_start_val - 1.0)
-                    trade_start_val = 1.0
-                    in_trade = False
-                if curr_pos != 0:
-                    in_trade = True
+    def _execution_price(self, open_price: float, direction: float, slip: float, spread: float) -> float:
+        if direction > 0:
+            px = open_price * (1.0 + slip + (spread * 0.5))
+        elif direction < 0:
+            px = open_price * (1.0 - slip - (spread * 0.5))
+        else:
+            px = open_price
+        return self._round_to_tick(px, self.price_tick)
 
-            if in_trade:
-                if curr_pos != prev_pos:
-                    open_cost = abs(curr_pos) * trade_cost
-                    bar_ret = curr_pos * price_ret.iloc[i] - open_cost - abs(curr_pos) * unit_funding_per_bar
+    def run(
+        self,
+        df: pd.DataFrame,
+        signal: pd.Series,
+        return_details: bool = False,
+    ) -> tuple[pd.Series, int, list[float], pd.Series, pd.Series, pd.Series] | tuple[
+        pd.Series, int, list[float], pd.Series, pd.Series, pd.Series, Dict[str, Any]
+    ]:
+        """
+        현실화 규칙:
+        - 신호 반영: 다음 봉 시가 체결
+        - 비용 모델: maker/taker 수수료 + 변동성/유동성 연동 슬리피지 + 스프레드
+        - 리스크 모델: 펀딩비 + 유지증거금 기반 강제청산
+        - 거래소 제약: 최소 수량/틱/최소 명목가 반영
+        """
+        required_cols = {"open", "high", "low", "close", "volume"}
+        if not required_cols.issubset(set(df.columns)):
+            missing = required_cols - set(df.columns)
+            raise ValueError(f"Missing OHLCV columns: {sorted(missing)}")
+
+        signal = self._normalize_signal(df, signal)
+        if len(df) < 3:
+            empty = pd.Series(0.0, index=df.index, dtype=float)
+            if return_details:
+                return empty, 0, [], empty, empty, empty, {"trades": [], "position": empty, "liquidations": 0}
+            return empty, 0, [], empty, empty, empty
+
+        open_px = pd.to_numeric(df["open"], errors="coerce").ffill().bfill()
+        high_px = pd.to_numeric(df["high"], errors="coerce").ffill().bfill()
+        low_px = pd.to_numeric(df["low"], errors="coerce").ffill().bfill()
+        close_px = pd.to_numeric(df["close"], errors="coerce").ffill().bfill()
+        volume = pd.to_numeric(df["volume"], errors="coerce").fillna(0.0)
+
+        bar_returns = pd.Series(0.0, index=df.index, dtype=float)
+        total_cost = pd.Series(0.0, index=df.index, dtype=float)
+        long_returns = pd.Series(0.0, index=df.index, dtype=float)
+        short_returns = pd.Series(0.0, index=df.index, dtype=float)
+        effective_position = pd.Series(0.0, index=df.index, dtype=float)
+
+        vol_window = max(10, min(len(df) // 4, self.freq))
+        vol_ref_window = max(vol_window * 5, self.freq * 3)
+        realized_vol = close_px.pct_change().rolling(vol_window, min_periods=3).std().fillna(0.0)
+        vol_ref = realized_vol.rolling(vol_ref_window, min_periods=5).median().replace(0, np.nan).fillna(1e-6)
+        vol_mult = (realized_vol / vol_ref).clip(0.5, 4.0)
+
+        liq_window = max(8, self.freq)
+        vol_ma = volume.rolling(liq_window, min_periods=1).median().replace(0, np.nan).fillna(1.0)
+        liq_mult = (vol_ma / volume.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).fillna(2.0).clip(0.5, 4.0)
+
+        dynamic_slip = self.base_slippage * (
+            1.0
+            + self.slippage_vol_mult * (vol_mult - 1.0).clip(lower=0.0)
+            + self.slippage_liq_mult * (liq_mult - 1.0).clip(lower=0.0)
+        )
+        dynamic_spread = self.base_spread * (
+            1.0 + self.spread_vol_mult * (vol_mult - 1.0).clip(lower=0.0)
+        )
+        effective_fee_rate = (self.maker_fee_rate * self.maker_ratio) + (
+            self.taker_fee_rate * (1.0 - self.maker_ratio)
+        )
+
+        bar_hours = 24.0 / float(self.freq)
+        funding_per_bar = self.funding_rate * (bar_hours / 8.0)
+
+        current_pos = 0.0
+        equity = 1.0
+        entry_exec = 0.0
+        entry_time = None
+        funding_accum = 0.0
+        trade_results: list[float] = []
+        trade_logs: list[Dict[str, Any]] = []
+        liquidation_count = 0
+
+        target_position = signal.shift(1).fillna(0.0).astype(float) * float(self.max_position)
+
+        for i in range(1, len(df) - 1):
+            idx = df.index[i]
+            open_i = float(open_px.iloc[i])
+            next_open = float(open_px.iloc[i + 1])
+            low_i = float(low_px.iloc[i])
+            high_i = float(high_px.iloc[i])
+
+            slip_i = float(dynamic_slip.iloc[i])
+            spread_i = float(dynamic_spread.iloc[i])
+            exec_cost_rate = effective_fee_rate + slip_i + (spread_i * 0.5)
+
+            raw_target = float(target_position.iloc[i])
+            account_equity = equity * self.starting_capital
+            desired_target = self._apply_exchange_constraints(raw_target, open_i, account_equity)
+            desired_target = float(np.clip(desired_target, -self.max_position, self.max_position))
+
+            turnover = abs(desired_target - current_pos)
+            bar_ret = 0.0
+            if turnover > 0:
+                cost = turnover * exec_cost_rate
+                bar_ret -= cost
+                total_cost.iloc[i] += cost
+
+                closes_trade = (current_pos != 0.0) and (
+                    desired_target == 0.0 or np.sign(desired_target) != np.sign(current_pos)
+                )
+                if closes_trade and entry_exec > 0:
+                    exit_dir = -np.sign(current_pos)
+                    exit_exec = self._execution_price(open_i, exit_dir, slip_i, spread_i)
+                    gross_ret = (exit_exec / entry_exec - 1.0) * current_pos
+                    net_ret = gross_ret - funding_accum - (abs(current_pos) * effective_fee_rate)
+                    trade_results.append(float(net_ret))
+                    trade_logs.append(
+                        {
+                            "entry_time": pd.Timestamp(entry_time).isoformat() if entry_time is not None else None,
+                            "exit_time": pd.Timestamp(idx).isoformat(),
+                            "direction": "LONG" if current_pos > 0 else "SHORT",
+                            "entry_price": float(entry_exec),
+                            "exit_price": float(exit_exec),
+                            "size": float(abs(current_pos)),
+                            "pnl_pct": float(net_ret),
+                            "pnl": float(self.starting_capital * net_ret),
+                            "reason": "signal",
+                        }
+                    )
+                    funding_accum = 0.0
+                    entry_exec = 0.0
+                    entry_time = None
+
+                opens_trade = desired_target != 0.0 and (
+                    current_pos == 0.0 or np.sign(desired_target) != np.sign(current_pos)
+                )
+                if opens_trade:
+                    entry_exec = self._execution_price(open_i, np.sign(desired_target), slip_i, spread_i)
+                    entry_time = idx
+                    funding_accum = 0.0
+
+                current_pos = desired_target
+
+            effective_position.iloc[i] = current_pos
+
+            if current_pos == 0.0:
+                equity *= max(1e-9, 1.0 + bar_ret)
+                bar_returns.iloc[i] = bar_ret
+                continue
+
+            funding_cost = abs(current_pos) * funding_per_bar
+            bar_ret -= funding_cost
+            total_cost.iloc[i] += funding_cost
+            funding_accum += funding_cost
+
+            lev = max(abs(current_pos), 1e-9)
+            liq_move = max(0.0, (1.0 / lev) - self.maintenance_margin)
+            liquidated = False
+            liq_price = None
+
+            if current_pos > 0 and entry_exec > 0:
+                liq_price = entry_exec * (1.0 - liq_move)
+                if low_i <= liq_price:
+                    liquidated = True
+            elif current_pos < 0 and entry_exec > 0:
+                liq_price = entry_exec * (1.0 + liq_move)
+                if high_i >= liq_price:
+                    liquidated = True
+
+            if liquidated and liq_price is not None:
+                liquidation_count += 1
+                liq_impact = min(0.999, abs(current_pos) * liq_move + self.liquidation_penalty)
+                bar_ret -= liq_impact
+                total_cost.iloc[i] += liq_impact
+
+                gross_ret = (liq_price / entry_exec - 1.0) * current_pos
+                net_ret = gross_ret - funding_accum - self.liquidation_penalty
+                trade_results.append(float(net_ret))
+                trade_logs.append(
+                    {
+                        "entry_time": pd.Timestamp(entry_time).isoformat() if entry_time is not None else None,
+                        "exit_time": pd.Timestamp(idx).isoformat(),
+                        "direction": "LONG" if current_pos > 0 else "SHORT",
+                        "entry_price": float(entry_exec),
+                        "exit_price": float(liq_price),
+                        "size": float(abs(current_pos)),
+                        "pnl_pct": float(net_ret),
+                        "pnl": float(self.starting_capital * net_ret),
+                        "reason": "liquidation",
+                    }
+                )
+
+                current_pos = 0.0
+                entry_exec = 0.0
+                entry_time = None
+                funding_accum = 0.0
+                effective_position.iloc[i] = 0.0
+            else:
+                bar_move = (next_open / open_i) - 1.0
+                pnl = current_pos * bar_move
+                bar_ret += pnl
+                if current_pos > 0:
+                    long_returns.iloc[i] = pnl
                 else:
-                    bar_ret = strategy_ret.iloc[i]
-                trade_start_val *= (1 + bar_ret)
+                    short_returns.iloc[i] = pnl
 
-        if in_trade:
-            trade_results.append(trade_start_val - 1.0)
+            bar_returns.iloc[i] = bar_ret
+            equity *= max(1e-9, 1.0 + bar_ret)
+
+        if current_pos != 0.0 and entry_exec > 0:
+            last_idx = df.index[-1]
+            last_close = float(close_px.iloc[-1])
+            slip_last = float(dynamic_slip.iloc[-1])
+            spread_last = float(dynamic_spread.iloc[-1])
+            exit_exec = self._execution_price(last_close, -np.sign(current_pos), slip_last, spread_last)
+            gross_ret = (exit_exec / entry_exec - 1.0) * current_pos
+            net_ret = gross_ret - funding_accum - (abs(current_pos) * effective_fee_rate)
+            trade_results.append(float(net_ret))
+            trade_logs.append(
+                {
+                    "entry_time": pd.Timestamp(entry_time).isoformat() if entry_time is not None else None,
+                    "exit_time": pd.Timestamp(last_idx).isoformat(),
+                    "direction": "LONG" if current_pos > 0 else "SHORT",
+                    "entry_price": float(entry_exec),
+                    "exit_price": float(exit_exec),
+                    "size": float(abs(current_pos)),
+                    "pnl_pct": float(net_ret),
+                    "pnl": float(self.starting_capital * net_ret),
+                    "reason": "eod",
+                }
+            )
+
+            close_cost = abs(current_pos) * (effective_fee_rate + slip_last + (spread_last * 0.5))
+            total_cost.iloc[-1] += close_cost
+            bar_returns.iloc[-1] -= close_cost
 
         n_trades = len(trade_results)
-        return strategy_ret, n_trades, trade_results, total_cost + funding_cost, long_returns, short_returns
+        if return_details:
+            details = {
+                "trades": trade_logs,
+                "position": effective_position.astype(float),
+                "liquidations": liquidation_count,
+            }
+            return (
+                bar_returns,
+                n_trades,
+                trade_results,
+                total_cost,
+                long_returns,
+                short_returns,
+                details,
+            )
+        return bar_returns, n_trades, trade_results, total_cost, long_returns, short_returns
 
 
 # ─────────────────────────────────────────────

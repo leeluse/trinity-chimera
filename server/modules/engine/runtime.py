@@ -556,153 +556,137 @@ def run_skill_backtest(
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df = df.set_index("timestamp")
 
-    # 3. 전략 실행 (Signal 생성)
+    # 3. 전략 실행 (OOS 우선 채점)
     try:
         strategy_fn = strategy_from_code(strat_code)
-        # 신형 엔진의 strategy_fn(train_df, test_df) 형식을 맞추기 위해 더미 데이터 제공
-        train_df = df.iloc[:len(df)//2]  # 대략적인 절반
-        test_df = df
-        signal = strategy_fn(train_df, test_df)
     except Exception as exc:
         return {"success": False, "error": f"Strategy execution error: {exc}"}
 
-    # 4. 신형 시뮬레이터 구동
     freq = TF_BARS_PER_DAY.get(interval, 24)
-    sim = RealisticSimulator(max_position=max(0.0, float(leverage)), freq=freq)
-    # [IMPORTANT] 새로 추가된 롱/숏 수익률 및 비용 데이터 캡처
-    rets, n_trades, trade_results, costs, l_rets, s_rets = sim.run(df, signal)
+    min_train_bars = max(120, freq * 7)
+    min_eval_bars = max(80, freq * 5)
+    use_oos = len(df) >= (min_train_bars + min_eval_bars)
 
-    normalized_signal = pd.to_numeric(signal.reindex(df.index), errors="coerce").fillna(0.0)
-    normalized_signal = pd.Series(np.sign(normalized_signal).astype(int), index=df.index, dtype=int)
-    effective_pos = normalized_signal.shift(1).fillna(0).astype(int)
-    prev_effective_pos = effective_pos.shift(1).fillna(0).astype(int)
-    entry_mask = (effective_pos != prev_effective_pos) & (effective_pos != 0)
-    long_trade_count = int((entry_mask & (effective_pos > 0)).sum())
-    short_trade_count = int((entry_mask & (effective_pos < 0)).sum())
-    
-    # 벤치마크 수익률 (Buy & Hold 계산용)
-    bench_rets = df["close"].pct_change().fillna(0)
-    
+    if use_oos:
+        split_idx = int(len(df) * 0.60)
+        split_idx = max(min_train_bars, min(split_idx, len(df) - min_eval_bars))
+        train_df = df.iloc[:split_idx]
+        eval_df = df.iloc[split_idx:]
+    else:
+        split_idx = len(df) // 2
+        train_df = df.iloc[:split_idx]
+        eval_df = df
+
+    try:
+        signal = strategy_fn(train_df, eval_df)
+    except Exception as exc:
+        return {"success": False, "error": f"Strategy execution error: {exc}"}
+
+    # 4. 현실화 시뮬레이션 구동 (다음봉 체결/동적 슬리피지/청산/거래소 제약)
+    sim = RealisticSimulator(max_position=max(0.0, float(leverage)), freq=freq)
+    rets, n_trades, trade_results, costs, l_rets, s_rets, details = sim.run(
+        eval_df,
+        signal,
+        return_details=True,
+    )
+
+    effective_pos = details.get("position", pd.Series(0.0, index=eval_df.index, dtype=float))
+    pos_sign = pd.Series(np.sign(pd.to_numeric(effective_pos, errors="coerce").fillna(0.0)).astype(int), index=eval_df.index)
+    prev_pos_sign = pos_sign.shift(1).fillna(0).astype(int)
+    entry_mask = (pos_sign != prev_pos_sign) & (pos_sign != 0)
+    long_trade_count = int((entry_mask & (pos_sign > 0)).sum())
+    short_trade_count = int((entry_mask & (pos_sign < 0)).sum())
+
+    bench_rets = eval_df["close"].pct_change().fillna(0)
     metrics = compute_metrics(
-        rets, n_trades, resolved_strategy, 
-        str(df.index[0]), str(df.index[-1]), 
+        rets,
+        n_trades,
+        resolved_strategy,
+        str(eval_df.index[0]),
+        str(eval_df.index[-1]),
         freq=freq,
         trade_results=trade_results,
         benchmark_returns=bench_rets,
         costs=costs,
         long_returns=l_rets,
-        short_returns=s_rets
+        short_returns=s_rets,
     )
 
-    # 5. UI용 거래 내역(Trades) 및 마커(Markers) 생성
+    # 5. UI용 거래 내역/마커 생성 (시뮬레이터 상세 로그 기준)
     trades_payload = []
     markers = []
-    pos = effective_pos
-    
-    entry_price = 0.0
-    
-    for i in range(1, len(df)):
-        current_pos = pos.iloc[i]
-        prev_pos = pos.iloc[i-1]
-        
-        if current_pos != prev_pos:
-            execution_idx = i - 1
-            t_ms = int(df.index[execution_idx].timestamp())
-            
-            # [A] 이전 포지션 종료 (Exit)
-            if prev_pos != 0:
-                is_long_exit = prev_pos > 0
-                exit_price = float(df["close"].iloc[execution_idx]) # signal.shift(1) 기준 실행 봉
-                
-                # 수익 계산 (롱: 종가/진입가 - 1, 숏: 진입가/종가 - 1)
-                if entry_price > 0:
-                    raw_profit_pct = (exit_price / entry_price - 1) if is_long_exit else (entry_price / exit_price - 1)
-                    profit_pct = raw_profit_pct * float(leverage)
-                else:
-                    profit_pct = 0.0
-                
-                is_profit = profit_pct >= 0
-                profit_amt = 10000 * profit_pct # 기본 자본 10,000 기준 단순 계산
-                
-                markers.append({
-                    "time": t_ms, 
-                    "position": "aboveBar" if is_long_exit else "belowBar",
-                    "color": "#10b981" if is_profit else "#f43f5e", # TP: Emerald Green, SL: Rose Red
-                    "shape": "circle", 
-                    "text": "TP" if is_profit else "SL",
-                })
-                
-                trades_payload.append({
-                    "type": "LONG" if is_long_exit else "SHORT",
-                    "time": df.index[execution_idx].isoformat(),
-                    "exitReason": "TP" if is_profit else "SL",
-                    "entry": entry_price,
-                    "exit": exit_price,
-                    "sl": 0.0, # 추후 엔진 연동 가능
+    for tr in details.get("trades", []):
+        direction = str(tr.get("direction", "LONG")).upper()
+        is_long = direction == "LONG"
+        entry_ts = tr.get("entry_time")
+        exit_ts = tr.get("exit_time")
+        pnl_pct = float(tr.get("pnl_pct", 0.0))
+        reason = str(tr.get("reason", "signal")).upper()
+        entry_px = float(tr.get("entry_price", 0.0))
+        exit_px = float(tr.get("exit_price", 0.0))
+        size = float(tr.get("size", 0.0))
+
+        if entry_ts:
+            markers.append(
+                {
+                    "time": int(pd.Timestamp(entry_ts).timestamp()),
+                    "position": "belowBar" if is_long else "aboveBar",
+                    "color": "#4ade80" if is_long else "#fb7185",
+                    "shape": "arrowUp" if is_long else "arrowDown",
+                    "text": "L" if is_long else "S",
+                }
+            )
+        if exit_ts:
+            markers.append(
+                {
+                    "time": int(pd.Timestamp(exit_ts).timestamp()),
+                    "position": "aboveBar" if is_long else "belowBar",
+                    "color": "#f43f5e" if reason == "LIQUIDATION" else ("#10b981" if pnl_pct >= 0 else "#f43f5e"),
+                    "shape": "circle",
+                    "text": "LQ" if reason == "LIQUIDATION" else "X",
+                }
+            )
+            trades_payload.append(
+                {
+                    "type": direction,
+                    "time": pd.Timestamp(exit_ts).isoformat(),
+                    "exitReason": reason,
+                    "entry": entry_px,
+                    "exit": exit_px,
+                    "sl": 0.0,
                     "tp": 0.0,
-                    "profitPct": f"{profit_pct*100:+.2f}%",
-                    "profitAmt": float(profit_amt),
-                    "posSize": float(leverage)
-                })
-            
-            # [B] 새 포지션 진입 (Entry)
-            if current_pos != 0:
-                is_long_entry = current_pos > 0
-                entry_price = float(df["close"].iloc[execution_idx]) # signal.shift(1) 기준 실행 봉
-                
-                markers.append({
-                    "time": t_ms, 
-                    "position": "belowBar" if is_long_entry else "aboveBar",
-                    "color": "#4ade80" if is_long_entry else "#fb7185",
-                    "shape": "arrowUp" if is_long_entry else "arrowDown", 
-                    "text": "L" if is_long_entry else "S",
-                })
-
-    if len(df) > 0 and pos.iloc[-1] != 0 and entry_price > 0:
-        is_long_exit = pos.iloc[-1] > 0
-        exit_price = float(df["close"].iloc[-1])
-        raw_profit_pct = (exit_price / entry_price - 1) if is_long_exit else (entry_price / exit_price - 1)
-        profit_pct = raw_profit_pct * float(leverage)
-        is_profit = profit_pct >= 0
-        t_ms = int(df.index[-1].timestamp())
-
-        markers.append({
-            "time": t_ms,
-            "position": "aboveBar" if is_long_exit else "belowBar",
-            "color": "#10b981" if is_profit else "#f43f5e",
-            "shape": "circle",
-            "text": "EOD",
-        })
-
-        trades_payload.append({
-            "type": "LONG" if is_long_exit else "SHORT",
-            "time": df.index[-1].isoformat(),
-            "exitReason": "EOD",
-            "entry": entry_price,
-            "exit": exit_price,
-            "sl": 0.0,
-            "tp": 0.0,
-            "profitPct": f"{profit_pct*100:+.2f}%",
-            "profitAmt": float(10000 * profit_pct),
-            "posSize": float(leverage),
-        })
+                    "profitPct": f"{pnl_pct * 100:+.2f}%",
+                    "profitAmt": float(tr.get("pnl", 0.0)),
+                    "posSize": size,
+                }
+            )
 
     # 6. 자산 곡선(Equity Curve) 생성
     cum_equity = (1 + rets).cumprod()
     equity_curve = []
     for t, val in cum_equity.items():
-        equity_curve.append({
-            "time": int(t.timestamp()),
-            "value": float(val)
-        })
+        equity_curve.append(
+            {
+                "time": int(t.timestamp()),
+                "value": float(val),
+            }
+        )
 
     # 7. 결과 조립
     return {
         "success": True,
-        "framework": "trinity-native-v2",
+        "framework": "trinity-native-v3-realistic",
         "symbol": sanitize_symbol(symbol),
         "interval": interval,
         "strategy": strategy,
+        "scoring_mode": "out_of_sample" if use_oos else "full_range_fallback",
+        "analysis_period": {
+            "start": str(eval_df.index[0]),
+            "end": str(eval_df.index[-1]),
+            "bars": int(len(eval_df)),
+            "oos_split_index": int(split_idx) if use_oos else None,
+            "liquidations": int(details.get("liquidations", 0)),
+        },
         "results": {
             "total_return": float(metrics.total_return * 100),
             "max_drawdown": abs(float(metrics.max_drawdown * 100)),
@@ -734,6 +718,6 @@ def run_skill_backtest(
         },
         "trades": trades_payload,
         "markers": markers,
-        "candles": _candles_payload(df) if include_candles else [],
+        "candles": _candles_payload(eval_df) if include_candles else [],
         "equity_curve": equity_curve
     }
