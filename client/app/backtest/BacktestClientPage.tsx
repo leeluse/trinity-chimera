@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CandlestickSeries, IChartApi, ISeriesApi, createChart, createSeriesMarkers, type ISeriesMarkersPluginApi, type Time } from "lightweight-charts";
 
@@ -21,6 +21,7 @@ import {
   ExecutionLog
 } from "@/components";
 import { AppRightPanel } from "@/components/layout/AppRightPanel";
+import type { LinePatch } from "@/components/features/chat/ChatInterface";
 
 // Externalized
 import { Results, TimeFrame } from "@/types/backtest";
@@ -174,23 +175,21 @@ export default function BacktestPage() {
   const handleStartTest = async () => {
     setLoading(true);
     try {
-      const isKnown = strategies.some(s => s.key === strategy);
-      const params = new URLSearchParams({
+      const body = {
         symbol,
         interval: timeFrame,
         strategy,
         start_date: startDate,
         end_date: endDate,
-        include_candles: "true"
+        include_candles: true,
+        ...(strategyCode ? { code: strategyCode } : {}),
+      };
+
+      const res = await fetchWithBypass("/api/backtest/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
-
-      if (!isKnown && strategyCode) {
-        params.append("code", strategyCode);
-      } else if (strategyCode) {
-        params.append("code", strategyCode);
-      }
-
-      const res = await fetchWithBypass(`/api/backtest/run?${params.toString()}`);
       const data = await res.json();
       if (!res.ok || !data?.success) throw new Error(data?.error || "백테스트 실패");
       applyBacktestPayload(data);
@@ -260,6 +259,19 @@ export default function BacktestPage() {
       codeSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 100);
   };
+
+  const applyPatch = useCallback((patches: LinePatch[], _title?: string) => {
+    setStrategyCode(prev => {
+      const lines = prev.split("\n");
+      const sorted = [...patches].sort((a, b) => b.start_line - a.start_line);
+      for (const p of sorted) {
+        const deleteCount = p.end_line - p.start_line + 1;
+        const newLines = p.new_content === "" ? [] : p.new_content.split("\n");
+        lines.splice(p.start_line - 1, deleteCount, ...newLines);
+      }
+      return lines.join("\n");
+    });
+  }, []);
 
   const loadStrategyCode = async (targetStrategy: string) => {
     const isKnownStrategy = strategies.some(s => s.key === targetStrategy);
@@ -361,6 +373,7 @@ export default function BacktestPage() {
           backtestContext={backtestContext}
           onBacktestGenerated={applyBacktestPayload}
           onApplyCode={applyGeneratedCode}
+          onApplyPatch={applyPatch}
         />
       </PageLayout.Side>
 
