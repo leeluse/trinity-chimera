@@ -24,6 +24,7 @@ from server.modules.chat.skills._base import (
     resolve_target_agent,
     build_memory_guardrail,
     get_last_strategy,
+    validate_strategy_template,
 )
 from server.modules.chat.skills.pipeline_backtest import run_backtest
 
@@ -351,10 +352,47 @@ def _validate_strategy_code(strategy_code: str) -> Optional[str]:
         return "수정된 코드 추출 실패"
     if not _REQUIRED_SIGNAL_FN_RE.search(strategy_code):
         return "필수 함수 시그니처 누락: def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series"
+    template_error = validate_strategy_template(strategy_code)
+    if template_error:
+        return template_error
     try:
         StrategyLoader.validate_code(strategy_code)
     except (SecurityError, SyntaxError) as e:
         return str(e)
+    return None
+
+
+def _compute_line_patches(before: str, after: str) -> List[Dict[str, Any]]:
+    """before→after 변경을 1-indexed 줄 번호 패치 목록으로 변환한다."""
+    before_lines = (before or "").splitlines()
+    after_lines  = (after  or "").splitlines()
+    sm = difflib.SequenceMatcher(a=before_lines, b=after_lines, autojunk=False)
+    patches: List[Dict[str, Any]] = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        patches.append({
+            "start_line":  i1 + 1,
+            "end_line":    i2,          # i2==i1 → 삽입(end_line = start_line-1)
+            "new_content": "\n".join(after_lines[j1:j2]),
+        })
+    return patches
+
+
+def _validate_line_patches(patches: List[Dict[str, Any]], before: str) -> Optional[str]:
+    """패치 목록의 줄 범위가 유효한지 검증한다. 오류 문자열 또는 None 반환."""
+    total = len((before or "").splitlines())
+    for p in patches:
+        s = p.get("start_line")
+        e = p.get("end_line")
+        if not isinstance(s, int) or not isinstance(e, int):
+            return "start_line/end_line must be int"
+        if s < 1:
+            return f"start_line {s} < 1"
+        if e > total:
+            return f"end_line {e} > total lines {total}"
+        if e < s - 1:
+            return f"end_line {e} < start_line-1 ({s-1})"
     return None
 
 
