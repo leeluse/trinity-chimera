@@ -260,8 +260,12 @@ export default function BacktestPage() {
     }, 100);
   };
 
-  const applyPatch = useCallback((patches: LinePatch[], _title?: string) => {
+  const applyPatch = useCallback((patches: LinePatch[], title?: string) => {
     if (!patches?.length) return;
+    if (title) {
+      setStrategy(title);
+      setStrategyTitle(title);
+    }
     setStrategyCode(prev => {
       const lines = prev.split("\n");
       const sorted = [...patches].sort((a, b) => b.start_line - a.start_line);

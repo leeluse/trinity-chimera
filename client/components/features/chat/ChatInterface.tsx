@@ -821,6 +821,12 @@ export default function ChatInterface({
               case "patch":
                 if (onApplyPatch && Array.isArray(event.data?.patches)) {
                   onApplyPatch(event.data.patches, event.data.title);
+                  appendMessage({
+                    id: `${Date.now()}-patch`,
+                    role: "assistant",
+                    content: `✓ **${event.data.title || "전략"}** 패치 적용 완료 (${event.data.patches.length}개 구간)`,
+                    type: "text",
+                  });
                 }
                 break;
 
@@ -1104,6 +1110,12 @@ export default function ChatInterface({
               case "patch":
                 if (onApplyPatch && Array.isArray(event.data?.patches)) {
                   onApplyPatch(event.data.patches, event.data.title);
+                  appendMessage({
+                    id: `${Date.now()}-patch`,
+                    role: "assistant",
+                    content: `✓ **${event.data.title || "전략"}** 패치 적용 완료 (${event.data.patches.length}개 구간)`,
+                    type: "text",
+                  });
                 }
                 break;
 
