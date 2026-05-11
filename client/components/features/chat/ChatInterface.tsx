@@ -9,6 +9,12 @@ import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { Send, Plus, CheckCircle2, FileCode2, Loader2, Zap, Trash2, RotateCcw, MessageSquare, GitBranch, ChevronDown, Copy, Check } from "lucide-react";
 import { fetchWithBypass } from "@/lib/api";
 
+export interface LinePatch {
+  start_line: number;
+  end_line: number;
+  new_content: string;
+}
+
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -22,6 +28,7 @@ interface ChatInterfaceProps {
   context?: Record<string, any>;
   onBacktestGenerated?: (payload: any) => void;
   onApplyCode?: (code: string, name?: string, payload?: any) => void;
+  onApplyPatch?: (patches: LinePatch[], title?: string) => void;
 }
 // const MAX_THINKING_CHARS = 10000; // 생략 비활성화됨 (사용 요청)
 
@@ -83,28 +90,42 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   }
 
   return (
-    <div className="relative group/code">
-      <button
-        onClick={handleCopy}
-        className="absolute right-3 top-3 p-2 rounded-lg bg-white/10 border border-white/10 text-slate-400 opacity-0 group-hover/code:opacity-100 hover:bg-white/20 hover:text-white transition-all z-20 backdrop-blur-md"
-        title="코드 복사"
-      >
-        {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-      </button>
-      <code className={className} {...props}>
-        {children}
-      </code>
+    <div className="relative group/code rounded-xl overflow-hidden bg-[#0D0D0E]/80 border border-white/10 my-4 shadow-2xl flex flex-col">
+      {/* Sticky Copy Button Area */}
+      <div className="absolute right-2 top-2 z-30">
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all backdrop-blur-md border border-white/5 opacity-0 group-hover/code:opacity-100 shadow-xl"
+        >
+          {copied ? (
+            <>
+              <Check size={12} className="text-green-400" />
+              <span className="text-[9px] font-bold text-green-400 uppercase tracking-tighter">Copied</span>
+            </>
+          ) : (
+            <>
+              <Copy size={12} />
+              <span className="text-[9px] font-bold uppercase tracking-tighter">Copy</span>
+            </>
+          )}
+        </button>
+      </div>
+      
+      {/* Scrollable Code Content */}
+      <div className="overflow-x-auto overflow-y-auto max-h-[450px] custom-scrollbar">
+        <pre className="p-4 !m-0 !bg-transparent !border-0 overflow-visible">
+          <code className={`${className} !p-0 !bg-transparent !border-0 text-purple-100/90 text-[12.5px] leading-relaxed font-mono block whitespace-pre`} {...props}>
+            {children}
+          </code>
+        </pre>
+      </div>
     </div>
   );
 };
 
 const MarkdownComponents = {
   pre: ({ children }: { children: React.ReactNode }) => {
-    return (
-      <pre className="relative mb-4 last:mb-0 overflow-visible">
-        {children}
-      </pre>
-    );
+    return <>{children}</>;
   },
   code: CodeBlock
 };
@@ -234,7 +255,7 @@ const MessageItem = memo(({ msg, onShowCode, onSendMessage, isStreaming, onChoic
 
           {mainContent && (
             <div className={`text-[14px] text-slate-200 leading-relaxed px-1.5 markdown-content animate-in slide-in-from-left-1 duration-300 mb-4 ${mainContent.length < 60 && /^[A-Z][A-Za-z0-9_]+$/.test(mainContent.trim()) ? 'strategy-title-header' :
-                mainContent.length < 100 && mainContent.includes('|') ? 'metadata-summary-badge' : ''
+              mainContent.length < 100 && mainContent.includes('|') ? 'metadata-summary-badge' : ''
               }`}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
@@ -348,6 +369,7 @@ export default function ChatInterface({
   context = {},
   onBacktestGenerated,
   onApplyCode,
+  onApplyPatch,
 }: ChatInterfaceProps) {
   const pathname = usePathname();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -796,6 +818,12 @@ export default function ChatInterface({
                 });
                 break;
 
+              case "patch":
+                if (onApplyPatch && Array.isArray(event.data?.patches)) {
+                  onApplyPatch(event.data.patches, event.data.title);
+                }
+                break;
+
               case "strategy":
                 setMessages((prev) => {
                   const last = prev[prev.length - 1];
@@ -1073,6 +1101,12 @@ export default function ChatInterface({
                 });
                 break;
 
+              case "patch":
+                if (onApplyPatch && Array.isArray(event.data?.patches)) {
+                  onApplyPatch(event.data.patches, event.data.title);
+                }
+                break;
+
               case "strategy":
                 setMessages((prev) => {
                   const last = prev[prev.length - 1];
@@ -1249,8 +1283,8 @@ export default function ChatInterface({
             <button
               onClick={toggleGlobalMode}
               className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border ${isGlobalMode
-                  ? 'bg-purple-500/20 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.15)]'
-                  : 'bg-white/[0.03] border-white/[0.1] text-slate-500 hover:text-slate-300'
+                ? 'bg-purple-500/20 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.15)]'
+                : 'bg-white/[0.03] border-white/[0.1] text-slate-500 hover:text-slate-300'
                 }`}
             >
               {isGlobalMode ? 'Global On' : 'Session Only'}
@@ -1276,8 +1310,8 @@ export default function ChatInterface({
             <button
               onClick={() => setPanelMode(panelMode === "pipeline" ? "chat" : "pipeline")}
               className={`flex items-center gap-1.5 px-3 py-1 rounded-sm text-[10px] font-bold uppercase transition-all duration-200 border ${panelMode === "pipeline"
-                  ? 'bg-purple-600/40 text-purple-100 border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
-                  : 'bg-white/[0.04] text-slate-500 border-white/[0.06] hover:text-slate-300 hover:bg-white/[0.08]'
+                ? 'bg-purple-600/40 text-purple-100 border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                : 'bg-white/[0.04] text-slate-500 border-white/[0.06] hover:text-slate-300 hover:bg-white/[0.08]'
                 }`}
             >
               <GitBranch size={10} />
@@ -1389,8 +1423,8 @@ export default function ChatInterface({
                     <div
                       key={s}
                       className={`h-1.5 w-1.5 rounded-full transition-all duration-700 ease-out ${s <= currentStage
-                          ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.8)] scale-110'
-                          : 'bg-white/10'
+                        ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.8)] scale-110'
+                        : 'bg-white/10'
                         }`}
                     />
                   ))}
@@ -1424,8 +1458,8 @@ export default function ChatInterface({
                         key={m}
                         onClick={() => { setChatModel(m); setShowModelSelect(false); }}
                         className={`w-full text-left px-3 py-2.5 text-[11px] font-mono transition-all duration-200 ${chatModel === m
-                            ? 'bg-white/[0.08] text-white'
-                            : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200'
+                          ? 'bg-white/[0.08] text-white'
+                          : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200'
                           }`}
                       >
                         <div className="flex items-center justify-between gap-3">
@@ -1445,8 +1479,8 @@ export default function ChatInterface({
 
           {/* Integrated Input Bar */}
           <div className={`relative flex items-center transition-all duration-500 rounded-[22px] p-1.5 backdrop-blur-2xl border ${isLoading
-              ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]'
-              : 'border-white/[0.08] bg-white/[0.02] shadow-2xl hover:border-white/[0.12] focus-within:border-purple-500/30 focus-within:bg-white/[0.04]'
+            ? 'border-purple-500/20 bg-purple-500/5 shadow-[0_0_30px_rgba(168,85,247,0.05)]'
+            : 'border-white/[0.08] bg-white/[0.02] shadow-2xl hover:border-white/[0.12] focus-within:border-purple-500/30 focus-within:bg-white/[0.04]'
             }`}>
             <textarea
               value={input}
@@ -1467,8 +1501,8 @@ export default function ChatInterface({
               onClick={() => handleSend()}
               disabled={!input.trim() || isLoading}
               className={`p-2.5 rounded-[18px] transition-all duration-300 flex items-center justify-center ${input.trim() && !isLoading
-                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20 hover:scale-105 hover:bg-purple-500 active:scale-95'
-                  : 'text-slate-700 opacity-40 cursor-not-allowed'
+                ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20 hover:scale-105 hover:bg-purple-500 active:scale-95'
+                : 'text-slate-700 opacity-40 cursor-not-allowed'
                 }`}
             >
               <Send size={18} fill={input.trim() && !isLoading ? "currentColor" : "none"} />
