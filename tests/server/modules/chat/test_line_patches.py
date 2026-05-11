@@ -1,3 +1,4 @@
+import asyncio
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
@@ -68,8 +69,6 @@ def test_validate_bad_order():
     assert err is not None
 
 
-import asyncio
-
 def test_patch_event_emitted():
     """patch_first 성공 시 patch 이벤트가 전송되는지 확인."""
     import json
@@ -117,7 +116,7 @@ def test_patch_event_emitted():
 
         db_mock.get_last_strategy_message = AsyncMock(return_value=None)
         db_mock.get_last_strategy_message_any = AsyncMock(return_value=None)
-        db_mock.get_last_strategy_row = AsyncMock(return_value=None)
+        db_mock.get_last_strategy_row_any = AsyncMock(return_value=None)
 
         with mock_patch(
             "server.modules.chat.skills.pipeline_modify._attempt_patch_first",
