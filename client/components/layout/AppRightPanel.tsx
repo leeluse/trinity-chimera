@@ -2,7 +2,7 @@
 
 import { usePathname, useSearchParams } from "next/navigation";
 import { RightPanelShell } from "@/components/panel/RightPanelShell";
-import ChatInterface from "@/components/features/chat/ChatInterface";
+import ChatInterface, { type LinePatch } from "@/components/features/chat/ChatInterface";
 import AgentFilter from "@/components/panel/sections/AgentFilter";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import { Trophy } from "lucide-react";
@@ -13,6 +13,7 @@ interface AppRightPanelProps {
   backtestContext?: any;
   onBacktestGenerated?: (data: any) => void;
   onApplyCode?: (code: string, name?: string, payload?: any) => void;
+  onApplyPatch?: (patches: LinePatch[], title?: string) => void;
   botTrades?: any[];
 }
 
@@ -22,6 +23,7 @@ export function AppRightPanel({
   backtestContext = null,
   onBacktestGenerated,
   onApplyCode,
+  onApplyPatch,
   botTrades = [],
 }: AppRightPanelProps) {
   const pathname = usePathname();
@@ -55,6 +57,7 @@ export function AppRightPanel({
           context={backtestContext}
           onBacktestGenerated={onBacktestGenerated}
           onApplyCode={onApplyCode}
+          onApplyPatch={onApplyPatch}
         />
       )}
 
