@@ -47,6 +47,16 @@ const DEFAULT_START_DATE = toDateInputValue(shiftMonths(today, -1));
 const parseResults = (payload: any): Results => ({
   netProfitAmt: Number(payload?.results?.total_pnl ?? 0),
   totalReturnNum: Number(payload?.results?.total_return ?? 0),
+  grossReturnNum: Number(payload?.results?.gross_return ?? payload?.results?.total_return ?? 0),
+  simulationMode: payload?.simulation_mode === "tradingview" ? "tradingview" : "realistic",
+  simulationSettings: payload?.simulation_settings ? {
+    mode: String(payload.simulation_settings.mode ?? ""),
+    commissionRate: Number(payload.simulation_settings.commission_rate ?? 0),
+    commissionPct: Number(payload.simulation_settings.commission_pct ?? 0),
+    initialCapital: Number(payload.simulation_settings.initial_capital ?? 0),
+    qtyType: String(payload.simulation_settings.qty_type ?? ""),
+    qtyValue: Number(payload.simulation_settings.qty_value ?? 0),
+  } : undefined,
   winRateNum: Number(payload?.results?.win_rate ?? 0),
   mddPct: Number(payload?.results?.max_drawdown ?? 0),
   sharpeRatio: Number(payload?.results?.sharpe_ratio ?? 0),
@@ -85,10 +95,12 @@ export default function BacktestPage() {
   const searchParams = useSearchParams();
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [timeFrame, setTimeFrame] = useState<TimeFrame>("1h");
+  const [leverage, setLeverage] = useState(10);
   const [strategy, setStrategy] = useState("");
   const [strategies, setStrategies] = useState<any[]>([]);
   const [startDate, setStartDate] = useState(DEFAULT_START_DATE);
   const [endDate, setEndDate] = useState(DEFAULT_END_DATE);
+  const [simulationMode, setSimulationMode] = useState<"realistic" | "tradingview">("realistic");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
   const [strategyTitle, setStrategyTitle] = useState("");
@@ -179,9 +191,11 @@ export default function BacktestPage() {
         symbol,
         interval: timeFrame,
         strategy,
+        leverage,
         start_date: startDate,
         end_date: endDate,
         include_candles: true,
+        simulation_mode: simulationMode,
         ...(strategyCode ? { code: strategyCode } : {}),
       };
 
@@ -353,6 +367,8 @@ export default function BacktestPage() {
     timeframe: timeFrame,
     start_date: startDate,
     end_date: endDate,
+    leverage,
+    simulation_mode: simulationMode,
     netProfitAmt: results?.netProfitAmt,
     total_return: results?.totalReturnNum,
     winRate: results?.winRateNum,
@@ -367,7 +383,7 @@ export default function BacktestPage() {
       title: strategy,
       code: strategyCode,
     },
-  }), [symbol, timeFrame, startDate, endDate, results, strategy, strategyCode]);
+  }), [symbol, timeFrame, startDate, endDate, leverage, simulationMode, results, strategy, strategyCode]);
 
   return (
     <PageLayout rightWidth="lg:w-[400px]">
@@ -402,8 +418,11 @@ export default function BacktestPage() {
             <BacktestHeader
               symbol={symbol} setSymbol={setSymbol}
               timeframe={timeFrame} setTimeframe={setTimeFrame}
+              leverage={leverage} setLeverage={setLeverage}
               startDate={startDate} setStartDate={setStartDate}
               endDate={endDate} setEndDate={setEndDate}
+              simulationMode={simulationMode} setSimulationMode={setSimulationMode}
+              simulationSettings={results?.simulationSettings}
               onRangePreset={handleRangePreset}
               strategy={strategy} strategies={strategies} setStrategy={handleStrategyChange}
               strategyTitle={strategyTitle} setStrategyTitle={setStrategyTitle}

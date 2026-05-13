@@ -73,24 +73,24 @@ export const PerformanceDetails = ({ results }: PerformanceDetailsProps) => {
             leftLabel="총 수익률"
             leftValue={fmtPct(results.totalReturnNum)}
             leftTone={valueTone(results.totalReturnNum)}
-            rightLabel="매수 후 보유"
-            rightValue={fmtPct(results.buyHoldReturn)}
-            rightTone={valueTone(results.buyHoldReturn)}
+            rightLabel="수수료 제외"
+            rightValue={fmtPct(results.grossReturnNum)}
+            rightTone={valueTone(results.grossReturnNum)}
           />
           <MetricPair
             leftLabel="초과 성과"
             leftValue={fmtPct(results.alphaReturn)}
             leftTone={valueTone(results.alphaReturn)}
-            rightLabel="수수료"
-            rightValue={fmtMoney(results.totalFees)}
+            rightLabel="매수 후 보유"
+            rightValue={fmtPct(results.buyHoldReturn)}
+            rightTone={valueTone(results.buyHoldReturn)}
           />
           <MetricPair
-            leftLabel="예상 수익"
-            leftValue={fmtMoney(results.expectedReturn)}
-            leftTone={valueTone(results.expectedReturn)}
-            rightLabel=""
-            rightValue=""
-            rightTone="text-transparent"
+            leftLabel="수수료"
+            leftValue={fmtMoney(results.totalFees)}
+            rightLabel="예상 수익"
+            rightValue={fmtPct(results.expectedReturn)}
+            rightTone={valueTone(results.expectedReturn)}
           />
         </div>
 

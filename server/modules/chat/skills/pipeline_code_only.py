@@ -7,7 +7,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from server.shared.llm.client import stream_code_gen_reply
 from server.shared.market.strategy_loader import StrategyLoader, SecurityError
 from server.shared.chat.wiki_memory import EvolutionWikiMemory
-from server.modules.chat.prompts import CODE_PROMPT_TEMPLATE
+from server.modules.chat.prompts import CODE_PROMPT_TEMPLATE, STRATEGY_CODE_TEMPLATE
 from server.modules.chat.skills._base import (
     format_sse,
     extract_python_code,
@@ -16,6 +16,7 @@ from server.modules.chat.skills._base import (
     salvage_valid_python,
     resolve_target_agent,
     build_memory_guardrail,
+    validate_strategy_template,
 )
 from server.modules.chat.skills.pipeline_backtest import run_backtest
 
@@ -31,6 +32,9 @@ def _validate_strategy_code(strategy_code: str) -> Optional[str]:
         return "코드 추출 실패"
     if not _REQUIRED_SIGNAL_FN_RE.search(strategy_code):
         return "필수 함수 시그니처 누락: def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series"
+    template_error = validate_strategy_template(strategy_code)
+    if template_error:
+        return template_error
     try:
         StrategyLoader.validate_code(strategy_code)
     except (SecurityError, SyntaxError) as e:
@@ -89,7 +93,7 @@ async def run_code_only_pipeline(
     yield format_sse({"type": "stage", "stage": 3,
                       "label": f"⚡ 설계도 기반 코드 생성 중... ({code_model})"})
 
-    prompt3 = CODE_PROMPT_TEMPLATE.format(design=design) + guardrail_block
+    prompt3 = CODE_PROMPT_TEMPLATE.format(design=design, template=STRATEGY_CODE_TEMPLATE) + guardrail_block
     code_full = ""
     _code_chunk_count = 0
     try:
@@ -123,6 +127,7 @@ async def run_code_only_pipeline(
                 "아래 출력은 중간에 끊겼거나 형식이 깨진 전략 코드다.\n"
                 "실행 가능한 완전한 Python 코드만 출력하라.\n"
                 "def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series\n"
+                "반환은 normalized signal Series 또는 payload dict 모두 허용된다.\n"
                 "백틱(```) 절대 사용 금지. 순수 코드만 출력.\n\n"
                 f"[실패 원인]\n{validation_error}\n\n"
                 f"[원래 설계도]\n{design[-2200:]}\n\n"

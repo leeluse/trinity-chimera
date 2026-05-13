@@ -27,6 +27,11 @@ def _is_connectivity_error(exc: Exception) -> bool:
         or "timed out" in text
     )
 
+
+def _is_missing_table_error(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    return "pgrst205" in text or "could not find the table" in text
+
 class SupabaseManager:
     """
     Manager for interacting with the Supabase backend for the Trinity Autonomous Evolution System.
@@ -40,6 +45,86 @@ class SupabaseManager:
             raise EnvironmentError("SUPABASE_URL and SUPABASE_KEY must be set in environment variables.")
 
         self.client: Client = create_client(url, key)
+
+    def get_ohlcv_cache(
+        self,
+        symbol: str,
+        timeframe: str,
+        start_ms: Optional[int] = None,
+        end_ms: Optional[int] = None,
+        limit: Optional[int] = None,
+        ascending: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Read OHLCV cache rows from Supabase with pagination.
+        """
+        try:
+            page_size = 1000
+            fetched: List[Dict[str, Any]] = []
+            offset = 0
+
+            while True:
+                remaining = page_size if limit is None else max(0, min(page_size, limit - len(fetched)))
+                if remaining == 0:
+                    break
+
+                query = (
+                    self.client.table("ohlcv_cache")
+                    .select("symbol,timeframe,timestamp_ms,open,high,low,close,volume")
+                    .eq("symbol", symbol)
+                    .eq("timeframe", timeframe)
+                    .order("timestamp_ms", desc=not ascending)
+                    .range(offset, offset + remaining - 1)
+                )
+
+                if start_ms is not None:
+                    query = query.gte("timestamp_ms", int(start_ms))
+                if end_ms is not None:
+                    query = query.lte("timestamp_ms", int(end_ms))
+
+                res = query.execute()
+                rows = res.data or []
+                if not rows:
+                    break
+
+                fetched.extend(rows)
+                if len(rows) < remaining:
+                    break
+                offset += len(rows)
+
+            return fetched
+        except APIError as e:
+            if _is_missing_table_error(e):
+                logger.info("ohlcv_cache table is not created yet.")
+            else:
+                logger.warning("Error reading ohlcv_cache: %s", e)
+            return []
+
+    def upsert_ohlcv_cache(self, candles: List[Dict[str, Any]]) -> int:
+        """
+        Bulk upsert OHLCV cache rows into Supabase.
+        """
+        if not candles:
+            return 0
+
+        written = 0
+        try:
+            batch_size = 500
+            for start in range(0, len(candles), batch_size):
+                batch = candles[start : start + batch_size]
+                self.client.table("ohlcv_cache").upsert(
+                    batch,
+                    on_conflict="symbol,timeframe,timestamp_ms",
+                    returning="minimal",
+                ).execute()
+                written += len(batch)
+            return written
+        except APIError as e:
+            if _is_missing_table_error(e):
+                logger.info("ohlcv_cache table is not created yet.")
+            else:
+                logger.warning("Error upserting ohlcv_cache: %s", e)
+            return written
 
     @staticmethod
     def _is_uuid_like(value: str) -> bool:

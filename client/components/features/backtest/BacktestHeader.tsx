@@ -1,17 +1,29 @@
 "use client";
 
 import { ChevronDown, Play, Zap, Save, Copy, SlidersHorizontal } from "lucide-react";
-import { SYMBOLS } from "@/constants";
+import { LEVERAGES, SYMBOLS } from "@/constants";
 
 interface BacktestHeaderProps {
   symbol: string;
   setSymbol: (s: string) => void;
   timeframe: string;
   setTimeframe: (t: any) => void;
+  leverage: number;
+  setLeverage: (n: number) => void;
   startDate: string;
   setStartDate: (d: string) => void;
   endDate: string;
   setEndDate: (d: string) => void;
+  simulationMode: "realistic" | "tradingview";
+  setSimulationMode: (mode: "realistic" | "tradingview") => void;
+  simulationSettings?: {
+    mode?: string;
+    commissionRate?: number;
+    commissionPct?: number;
+    initialCapital?: number;
+    qtyType?: string;
+    qtyValue?: number;
+  };
   onRangePreset: (months: number) => void;
   strategy: string;
   strategies: any[];
@@ -29,8 +41,11 @@ interface BacktestHeaderProps {
 export default function BacktestHeader({
   symbol, setSymbol,
   timeframe, setTimeframe,
+  leverage, setLeverage,
   startDate, setStartDate,
   endDate, setEndDate,
+  simulationMode, setSimulationMode,
+  simulationSettings,
   onRangePreset,
   strategy,
   strategies,
@@ -50,6 +65,19 @@ export default function BacktestHeader({
     { label: "6개월", months: 6 },
     { label: "1년", months: 12 },
   ];
+  const tvSettingsLabel = simulationMode === "tradingview" && simulationSettings
+    ? [
+        simulationSettings.qtyType
+          ? `${simulationSettings.qtyType} ${Number(simulationSettings.qtyValue ?? 0).toLocaleString()}`
+          : null,
+        simulationSettings.initialCapital
+          ? `capital ${Number(simulationSettings.initialCapital).toLocaleString()}`
+          : null,
+        Number.isFinite(simulationSettings.commissionPct)
+          ? `fee ${Number(simulationSettings.commissionPct ?? 0).toFixed(3)}%`
+          : null,
+      ].filter(Boolean).join("  |  ")
+    : "";
 
   return (
     <div className="flex flex-col gap-3 p-3 border-b border-white/[0.05] relative z-20">
@@ -87,6 +115,13 @@ export default function BacktestHeader({
           width="w-24" 
         />
 
+        <DropdownSelect
+          value={`${leverage}x`}
+          options={LEVERAGES.map((value) => `${value}x`)}
+          onChange={(value: string) => setLeverage(Number(String(value).replace("x", "")))}
+          width="w-24"
+        />
+
         {/* Date Range Group */}
         <div className="flex items-center gap-2 px-4 py-2 bg-white/[0.03] border border-white/10 rounded-xl">
           <input 
@@ -108,6 +143,25 @@ export default function BacktestHeader({
               className="px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-tight text-slate-400 hover:text-white hover:bg-white/[0.06] transition-all"
             >
               {preset.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1 p-1 bg-white/[0.02] border border-white/5 rounded-xl">
+          {[
+            { key: "realistic", label: "Realistic" },
+            { key: "tradingview", label: "TradingView" },
+          ].map((mode) => (
+            <button
+              key={mode.key}
+              onClick={() => setSimulationMode(mode.key as "realistic" | "tradingview")}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-tight transition-all ${
+                simulationMode === mode.key
+                  ? "bg-[#9f7aea]/20 text-[#a78bfa] border border-[#9f7aea]/30"
+                  : "text-slate-500 hover:text-white hover:bg-white/[0.06]"
+              }`}
+            >
+              {mode.label}
             </button>
           ))}
         </div>
@@ -142,6 +196,13 @@ export default function BacktestHeader({
           </button>
         </div>
       </div>
+
+      {tvSettingsLabel && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-300/15 bg-amber-300/[0.06] text-[10px] font-bold tracking-wide text-amber-100/85">
+          <span className="text-amber-200">TV Fill</span>
+          <span className="text-amber-50/90">{tvSettingsLabel}</span>
+        </div>
+      )}
 
       {/* Bottom Row: Tabs & Tools */}
       <div className="flex items-center justify-between">

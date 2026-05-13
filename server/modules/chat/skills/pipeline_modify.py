@@ -249,7 +249,7 @@ def _build_fast_modify_design(
         "    - import는 numpy, pandas만 사용\n"
         "    - shift(-1) 미래참조 금지\n"
         "    - 최종 조건은 long/short 각각 3개 내외의 핵심 조건으로 구성\n"
-        "    - return sig.fillna(0).astype(int)\n"
+        "    - 마지막 반환은 normalized signal Series 또는 normalized signal을 포함한 payload dict\n"
         "\nanalysis_summary:\n"
         + analysis[:1800]
     )
@@ -333,6 +333,7 @@ async def _recover_code_once(raw_output: str, original_prompt: str, reason: str)
         "이전 출력 조각을 이어 쓰지 말고, 실행 가능한 완전한 Python 코드 전체를 처음부터 다시 출력하라.\n"
         "필수 함수 시그니처:\n"
         "def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series\n"
+        "반환은 normalized signal Series 또는 payload dict 모두 허용된다.\n"
         "설명문/마크다운 문장 금지. 백틱(```) 절대 사용 금지. 순수 코드만 출력.\n"
         "코드는 간결하게 작성하고, 불필요한 클래스/긴 주석/장문 설명을 넣지 마라.\n\n"
         f"[실패 원인]\n{reason}\n\n"

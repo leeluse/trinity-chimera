@@ -68,7 +68,6 @@ trinity-chimery/
 │   │   │   ├── router.py          # /api/chat 엔드포인트
 │   │   │   └── skills/            # 파이프라인 스킬들
 │   │   ├── engine/                # 백테스트 엔진 API
-│   │   ├── evolution/             # 자율 진화 에이전트
 │   │   ├── bots/                  # 봇 시뮬레이션 관리
 │   │   └── settings/              # LLM 설정 API
 │   ├── shared/
@@ -85,6 +84,7 @@ trinity-chimery/
 ## 3. API 전체 목록
 
 ### Chat
+
 | Method | Path | 설명 |
 |---|---|---|
 | POST | `/api/chat/run` | 채팅 파이프라인 (SSE) |
@@ -95,6 +95,7 @@ trinity-chimery/
 | POST | `/api/chat/deploy` | 전략 배포 |
 
 ### Backtest Engine
+
 | Method | Path | 설명 |
 |---|---|---|
 | GET | `/api/backtest/run` | 백테스트 실행 |
@@ -106,6 +107,7 @@ trinity-chimery/
 | POST | `/api/backtest/llm/backtest-analysis` | LLM 분석 리포트 |
 
 ### System / Bots / Agents
+
 | Method | Path | 설명 |
 |---|---|---|
 | GET/POST | `/api/system/settings` | LLM 모델 설정 |

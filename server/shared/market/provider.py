@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -9,6 +10,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import pandas as pd
+
+from server.shared.db.supabase import SupabaseManager
 
 _ALLOWED_INTERVALS = {"1m", "5m", "15m", "1h", "4h"}
 _INTERVAL_MS = {
@@ -26,6 +29,10 @@ _BYBIT_INTERVAL_MAP = {"1m": "1", "5m": "5", "15m": "15", "1h": "60", "4h": "240
 # 최적화 파이프라인 등 동일 조건으로 반복 호출 시 실제 네트워크 요청을 1번으로 줄임
 _OHLCV_CACHE: Dict[Tuple, Tuple[float, pd.DataFrame]] = {}
 _CACHE_TTL = 300  # seconds
+_supabase_manager: Optional[SupabaseManager] = None
+_supabase_unavailable = False
+
+logger = logging.getLogger(__name__)
 
 
 def sanitize_symbol(symbol: str) -> str:
@@ -33,6 +40,21 @@ def sanitize_symbol(symbol: str) -> str:
     if not s.endswith("USDT"):
         s = f"{s}USDT"
     return s
+
+
+def _get_supabase_manager() -> Optional[SupabaseManager]:
+    global _supabase_manager, _supabase_unavailable
+    if _supabase_unavailable:
+        return None
+    if _supabase_manager is not None:
+        return _supabase_manager
+    try:
+        _supabase_manager = SupabaseManager()
+        return _supabase_manager
+    except Exception as exc:
+        logger.info("Supabase OHLCV cache unavailable: %s", exc)
+        _supabase_unavailable = True
+        return None
 
 
 def parse_date_to_ms(value: Optional[str], end_of_day: bool) -> Optional[int]:
@@ -110,6 +132,107 @@ def _fetch_bybit_klines(
     return out
 
 
+def _rows_to_frame(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+
+    frame = pd.DataFrame(
+        [
+            {
+                "timestamp": datetime.fromtimestamp(int(r["t"]) / 1000, tz=timezone.utc),
+                "open": float(r["o"]),
+                "high": float(r["h"]),
+                "low": float(r["l"]),
+                "close": float(r["c"]),
+                "volume": float(r.get("v", 0.0)),
+            }
+            for r in rows
+            if "t" in r and "o" in r and "h" in r and "l" in r and "c" in r
+        ]
+    )
+
+    return frame.sort_values("timestamp").drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
+
+
+def _load_ohlcv_from_db(
+    symbol: str,
+    interval: str,
+    limit: int,
+    start_ms: Optional[int],
+    end_ms: Optional[int],
+) -> pd.DataFrame:
+    manager = _get_supabase_manager()
+    if manager is None:
+        return pd.DataFrame()
+
+    try:
+        normalized_symbol = sanitize_symbol(symbol)
+        if start_ms is not None and end_ms is not None:
+            rows = manager.get_ohlcv_cache(
+                symbol=normalized_symbol,
+                timeframe=interval,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                ascending=True,
+            )
+            step = _INTERVAL_MS[interval]
+            expected = max(1, int((int(end_ms) - int(start_ms)) / step) + 1)
+            if len(rows) < max(1, expected - 1):
+                return pd.DataFrame()
+        else:
+            bars = max(1, min(int(limit), 100_000))
+            rows = manager.get_ohlcv_cache(
+                symbol=normalized_symbol,
+                timeframe=interval,
+                limit=bars,
+                ascending=False,
+            )
+            if len(rows) < bars:
+                return pd.DataFrame()
+            rows = list(reversed(rows))
+
+        db_rows = [
+            {
+                "t": int(row["timestamp_ms"]),
+                "o": float(row["open"]),
+                "h": float(row["high"]),
+                "l": float(row["low"]),
+                "c": float(row["close"]),
+                "v": float(row.get("volume", 0.0) or 0.0),
+            }
+            for row in rows
+        ]
+        return _rows_to_frame(db_rows)
+    except Exception as exc:
+        logger.warning("Supabase OHLCV cache read failed: %s", exc)
+        return pd.DataFrame()
+
+
+def _persist_ohlcv_to_db(symbol: str, interval: str, rows: List[Dict[str, Any]]) -> None:
+    manager = _get_supabase_manager()
+    if manager is None or not rows:
+        return
+
+    try:
+        payload = [
+            {
+                "symbol": sanitize_symbol(symbol),
+                "timeframe": interval,
+                "timestamp_ms": int(row["t"]),
+                "open": float(row["o"]),
+                "high": float(row["h"]),
+                "low": float(row["l"]),
+                "close": float(row["c"]),
+                "volume": float(row.get("v", 0.0) or 0.0),
+            }
+            for row in rows
+            if "t" in row and "o" in row and "h" in row and "l" in row and "c" in row
+        ]
+        manager.upsert_ohlcv_cache(payload)
+    except Exception as exc:
+        logger.warning("Supabase OHLCV cache write failed: %s", exc)
+
+
 def fetch_ohlcv_dataframe(
     symbol: str,
     interval: str,
@@ -128,6 +251,17 @@ def fetch_ohlcv_dataframe(
         if time.time() - ts < _CACHE_TTL:
             return df.copy()
         del _OHLCV_CACHE[cache_key]
+
+    db_frame = _load_ohlcv_from_db(
+        symbol=symbol,
+        interval=interval,
+        limit=limit,
+        start_ms=start_ms,
+        end_ms=end_ms,
+    )
+    if not db_frame.empty:
+        _OHLCV_CACHE[cache_key] = (time.time(), db_frame)
+        return db_frame.copy()
 
     rows: List[Dict[str, Any]] = []
     step = _INTERVAL_MS[interval]
@@ -189,22 +323,8 @@ def fetch_ohlcv_dataframe(
     if not rows:
         return pd.DataFrame()
 
-    frame = pd.DataFrame(
-        [
-            {
-                "timestamp": datetime.fromtimestamp(int(r["t"]) / 1000, tz=timezone.utc),
-                "open": float(r["o"]),
-                "high": float(r["h"]),
-                "low": float(r["l"]),
-                "close": float(r["c"]),
-                "volume": float(r.get("v", 0.0)),
-            }
-            for r in rows
-            if "t" in r and "o" in r and "h" in r and "l" in r and "c" in r
-        ]
-    )
-
-    frame = frame.sort_values("timestamp").drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
+    _persist_ohlcv_to_db(symbol=symbol, interval=interval, rows=rows)
+    frame = _rows_to_frame(rows)
 
     # 캐시 저장 (오래된 항목 정리 후 저장)
     if len(_OHLCV_CACHE) > 50:

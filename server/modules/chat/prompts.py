@@ -106,6 +106,39 @@ QUANT_PERSONA = """너는 10년차 실전 퀀트 트레이더이자 트레이딩
 
 ---
 
+## 전략 코드 작성 원칙 (매우 중요)
+
+만약 파이썬으로 트레이딩 전략 코드를 작성해야 한다면, **반드시 아래 템플릿과 함수 시그니처를 그대로 준수하라**.
+절대 임의의 클래스(Class)를 생성하거나 다른 이름을 사용하지 마라. 시스템 백테스터가 코드를 실행할 수 없게 된다.
+
+```python
+ # [Title: 전략명]
+import numpy as np
+import pandas as pd
+
+def _compute_features(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.DataFrame:
+    df = test_df.copy()
+    return df
+
+def _build_raw_signal(df: pd.DataFrame) -> pd.Series:
+    signal = pd.Series(0, index=df.index, dtype=int)
+    return signal
+
+def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
+    df = _compute_features(train_df.copy(), test_df.copy())
+    signal = _build_raw_signal(df)
+    signal = signal.reindex(test_df.index).fillna(0).astype(int)
+    return signal
+```
+- `ta`, `talib` 등 외부 라이브러리 사용 금지 (오직 `numpy`, `pandas`만 허용).
+- 단순 방향 전략은 `pd.Series` 반환, TradingView 호환 체결이 필요한 전략은 `dict` payload 반환도 허용한다.
+  - payload 키: `signal`, `entry_price`, `exit_price`, `position_size`, `trade_direction`, `meta`
+  - 예시 meta: `TV_INITIAL_CAPITAL = 100000`, `TV_QTY_TYPE = "fixed"`, `TV_FIXED_QTY = 100`, `TV_COMMISSION_PCT = 0.075`
+- 진입 조건이 소멸한다고 즉시 0을 반환하지 않도록 주의하라. 다만 명시적 stop/exit 상태 머신이 있으면 `hold_bars`는 필수가 아니다.
+- 함수 이름 `_compute_features`, `_build_raw_signal`, `generate_signal`은 변경 금지.
+
+---
+
 ## 설명 원칙
 
 - 개념 설명 요청 시: 교과서 정의 → 실전에서 어떻게 쓰이는지 → 흔한 오해나 함정 순서로 설명
@@ -240,6 +273,33 @@ risk_profile:
 # NOTE: <think> 태그를 쓰면 코드 생성 응답이 분리되어 파싱 오류 발생.
 #       코드만 출력하고 내부 검토는 주석으로 처리.
 
+STRATEGY_CODE_TEMPLATE = """# [Title: 전략명]
+import numpy as np
+import pandas as pd
+
+
+def _compute_features(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.DataFrame:
+    df = test_df.copy()
+    # TODO: train_df 기반 임계값 계산 + test_df 지표 계산
+    return df
+
+
+def _build_raw_signal(df: pd.DataFrame) -> pd.Series:
+    signal = pd.Series(0, index=df.index, dtype=int)
+    # TODO: long_entry / short_entry를 계산해 signal에 반영
+    return signal
+
+
+def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
+    train = train_df.copy()
+    test = test_df.copy()
+    df = _compute_features(train, test)
+    signal = _build_raw_signal(df)
+    signal = signal.reindex(test_df.index).fillna(0).astype(int)
+    return signal
+"""
+
+
 CODE_PROMPT_TEMPLATE = """설계도:
 {design}
 
@@ -252,7 +312,9 @@ def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
 ```
 - train_df: 학습 구간 (적응형 임계값 계산 전용)
 - test_df: 신호 생성 대상. 컬럼: open/high/low/close/volume (DatetimeIndex)
-- 반환: pd.Series (1=롱, -1=숏, 0=관망), index=test_df.index
+- 반환: `pd.Series` (1=롱, -1=숏, 0=관망) 또는 TradingView 호환 payload dict
+- payload dict 허용 키: `signal`, `entry_price`, `exit_price`, `position_size`, `trade_direction`, `entry_reason`, `exit_reason`, `meta`
+- TradingView 설정은 `meta["tradingview"]` 또는 전역 상수 `TV_INITIAL_CAPITAL`, `TV_QTY_TYPE`, `TV_FIXED_QTY`, `TV_COMMISSION_PCT`로 전달 가능
 
 ### 필수 원칙
 1. **train_df 기반 동적 임계값** — 정적 수치(rsi>70 등) 사용 금지
@@ -262,51 +324,20 @@ def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
 5. **AND 조건 3개 이하** — 전체 구간 신호 ≥ 50건 보장
 6. **numpy/pandas만 허용** — ta/talib/scipy 금지
 7. **간결하게 100줄 이내** — 불필요한 주석/헬퍼 함수 최소화
-8. **명시적 청산 로직 필수** — 진입 조건이 사라진다고 즉시 청산(0)하면 1봉 보유가 돼 백테스터와 전략 의도가 어긋난다.
-   - 권장: 진입 후 `ffill(limit=N)`으로 최소 N봉 유지 **또는** 명시적 청산 조건(RSI 정상화, 반전 모멘텀 등)을 별도로 설계
-   - 예시: `sig = entry_sig.replace(0, np.nan).ffill(limit=hold_bars).fillna(0).astype(int)`
-   - `hold_bars`는 train_df에서 계산: 예) `hold_bars = max(3, int(train_df['volume'].rolling(20).std().mean() / train_df['volume'].mean() * 20))`
+8. **명시적 청산 로직 필수**
+   - 단순 방향 전략은 `ffill(limit=N)` 또는 별도 청산 조건으로 1봉 보유 문제를 피하라.
+   - stop/target/trailing 기반 exact 전략은 상태 머신을 사용하고, 필요하면 payload의 `exit_price`까지 채워라.
+9. **아래 템플릿 구조를 정확히 유지**
+   - 함수 이름: `_compute_features`, `_build_raw_signal`, `generate_signal`
+   - 마지막 반환식은 둘 중 하나:
+     `return signal.reindex(test_df.index).fillna(0).astype(int)`
+     `return {"signal": signal, ...}`
+   - 클래스 정의 금지
+   - 추가 헬퍼가 필요해도 위 3개 함수는 반드시 유지
 
 ### 출력 형식
 ```python
-# [Title: 전략명]
-import numpy as np
-import pandas as pd
-from typing import Dict, Any
-
-class PositionState:
-    def __init__(self):
-        self.active = False
-        self.entry_price = 0.0
-        self.extreme = 0.0
-        self.last_exit_bar = None
-
-class StrategyEngine:
-    def __init__(self, params: Dict[str, Any]):
-        self.p = params
-        self.long_state = PositionState()
-        self.short_state = PositionState()
-
-    def run(self, df):
-        # 1. 지표 계산 (test_df)
-        ...
-        # 2. 메인 루프 (상태 제어)
-        signal = pd.Series(0, index=df.index, dtype=int)
-        for i in range(len(df)):
-            ...
-        return signal
-
-def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
-    params = {
-        # === CORE ===
-        "fast_len": 10,
-        "atr_len": 14,
-        # === LONG ===
-        "long_trail_atr": 3.0,
-        ...
-    }
-    engine = StrategyEngine(params)
-    return engine.run(test_df)
+{template}
 ```
 """
 
@@ -381,7 +412,8 @@ MODIFY_CODE_TEMPLATE = """수정 분석:
 - 조건을 많이 쌓아 신호를 죽이지 마라. long/short 최종 조건은 각각 핵심 필터 3개 내외로 유지해라.
 - train_df quantile 결과가 NaN/inf이면 합리적인 fallback 값을 사용해라.
 - 쿨다운/중복 신호 제거는 pandas rolling/shift 기반 vectorized 방식으로 구현해라.
-- **청산 로직 필수**: 진입 조건 소멸 시 즉시 0 반환 금지(1봉만 보유됨). `sig.replace(0, np.nan).ffill(limit=hold_bars).fillna(0).astype(int)` 또는 상태 머신으로 명시적 청산 조건을 설계해라.
+- **청산 로직 필수**: 진입 조건 소멸 시 즉시 0 반환 금지(1봉만 보유됨). `ffill(limit=hold_bars)` 또는 상태 머신 기반 명시적 청산 조건을 설계해라.
+- TradingView exact 체결이 중요하면 `signal`만 반환하지 말고 payload dict에 `entry_price` / `exit_price` / `position_size` / `meta`를 채워라.
 
 ### 함수 시그니처 (변경 불가)
 ```python
@@ -392,6 +424,9 @@ def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series:
 - `import numpy as np`, `import pandas as pd` 만 허용
 - 전체 구간 신호 발생 ≥ 30건
 - 첫 줄에 `# [Title: 수정된 전략명]` 필수
+- `_compute_features`, `_build_raw_signal`, `generate_signal` 3개 함수 구조 유지
+- 클래스 정의 금지
+- 마지막 반환은 normalized `signal` Series 또는 normalized `signal`을 포함한 payload dict
 - 완전한 코드 블록 (```python ... ```) 으로만 출력
 """
 

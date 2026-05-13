@@ -304,13 +304,14 @@ input:focus, textarea:focus, select:focus {
   font-size: 13.5px;
 }
 
-.markdown-content code {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  padding: 1px 4px;
+.markdown-content code:not(pre code):not(.code-block code) {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2px 5px;
   border-radius: 4px;
   font-family: 'JetBrains Mono', monospace;
-  color: var(--accent-teal);
+  color: #5eead4; /* teal-300 */
+  font-size: 0.9em;
 }
 
 .markdown-content table {

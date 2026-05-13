@@ -35,6 +35,16 @@ export type Trade = {
 export type Results = {
   netProfitAmt: number;
   totalReturnNum: number;
+  grossReturnNum?: number;
+  simulationMode?: "realistic" | "tradingview";
+  simulationSettings?: {
+    mode?: string;
+    commissionRate?: number;
+    commissionPct?: number;
+    initialCapital?: number;
+    qtyType?: string;
+    qtyValue?: number;
+  };
   winRateNum: number;
   mddPct: number;
   sharpeRatio: number;

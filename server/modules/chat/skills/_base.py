@@ -19,6 +19,45 @@ DEFAULT_HARD_GATES = {
     "min_sharpe_ratio": -0.10,
 }
 
+_REQUIRED_TEMPLATE_PATTERNS = [
+    (r"(?m)^# \[Title:\s*.+\]$", "첫 줄 `# [Title: 전략명]` 주석이 필요합니다."),
+    (r"(?m)^import numpy as np$", "`import numpy as np`가 필요합니다."),
+    (r"(?m)^import pandas as pd$", "`import pandas as pd`가 필요합니다."),
+    (
+        r"def\s+_compute_features\s*\(\s*train_df\s*:\s*pd\.DataFrame\s*,\s*test_df\s*:\s*pd\.DataFrame\s*\)\s*->\s*pd\.DataFrame",
+        "`_compute_features(train_df, test_df) -> pd.DataFrame` 함수가 필요합니다.",
+    ),
+    (
+        r"def\s+_build_raw_signal\s*\(\s*df\s*:\s*pd\.DataFrame\s*\)\s*->\s*pd\.Series",
+        "`_build_raw_signal(df) -> pd.Series` 함수가 필요합니다.",
+    ),
+    (
+        r"def\s+generate_signal\s*\(\s*train_df\s*:\s*pd\.DataFrame\s*,\s*test_df\s*:\s*pd\.DataFrame\s*\)\s*->\s*pd\.Series",
+        "`generate_signal(train_df, test_df) -> pd.Series` 함수가 필요합니다.",
+    ),
+]
+
+_NORMALIZED_SIGNAL_ASSIGN_RE = re.compile(
+    r"signal\s*=\s*signal\.reindex\(test_df\.index\)\.fillna\(0\)\.astype\(int\)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_LEGACY_SIGNAL_RETURN_RE = re.compile(
+    r"return\s+signal\.reindex\(test_df\.index\)\.fillna\(0\)\.astype\(int\)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_PAYLOAD_SIGNAL_KEY_RE = re.compile(
+    r"['\"]signal['\"]\s*:\s*(signal\b|signal\.reindex\(test_df\.index\)\.fillna\(0\)\.astype\(int\))",
+    re.IGNORECASE | re.MULTILINE,
+)
+_PAYLOAD_RETURN_RE = re.compile(
+    r"return\s+\{[\s\S]*?['\"]signal['\"]\s*:\s*(signal\b|signal\.reindex\(test_df\.index\)\.fillna\(0\)\.astype\(int\))",
+    re.IGNORECASE | re.MULTILINE,
+)
+_PAYLOAD_VAR_RETURN_RE = re.compile(
+    r"payload\s*=\s*\{[\s\S]*?['\"]signal['\"]\s*:\s*(signal\b|signal\.reindex\(test_df\.index\)\.fillna\(0\)\.astype\(int\))[\s\S]*?return\s+payload",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 
 def format_sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -150,6 +189,33 @@ def salvage_valid_python(code: str) -> str:
         except Exception:
             continue
     return text
+
+
+def validate_strategy_template(code: str) -> Optional[str]:
+    text = (code or "").strip()
+    if not text:
+        return "코드 추출 실패"
+    if re.search(r"(?m)^\s*class\s+\w+", text):
+        return "템플릿 위반: 클래스 정의는 허용되지 않습니다."
+    for pattern, message in _REQUIRED_TEMPLATE_PATTERNS:
+        if not re.search(pattern, text, re.IGNORECASE | re.MULTILINE):
+            return f"템플릿 위반: {message}"
+
+    has_legacy_return = bool(_LEGACY_SIGNAL_RETURN_RE.search(text))
+    has_signal_assign = bool(_NORMALIZED_SIGNAL_ASSIGN_RE.search(text))
+    has_payload_return = bool(_PAYLOAD_RETURN_RE.search(text) or _PAYLOAD_VAR_RETURN_RE.search(text))
+    has_payload_signal = bool(_PAYLOAD_SIGNAL_KEY_RE.search(text))
+
+    if has_legacy_return:
+        return None
+    if has_payload_return and (has_signal_assign or has_payload_signal):
+        return None
+
+    return (
+        "템플릿 위반: 마지막 반환은 "
+        "`return signal.reindex(test_df.index).fillna(0).astype(int)` "
+        "또는 normalized `signal`을 포함한 payload dict 이어야 합니다."
+    )
 
 
 def extract_strategy_title(text: str) -> str:

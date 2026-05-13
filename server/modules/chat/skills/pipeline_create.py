@@ -11,6 +11,7 @@ from server.shared.chat.wiki_memory import EvolutionWikiMemory
 from server.modules.chat.prompts import (
     DESIGN_PROMPT_TEMPLATE,
     CODE_PROMPT_TEMPLATE,
+    STRATEGY_CODE_TEMPLATE,
 )
 from server.modules.chat.skills._base import (
     format_sse,
@@ -20,6 +21,7 @@ from server.modules.chat.skills._base import (
     salvage_valid_python,
     resolve_target_agent,
     build_memory_guardrail,
+    validate_strategy_template,
 )
 from server.modules.chat.skills.pipeline_backtest import run_backtest
 
@@ -54,6 +56,7 @@ async def _recover_code_once(raw_output: str, original_prompt: str, reason: str)
         "이전 출력 조각을 이어 쓰지 말고, 실행 가능한 완전한 Python 코드 전체를 처음부터 다시 출력하라.\n"
         "필수 함수 시그니처:\n"
         "def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series\n"
+        "반환은 normalized signal Series 또는 payload dict 모두 허용된다.\n"
         "설명문/마크다운 문장 금지. 백틱(```) 절대 사용 금지. 순수 코드만 출력.\n"
         "코드는 간결하게 작성하고, 불필요한 클래스/긴 주석/장문 설명을 넣지 마라.\n\n"
         f"[실패 원인]\n{reason}\n\n"
@@ -73,6 +76,9 @@ def _validate_strategy_code(strategy_code: str) -> Optional[str]:
         return "코드 추출 실패"
     if not _REQUIRED_SIGNAL_FN_RE.search(strategy_code):
         return "필수 함수 시그니처 누락: def generate_signal(train_df: pd.DataFrame, test_df: pd.DataFrame) -> pd.Series"
+    template_error = validate_strategy_template(strategy_code)
+    if template_error:
+        return template_error
     try:
         StrategyLoader.validate_code(strategy_code)
     except (SecurityError, SyntaxError) as e:
@@ -148,7 +154,7 @@ async def run_create_pipeline(
     yield format_sse({"type": "stage", "stage": 2, "label": f"⚙️ Python 전략 코드 구현 중... ({code_model})"})
     logger.info(f"[{session_id}] Starting Stage 2: Code Generation (mode={code_gen_mode}, max_tokens={_mode_max_tokens})")
 
-    prompt3 = CODE_PROMPT_TEMPLATE.format(design=design_full) + guardrail_block
+    prompt3 = CODE_PROMPT_TEMPLATE.format(design=design_full, template=STRATEGY_CODE_TEMPLATE) + guardrail_block
     code_full = ""
     _thought_buf = ""  # thinking 모델이 content 없이 reasoning_content만 내보낼 때 대비
     _last_status_t = time.monotonic()
@@ -258,7 +264,7 @@ async def run_create_pipeline(
             "- profit_factor 미달 이면 손실 거래의 평균 손실 크기를 줄여라\n"
             "- 거래 수 미달 이면 시그널 발생 빈도를 높여라\n"
         )
-        prompt_retry = CODE_PROMPT_TEMPLATE.format(design=design_full) + guardrail_block + _retry_hint
+        prompt_retry = CODE_PROMPT_TEMPLATE.format(design=design_full, template=STRATEGY_CODE_TEMPLATE) + guardrail_block + _retry_hint
         code_retry = ""
         _lst = time.monotonic()
         try:

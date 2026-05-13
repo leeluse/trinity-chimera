@@ -41,6 +41,7 @@ class PeriodResult:
     n_trades: int
     profit_factor: float
     calmar: float
+    gross_return: float = 0
     # [NEW] Trade-level details
     trade_win_rate: float = 0
     best_trade: float = 0
@@ -124,6 +125,8 @@ def compute_metrics(returns: pd.Series, n_trades: int, name: str,
 
     ann = freq * 365
     total_ret = (1 + returns).prod() - 1
+    gross_returns = (returns + costs) if costs is not None else returns
+    gross_ret = (1 + gross_returns).prod() - 1
     
     # 벤치마크 (Buy & Hold) 수익률
     bh_ret = (1 + benchmark_returns).prod() - 1 if benchmark_returns is not None else 0
@@ -181,7 +184,7 @@ def compute_metrics(returns: pd.Series, n_trades: int, name: str,
 
     return PeriodResult(
         name=name, start=start, end=end,
-        total_return=total_ret, sharpe=sharpe, sortino=sortino,
+        total_return=total_ret, gross_return=gross_ret, sharpe=sharpe, sortino=sortino,
         max_drawdown=max_dd, win_rate=trade_win_rate, n_trades=n_trades,
         profit_factor=profit_factor, calmar=calmar,
         trade_win_rate=trade_win_rate,
@@ -203,6 +206,184 @@ def compute_metrics(returns: pd.Series, n_trades: int, name: str,
         long_count=len(long_returns[long_returns != 0]) if long_returns is not None else 0,
         short_count=len(short_returns[short_returns != 0]) if short_returns is not None else 0
     )
+
+
+def _normalize_signal_series(index: pd.Index, signal: Any) -> pd.Series:
+    if signal is None:
+        signal = pd.Series(0, index=index, dtype=int)
+    elif not isinstance(signal, pd.Series):
+        if isinstance(signal, (list, tuple, np.ndarray)):
+            arr = np.asarray(signal).reshape(-1)
+            if arr.size < len(index):
+                padded = np.zeros(len(index), dtype=float)
+                padded[:arr.size] = arr
+                arr = padded
+            elif arr.size > len(index):
+                arr = arr[-len(index):]
+            signal = pd.Series(arr, index=index)
+        elif isinstance(signal, (int, float, bool, np.number)):
+            v = 1 if signal > 0 else -1 if signal < 0 else 0
+            signal = pd.Series(v, index=index, dtype=int)
+        else:
+            signal = pd.Series(0, index=index, dtype=int)
+
+    if not signal.index.equals(index):
+        signal = signal.reindex(index).fillna(0.0)
+    signal = pd.to_numeric(signal, errors="coerce").fillna(0.0)
+    return pd.Series(np.sign(signal).astype(int), index=index, dtype=int)
+
+
+def _align_numeric_series(index: pd.Index, value: Any, fill_value: float = np.nan) -> pd.Series:
+    if value is None:
+        return pd.Series(fill_value, index=index, dtype=float)
+    if isinstance(value, pd.DataFrame):
+        if value.empty:
+            return pd.Series(fill_value, index=index, dtype=float)
+        value = value.iloc[:, 0]
+    if isinstance(value, pd.Series):
+        s = value.copy()
+    elif isinstance(value, (list, tuple, np.ndarray)):
+        arr = np.asarray(value).reshape(-1)
+        if arr.size < len(index):
+            padded = np.full(len(index), fill_value, dtype=float)
+            padded[:arr.size] = arr
+            arr = padded
+        elif arr.size > len(index):
+            arr = arr[-len(index):]
+        s = pd.Series(arr, index=index)
+    elif isinstance(value, (int, float, bool, np.number)):
+        s = pd.Series(float(value), index=index, dtype=float)
+    else:
+        return pd.Series(fill_value, index=index, dtype=float)
+
+    if not s.index.equals(index):
+        s = s.reindex(index)
+    return pd.to_numeric(s, errors="coerce").fillna(fill_value).astype(float)
+
+
+def _align_text_series(index: pd.Index, value: Any, fill_value: str = "") -> pd.Series:
+    if value is None:
+        return pd.Series(fill_value, index=index, dtype=object)
+    if isinstance(value, pd.DataFrame):
+        if value.empty:
+            return pd.Series(fill_value, index=index, dtype=object)
+        value = value.iloc[:, 0]
+    if isinstance(value, pd.Series):
+        s = value.copy()
+        if not s.index.equals(index):
+            s = s.reindex(index)
+        return s.fillna(fill_value).astype(str)
+    if isinstance(value, (list, tuple, np.ndarray)):
+        arr = np.asarray(value, dtype=object).reshape(-1)
+        if arr.size < len(index):
+            padded = np.full(len(index), fill_value, dtype=object)
+            padded[:arr.size] = arr
+            arr = padded
+        elif arr.size > len(index):
+            arr = arr[-len(index):]
+        return pd.Series(arr, index=index, dtype=object).fillna(fill_value).astype(str)
+    return pd.Series(str(value), index=index, dtype=object)
+
+
+def _normalize_strategy_payload(df: pd.DataFrame, raw_signal: Any) -> Dict[str, Any]:
+    idx = df.index
+    payload: Dict[str, Any] = {
+        "signal": pd.Series(0, index=idx, dtype=int),
+        "entry_price": pd.Series(np.nan, index=idx, dtype=float),
+        "exit_price": pd.Series(np.nan, index=idx, dtype=float),
+        "position_size": pd.Series(np.nan, index=idx, dtype=float),
+        "trade_direction": pd.Series(np.nan, index=idx, dtype=float),
+        "entry_reason": pd.Series("", index=idx, dtype=object),
+        "exit_reason": pd.Series("", index=idx, dtype=object),
+        "meta": {},
+    }
+
+    signal_source = raw_signal
+    entry_price = None
+    exit_price = None
+    position_size = None
+    trade_direction = None
+    entry_reason = None
+    exit_reason = None
+    meta: Dict[str, Any] = {}
+
+    if isinstance(raw_signal, dict):
+        signal_source = (
+            raw_signal.get("signal")
+            if "signal" in raw_signal
+            else raw_signal.get("position", raw_signal.get("positions"))
+        )
+        entry_price = raw_signal.get("entry_price", raw_signal.get("entry_px"))
+        exit_price = raw_signal.get("exit_price", raw_signal.get("exit_px"))
+        position_size = raw_signal.get(
+            "position_size",
+            raw_signal.get("size", raw_signal.get("qty", raw_signal.get("quantity"))),
+        )
+        trade_direction = raw_signal.get(
+            "trade_direction",
+            raw_signal.get("entry_direction", raw_signal.get("roundtrip_direction")),
+        )
+        entry_reason = raw_signal.get("entry_reason")
+        exit_reason = raw_signal.get("exit_reason", raw_signal.get("reason"))
+        if isinstance(raw_signal.get("meta"), dict):
+            meta = dict(raw_signal["meta"])
+    elif isinstance(raw_signal, pd.DataFrame):
+        frame = raw_signal.copy()
+        if "signal" in frame.columns:
+            signal_source = frame["signal"]
+        elif len(frame.columns) > 0:
+            signal_source = frame.iloc[:, 0]
+        entry_price = frame["entry_price"] if "entry_price" in frame.columns else frame.get("entry_px")
+        exit_price = frame["exit_price"] if "exit_price" in frame.columns else frame.get("exit_px")
+        if "position_size" in frame.columns:
+            position_size = frame["position_size"]
+        elif "size" in frame.columns:
+            position_size = frame["size"]
+        elif "qty" in frame.columns:
+            position_size = frame["qty"]
+        elif "quantity" in frame.columns:
+            position_size = frame["quantity"]
+        if "trade_direction" in frame.columns:
+            trade_direction = frame["trade_direction"]
+        elif "entry_direction" in frame.columns:
+            trade_direction = frame["entry_direction"]
+        elif "roundtrip_direction" in frame.columns:
+            trade_direction = frame["roundtrip_direction"]
+        entry_reason = frame["entry_reason"] if "entry_reason" in frame.columns else None
+        if "exit_reason" in frame.columns:
+            exit_reason = frame["exit_reason"]
+        elif "reason" in frame.columns:
+            exit_reason = frame["reason"]
+        frame_meta = getattr(frame, "attrs", {}).get("meta")
+        if isinstance(frame_meta, dict):
+            meta = dict(frame_meta)
+    else:
+        maybe_meta = getattr(raw_signal, "meta", None)
+        if isinstance(maybe_meta, dict):
+            meta = dict(maybe_meta)
+        signal_attr = getattr(raw_signal, "signal", None)
+        if signal_attr is not None:
+            signal_source = signal_attr
+        entry_price = getattr(raw_signal, "entry_price", None)
+        exit_price = getattr(raw_signal, "exit_price", None)
+        position_size = getattr(raw_signal, "position_size", None)
+        trade_direction = getattr(
+            raw_signal,
+            "trade_direction",
+            getattr(raw_signal, "entry_direction", getattr(raw_signal, "roundtrip_direction", None)),
+        )
+        entry_reason = getattr(raw_signal, "entry_reason", None)
+        exit_reason = getattr(raw_signal, "exit_reason", None)
+
+    payload["signal"] = _normalize_signal_series(idx, signal_source)
+    payload["entry_price"] = _align_numeric_series(idx, entry_price, fill_value=np.nan)
+    payload["exit_price"] = _align_numeric_series(idx, exit_price, fill_value=np.nan)
+    payload["position_size"] = _align_numeric_series(idx, position_size, fill_value=np.nan)
+    payload["trade_direction"] = _align_numeric_series(idx, trade_direction, fill_value=np.nan)
+    payload["entry_reason"] = _align_text_series(idx, entry_reason, fill_value="")
+    payload["exit_reason"] = _align_text_series(idx, exit_reason, fill_value="")
+    payload["meta"] = meta
+    return payload
 
 
 # ─────────────────────────────────────────────
@@ -264,28 +445,9 @@ class RealisticSimulator:
 
     @staticmethod
     def _normalize_signal(df: pd.DataFrame, signal: Any) -> pd.Series:
-        if signal is None:
-            signal = pd.Series(0, index=df.index, dtype=int)
-        elif not isinstance(signal, pd.Series):
-            if isinstance(signal, (list, tuple, np.ndarray)):
-                arr = np.asarray(signal).reshape(-1)
-                if arr.size < len(df.index):
-                    padded = np.zeros(len(df.index), dtype=float)
-                    padded[:arr.size] = arr
-                    arr = padded
-                elif arr.size > len(df.index):
-                    arr = arr[-len(df.index):]
-                signal = pd.Series(arr, index=df.index)
-            elif isinstance(signal, (int, float, bool, np.number)):
-                v = 1 if signal > 0 else -1 if signal < 0 else 0
-                signal = pd.Series(v, index=df.index, dtype=int)
-            else:
-                signal = pd.Series(0, index=df.index, dtype=int)
-
-        if not signal.index.equals(df.index):
-            signal = signal.reindex(df.index).fillna(0.0)
-        signal = pd.to_numeric(signal, errors="coerce").fillna(0.0)
-        return pd.Series(np.sign(signal).astype(int), index=df.index, dtype=int)
+        if isinstance(signal, dict) or isinstance(signal, pd.DataFrame) or hasattr(signal, "signal"):
+            return _normalize_strategy_payload(df, signal)["signal"]
+        return _normalize_signal_series(df.index, signal)
 
     @staticmethod
     def _round_to_tick(price: float, tick: float) -> float:
@@ -561,6 +723,399 @@ class RealisticSimulator:
                 "trades": trade_logs,
                 "position": effective_position.astype(float),
                 "liquidations": liquidation_count,
+            }
+            return (
+                bar_returns,
+                n_trades,
+                trade_results,
+                total_cost,
+                long_returns,
+                short_returns,
+                details,
+            )
+        return bar_returns, n_trades, trade_results, total_cost, long_returns, short_returns
+
+
+class TradingViewSimulator:
+    """
+    TradingView 호환 모드용 경량 시뮬레이터.
+    - 시그널은 해당 봉 종가에서 반영
+    - 비용은 고정 commission만 사용
+    - 슬리피지/스프레드/펀딩/청산/거래소 제약은 적용하지 않음
+    """
+
+    def __init__(
+        self,
+        commission_rate: float = 0.00075,
+        max_position: float = 1.0,
+        starting_capital: float = 10_000.0,
+    ):
+        self.commission_rate = max(0.0, float(commission_rate))
+        self.max_position = max(0.0, float(max_position))
+        self.starting_capital = max(1.0, float(starting_capital))
+        self.last_settings: Dict[str, Any] = {}
+
+    @staticmethod
+    def _flatten_meta(meta: Any) -> Dict[str, Any]:
+        if not isinstance(meta, dict):
+            return {}
+        merged: Dict[str, Any] = {}
+        for key, value in meta.items():
+            if not isinstance(value, dict):
+                merged[key] = value
+        for nested_key in ("simulation", "backtest", "tradingview"):
+            nested = meta.get(nested_key)
+            if isinstance(nested, dict):
+                merged.update(nested)
+        return merged
+
+    @staticmethod
+    def _float_or_default(value: Any, default: float) -> float:
+        try:
+            if value is None or (isinstance(value, float) and np.isnan(value)):
+                return default
+            return float(value)
+        except Exception:
+            return default
+
+    def _resolve_commission_rate(self, config: Dict[str, Any]) -> float:
+        if "commission_rate" in config:
+            return max(0.0, self._float_or_default(config.get("commission_rate"), self.commission_rate))
+        if "commission_pct" in config:
+            return max(0.0, self._float_or_default(config.get("commission_pct"), self.commission_rate * 100.0) / 100.0)
+        if "commission_value" in config:
+            return max(0.0, self._float_or_default(config.get("commission_value"), self.commission_rate * 100.0) / 100.0)
+        return self.commission_rate
+
+    def _resolve_starting_capital(self, config: Dict[str, Any]) -> float:
+        return max(1.0, self._float_or_default(config.get("initial_capital"), self.starting_capital))
+
+    def _resolve_qty_type(self, config: Dict[str, Any]) -> str:
+        raw = str(config.get("qty_type", config.get("default_qty_type", "exposure"))).strip().lower()
+        aliases = {
+            "fixed": "fixed",
+            "contracts": "fixed",
+            "contract": "fixed",
+            "qty": "fixed",
+            "quantity": "fixed",
+            "cash": "cash",
+            "currency": "cash",
+            "notional": "cash",
+            "percent": "percent_of_equity",
+            "percent_of_equity": "percent_of_equity",
+            "pct_equity": "percent_of_equity",
+            "exposure": "exposure",
+            "leverage": "exposure",
+        }
+        return aliases.get(raw, "exposure")
+
+    def _resolve_qty_value(self, config: Dict[str, Any]) -> float:
+        for key in ("fixed_qty", "default_qty_value", "qty_value", "position_value"):
+            if key in config:
+                return abs(self._float_or_default(config.get(key), self.max_position))
+        return abs(self.max_position)
+
+    def _resolve_target_qty(
+        self,
+        direction: int,
+        qty_hint: float,
+        price: float,
+        equity_cash: float,
+        qty_type: str,
+        qty_value: float,
+        starting_capital: float,
+    ) -> float:
+        if direction == 0 or price <= 0:
+            return 0.0
+        if np.isfinite(qty_hint) and abs(float(qty_hint)) > 0:
+            return abs(float(qty_hint))
+
+        if qty_type == "fixed":
+            return abs(qty_value)
+        if qty_type == "cash":
+            notional = abs(qty_value)
+            return notional / price if price > 0 else 0.0
+        if qty_type == "percent_of_equity":
+            capital_base = equity_cash if abs(equity_cash) > 1e-9 else starting_capital
+            notional = max(capital_base, 0.0) * abs(qty_value) / 100.0
+            return notional / price if price > 0 else 0.0
+
+        capital_base = equity_cash if abs(equity_cash) > 1e-9 else starting_capital
+        notional = max(capital_base, 0.0) * abs(qty_value)
+        return notional / price if price > 0 else 0.0
+
+    @staticmethod
+    def _resolve_price(raw_price: float, fallback: float, low: float, high: float) -> float:
+        if not np.isfinite(raw_price) or raw_price <= 0:
+            return fallback
+        lo = min(low, high)
+        hi = max(low, high)
+        price = float(raw_price)
+        if lo <= price <= hi:
+            return price
+        if lo > 0 and price < lo and abs(lo - price) / lo <= 0.01:
+            return lo
+        if hi > 0 and price > hi and abs(price - hi) / hi <= 0.01:
+            return hi
+        return fallback
+
+    def run(
+        self,
+        df: pd.DataFrame,
+        signal: pd.Series,
+        return_details: bool = False,
+    ) -> tuple[pd.Series, int, list[float], pd.Series, pd.Series, pd.Series] | tuple[
+        pd.Series, int, list[float], pd.Series, pd.Series, pd.Series, Dict[str, Any]
+    ]:
+        required_cols = {"open", "high", "low", "close", "volume"}
+        if not required_cols.issubset(set(df.columns)):
+            missing = required_cols - set(df.columns)
+            raise ValueError(f"Missing OHLCV columns: {sorted(missing)}")
+
+        payload = _normalize_strategy_payload(df, signal)
+        signal = payload["signal"]
+        if len(df) < 2:
+            empty = pd.Series(0.0, index=df.index, dtype=float)
+            if return_details:
+                return empty, 0, [], empty, empty, empty, {"trades": [], "position": empty, "liquidations": 0}
+            return empty, 0, [], empty, empty, empty
+
+        config = self._flatten_meta(payload.get("meta", {}))
+        commission_rate = self._resolve_commission_rate(config)
+        starting_capital = self._resolve_starting_capital(config)
+        qty_type = self._resolve_qty_type(config)
+        qty_value = self._resolve_qty_value(config)
+
+        self.commission_rate = commission_rate
+        self.starting_capital = starting_capital
+        self.last_settings = {
+            "mode": "tradingview",
+            "commission_rate": commission_rate,
+            "commission_pct": commission_rate * 100.0,
+            "initial_capital": starting_capital,
+            "qty_type": qty_type,
+            "qty_value": qty_value,
+        }
+
+        close_px = pd.to_numeric(df["close"], errors="coerce").ffill().bfill()
+        high_px = pd.to_numeric(df["high"], errors="coerce").ffill().bfill()
+        low_px = pd.to_numeric(df["low"], errors="coerce").ffill().bfill()
+        entry_px_hint = payload["entry_price"]
+        exit_px_hint = payload["exit_price"]
+        size_hint = payload["position_size"]
+        trade_dir_hint = payload["trade_direction"]
+        exit_reason = payload["exit_reason"]
+
+        bar_returns = pd.Series(0.0, index=df.index, dtype=float)
+        total_cost = pd.Series(0.0, index=df.index, dtype=float)
+        long_returns = pd.Series(0.0, index=df.index, dtype=float)
+        short_returns = pd.Series(0.0, index=df.index, dtype=float)
+        effective_position = pd.Series(0.0, index=df.index, dtype=float)
+
+        current_pos = 0
+        current_qty = 0.0
+        entry_price = 0.0
+        entry_time = None
+        entry_equity_cash = starting_capital
+        trade_cost_accum_cash = 0.0
+        equity_cash = starting_capital
+        trade_results: list[float] = []
+        trade_logs: list[Dict[str, Any]] = []
+
+        for i in range(len(df)):
+            idx = df.index[i]
+            close_i = float(close_px.iloc[i])
+            low_i = float(low_px.iloc[i])
+            high_i = float(high_px.iloc[i])
+            prev_close = float(close_px.iloc[i - 1]) if i > 0 else close_i
+
+            base_equity = equity_cash if abs(equity_cash) > 1e-9 else starting_capital
+            bar_pnl_cash = 0.0
+            bar_cost_cash = 0.0
+            long_cash = 0.0
+            short_cash = 0.0
+
+            desired_pos = int(signal.iloc[i])
+            target_qty = self._resolve_target_qty(
+                desired_pos,
+                float(size_hint.iloc[i]),
+                close_i,
+                equity_cash,
+                qty_type,
+                qty_value,
+                starting_capital,
+            )
+            intrabar_dir = int(np.sign(float(trade_dir_hint.iloc[i]))) if np.isfinite(float(trade_dir_hint.iloc[i])) else 0
+            has_same_bar_roundtrip = (
+                current_pos == 0
+                and desired_pos == 0
+                and intrabar_dir != 0
+                and np.isfinite(float(entry_px_hint.iloc[i]))
+                and np.isfinite(float(exit_px_hint.iloc[i]))
+            )
+
+            if has_same_bar_roundtrip:
+                qty = self._resolve_target_qty(
+                    intrabar_dir,
+                    float(size_hint.iloc[i]),
+                    float(entry_px_hint.iloc[i]),
+                    equity_cash,
+                    qty_type,
+                    qty_value,
+                    starting_capital,
+                )
+                if qty > 0:
+                    rt_entry_px = self._resolve_price(
+                        float(entry_px_hint.iloc[i]),
+                        close_i,
+                        low_i,
+                        high_i,
+                    )
+                    rt_exit_px = self._resolve_price(
+                        float(exit_px_hint.iloc[i]),
+                        close_i,
+                        low_i,
+                        high_i,
+                    )
+                    open_cost_cash = abs(qty) * rt_entry_px * commission_rate
+                    close_cost_cash = abs(qty) * rt_exit_px * commission_rate
+                    pnl_cash = (rt_exit_px - rt_entry_px) * qty * intrabar_dir
+                    total_trade_pnl_cash = pnl_cash - open_cost_cash - close_cost_cash
+
+                    bar_pnl_cash += total_trade_pnl_cash
+                    bar_cost_cash += open_cost_cash + close_cost_cash
+                    if intrabar_dir > 0:
+                        long_cash += pnl_cash
+                    else:
+                        short_cash += pnl_cash
+
+                    trade_ret = total_trade_pnl_cash / base_equity
+                    trade_results.append(float(trade_ret))
+                    trade_logs.append(
+                        {
+                            "entry_time": pd.Timestamp(idx).isoformat(),
+                            "exit_time": pd.Timestamp(idx).isoformat(),
+                            "direction": "LONG" if intrabar_dir > 0 else "SHORT",
+                            "entry_price": float(rt_entry_px),
+                            "exit_price": float(rt_exit_px),
+                            "size": float(abs(qty)),
+                            "pnl_pct": float(trade_ret),
+                            "pnl": float(total_trade_pnl_cash),
+                            "reason": str(exit_reason.iloc[i]).strip() or "intrabar",
+                        }
+                    )
+
+                    bar_returns.iloc[i] = bar_pnl_cash / base_equity
+                    total_cost.iloc[i] = bar_cost_cash / base_equity
+                    long_returns.iloc[i] = long_cash / base_equity
+                    short_returns.iloc[i] = short_cash / base_equity
+                    effective_position.iloc[i] = 0.0
+                    equity_cash += bar_pnl_cash
+                    continue
+
+            needs_rebalance = (
+                desired_pos != current_pos
+                or (desired_pos != 0 and abs(target_qty - current_qty) > 1e-12)
+            )
+
+            if current_pos != 0 and not needs_rebalance:
+                pnl_cash = (close_i - prev_close) * current_qty * current_pos
+                bar_pnl_cash += pnl_cash
+                if current_pos > 0:
+                    long_cash += pnl_cash
+                else:
+                    short_cash += pnl_cash
+            else:
+                if current_pos != 0:
+                    exit_px = self._resolve_price(
+                        float(exit_px_hint.iloc[i]),
+                        close_i,
+                        low_i,
+                        high_i,
+                    )
+                    pnl_cash = (exit_px - prev_close) * current_qty * current_pos
+                    bar_pnl_cash += pnl_cash
+                    if current_pos > 0:
+                        long_cash += pnl_cash
+                    else:
+                        short_cash += pnl_cash
+
+                    close_cost_cash = abs(current_qty) * exit_px * commission_rate
+                    bar_pnl_cash -= close_cost_cash
+                    bar_cost_cash += close_cost_cash
+
+                    trade_pnl_cash = (
+                        (exit_px - entry_price) * current_qty * current_pos
+                        - trade_cost_accum_cash
+                        - close_cost_cash
+                    )
+                    trade_base = entry_equity_cash if abs(entry_equity_cash) > 1e-9 else starting_capital
+                    trade_ret = trade_pnl_cash / trade_base
+                    reason = str(exit_reason.iloc[i]).strip() or (
+                        "reverse" if desired_pos != 0 and desired_pos != current_pos else "signal"
+                    )
+                    trade_results.append(float(trade_ret))
+                    trade_logs.append(
+                        {
+                            "entry_time": pd.Timestamp(entry_time).isoformat() if entry_time is not None else None,
+                            "exit_time": pd.Timestamp(idx).isoformat(),
+                            "direction": "LONG" if current_pos > 0 else "SHORT",
+                            "entry_price": float(entry_price),
+                            "exit_price": float(exit_px),
+                            "size": float(abs(current_qty)),
+                            "pnl_pct": float(trade_ret),
+                            "pnl": float(trade_pnl_cash),
+                            "reason": reason,
+                        }
+                    )
+
+                    current_pos = 0
+                    current_qty = 0.0
+                    entry_price = 0.0
+                    entry_time = None
+                    entry_equity_cash = equity_cash + bar_pnl_cash
+                    trade_cost_accum_cash = 0.0
+
+                if desired_pos != 0 and target_qty > 0:
+                    open_px = self._resolve_price(
+                        float(entry_px_hint.iloc[i]),
+                        close_i,
+                        low_i,
+                        high_i,
+                    )
+                    entry_base_cash = equity_cash + bar_pnl_cash
+                    open_cost_cash = abs(target_qty) * open_px * commission_rate
+                    bar_pnl_cash -= open_cost_cash
+                    bar_cost_cash += open_cost_cash
+
+                    pnl_after_entry_cash = (close_i - open_px) * target_qty * desired_pos
+                    bar_pnl_cash += pnl_after_entry_cash
+                    if desired_pos > 0:
+                        long_cash += pnl_after_entry_cash
+                    else:
+                        short_cash += pnl_after_entry_cash
+
+                    current_pos = desired_pos
+                    current_qty = float(target_qty)
+                    entry_price = float(open_px)
+                    entry_time = idx
+                    entry_equity_cash = entry_base_cash
+                    trade_cost_accum_cash = open_cost_cash
+
+            bar_returns.iloc[i] = bar_pnl_cash / base_equity
+            total_cost.iloc[i] = bar_cost_cash / base_equity
+            long_returns.iloc[i] = long_cash / base_equity
+            short_returns.iloc[i] = short_cash / base_equity
+            effective_position.iloc[i] = current_pos * current_qty
+            equity_cash += bar_pnl_cash
+
+        n_trades = len(trade_results)
+        if return_details:
+            details = {
+                "trades": trade_logs,
+                "position": effective_position.astype(float),
+                "liquidations": 0,
+                "simulation_settings": dict(self.last_settings),
             }
             return (
                 bar_returns,
@@ -1026,28 +1581,46 @@ def strategy_from_code(code: str) -> Callable:
     if "generate_signal" in namespace:
         original_fn = namespace["generate_signal"]
 
-        def _normalize_to_series(raw_signal, test_df: pd.DataFrame) -> pd.Series:
-            """전략 함수 반환값을 항상 test_df.index 기준의 -1/0/1 Series로 강제 변환."""
+        def _extract_backtest_meta(ns: Dict[str, Any]) -> Dict[str, Any]:
+            meta: Dict[str, Any] = {}
+            direct_meta = ns.get("BACKTEST_META")
+            if isinstance(direct_meta, dict):
+                meta.update(direct_meta)
+
+            tv_meta = ns.get("TRADINGVIEW_META")
+            if isinstance(tv_meta, dict):
+                meta.setdefault("tradingview", {}).update(tv_meta)
+
+            tv_conf: Dict[str, Any] = {}
+            if ns.get("TV_INITIAL_CAPITAL") is not None:
+                tv_conf["initial_capital"] = float(ns["TV_INITIAL_CAPITAL"])
+            if ns.get("TV_QTY_TYPE") is not None:
+                tv_conf["qty_type"] = str(ns["TV_QTY_TYPE"]).strip().lower()
+            if ns.get("TV_FIXED_QTY") is not None:
+                tv_conf["fixed_qty"] = float(ns["TV_FIXED_QTY"])
+            if ns.get("TV_DEFAULT_QTY_VALUE") is not None:
+                tv_conf["default_qty_value"] = float(ns["TV_DEFAULT_QTY_VALUE"])
+            if ns.get("TV_COMMISSION_RATE") is not None:
+                tv_conf["commission_rate"] = float(ns["TV_COMMISSION_RATE"])
+            elif ns.get("TV_COMMISSION_PCT") is not None:
+                tv_conf["commission_pct"] = float(ns["TV_COMMISSION_PCT"])
+            elif ns.get("TV_COMMISSION_VALUE") is not None:
+                tv_conf["commission_pct"] = float(ns["TV_COMMISSION_VALUE"])
+            if tv_conf:
+                meta.setdefault("tradingview", {}).update(tv_conf)
+            return meta
+
+        def _normalize_output(raw_signal, test_df: pd.DataFrame) -> Dict[str, Any]:
             idx = test_df.index
-            zero_sig = pd.Series(0, index=idx, dtype=int)
 
-            if raw_signal is None:
-                return zero_sig
-
-            # Signal 객체 / dict 호환
-            if isinstance(raw_signal, dict):
-                signal_val = raw_signal.get("signal")
-                if isinstance(signal_val, (int, float, bool, np.number)):
-                    v = 1 if signal_val > 0 else -1 if signal_val < 0 else 0
-                    return pd.Series(v, index=idx, dtype=int)
+            if isinstance(raw_signal, dict) and "signal" not in raw_signal:
                 entry = bool(raw_signal.get("entry", False))
                 exit_signal = bool(raw_signal.get("exit", False))
                 direction = str(raw_signal.get("direction", "long")).lower()
-                if exit_signal:
-                    return zero_sig
-                if entry:
-                    return pd.Series(-1 if direction == "short" else 1, index=idx, dtype=int)
-                return zero_sig
+                raw_signal = {
+                    **raw_signal,
+                    "signal": -1 if (entry and direction == "short") else (1 if entry else 0),
+                } if (entry or exit_signal) else {"signal": 0, **raw_signal}
 
             entry_attr = getattr(raw_signal, "entry", None)
             exit_attr = getattr(raw_signal, "exit", None)
@@ -1055,49 +1628,28 @@ def strategy_from_code(code: str) -> Callable:
                 entry = bool(getattr(raw_signal, "entry", False))
                 exit_signal = bool(getattr(raw_signal, "exit", False))
                 direction = str(getattr(raw_signal, "direction", "long")).lower()
-                if exit_signal:
-                    return zero_sig
-                if entry:
-                    return pd.Series(-1 if direction == "short" else 1, index=idx, dtype=int)
-                return zero_sig
+                raw_signal = {
+                    "signal": -1 if (entry and direction == "short") else (1 if entry else 0),
+                    "meta": getattr(raw_signal, "meta", {}) if isinstance(getattr(raw_signal, "meta", {}), dict) else {},
+                }
+                if exit_signal and not entry:
+                    raw_signal["signal"] = 0
 
-            # 숫자 스칼라 → 전구간 동일 시그널
-            if isinstance(raw_signal, (int, float, bool, np.number)):
-                v = 1 if raw_signal > 0 else -1 if raw_signal < 0 else 0
-                return pd.Series(v, index=idx, dtype=int)
-
-            # DataFrame이면 signal 컬럼 우선, 없으면 첫 컬럼 사용
-            if isinstance(raw_signal, pd.DataFrame):
-                if raw_signal.empty:
-                    return zero_sig
-                raw_signal = raw_signal["signal"] if "signal" in raw_signal.columns else raw_signal.iloc[:, 0]
-
-            # 시퀀스/시리즈 처리
-            if isinstance(raw_signal, pd.Series):
-                s = raw_signal.copy()
-                # 인덱스가 다르면 test_df 인덱스로 강제 정렬
-                if not s.index.equals(idx):
-                    s = s.reindex(idx)
-                s = pd.to_numeric(s, errors="coerce").fillna(0.0)
-                s = np.sign(s).astype(int)
-                return pd.Series(s, index=idx, dtype=int)
-
-            if isinstance(raw_signal, (list, tuple, np.ndarray)):
-                arr = np.asarray(raw_signal).reshape(-1)
-                if arr.size == 0:
-                    return zero_sig
-                if arr.size < len(idx):
-                    padded = np.zeros(len(idx), dtype=float)
-                    padded[:arr.size] = arr
-                    arr = padded
-                elif arr.size > len(idx):
-                    arr = arr[-len(idx):]
-                s = pd.to_numeric(pd.Series(arr, index=idx), errors="coerce").fillna(0.0)
-                s = np.sign(s).astype(int)
-                return pd.Series(s, index=idx, dtype=int)
-
-            # 알 수 없는 타입은 안전하게 관망 처리
-            return zero_sig
+            payload = _normalize_strategy_payload(test_df, raw_signal)
+            extracted_meta = _extract_backtest_meta(namespace)
+            if extracted_meta:
+                merged_meta = {}
+                if isinstance(payload.get("meta"), dict):
+                    merged_meta.update(payload["meta"])
+                for key, value in extracted_meta.items():
+                    if isinstance(value, dict) and isinstance(merged_meta.get(key), dict):
+                        merged_meta[key] = {**merged_meta[key], **value}
+                    else:
+                        merged_meta[key] = value
+                payload["meta"] = merged_meta
+            if not isinstance(payload.get("signal"), pd.Series):
+                payload["signal"] = pd.Series(0, index=idx, dtype=int)
+            return payload
 
         # 안전장치가 적용된 래퍼 함수 생성
         def safe_generate_signal(train_df, test_df):
@@ -1119,7 +1671,7 @@ def strategy_from_code(code: str) -> Callable:
                 raw = original_fn(train_df, test_df)
             except Exception:
                 raise
-            return _normalize_to_series(raw, test_df)
+            return _normalize_output(raw, test_df)
 
         return safe_generate_signal
 
@@ -1184,7 +1736,14 @@ def strategy_from_code(code: str) -> Callable:
 
                             current_val = _normalize_signal(s, current_val)
                             signals.append(current_val)
-                        return pd.Series(signals, index=test_df.index).fillna(0)
+                        payload = {
+                            "signal": pd.Series(signals, index=test_df.index).fillna(0),
+                            "meta": {},
+                        }
+                        extracted_meta = namespace.get("BACKTEST_META")
+                        if isinstance(extracted_meta, dict):
+                            payload["meta"] = extracted_meta
+                        return payload
                     except Exception as e:
                         # 0 같은 불친절한 에러를 방지하기 위해 상세 에러 로깅
                         raise RuntimeError(f"Strategy Internal Error: {e}")

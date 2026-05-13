@@ -13,7 +13,13 @@ import pandas as pd
 
 from server.shared.market.provider import fetch_ohlcv_dataframe, parse_date_to_ms, sanitize_symbol
 from server.shared.db.supabase import SupabaseManager
-from server.modules.backtest.backtest_engine import BacktestEngine, RealisticSimulator, strategy_from_code, compute_metrics
+from server.modules.backtest.backtest_engine import (
+    BacktestEngine,
+    RealisticSimulator,
+    TradingViewSimulator,
+    strategy_from_code,
+    compute_metrics,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -477,6 +483,18 @@ def _candles_payload(frame: pd.DataFrame) -> List[Dict[str, Any]]:
     return out
 
 
+def _normalize_simulation_mode(mode: Optional[str]) -> str:
+    value = str(mode or "realistic").strip().lower()
+    aliases = {
+        "realistic": "realistic",
+        "default": "realistic",
+        "tv": "tradingview",
+        "tradingview": "tradingview",
+        "trading_view": "tradingview",
+    }
+    return aliases.get(value, "realistic")
+
+
 def _compute_side_stats(trades: List[Any], side: str) -> Tuple[int, float, float, float]:
     selected = [t for t in trades if str(t.direction).lower() == side.lower()]
     pnls = [float(t.pnl) for t in selected]
@@ -505,6 +523,7 @@ def run_skill_backtest(
     end_date: Optional[str] = None,
     include_candles: bool = True,
     code: Optional[str] = None,
+    simulation_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     # 1. 전략 소스 확보 (제공된 코드 또는 DB/로컬 조회)
     if code:
@@ -565,9 +584,14 @@ def run_skill_backtest(
     freq = TF_BARS_PER_DAY.get(interval, 24)
     min_train_bars = max(120, freq * 7)
     min_eval_bars = max(80, freq * 5)
-    use_oos = len(df) >= (min_train_bars + min_eval_bars)
+    simulation_mode = _normalize_simulation_mode(simulation_mode)
+    use_oos = simulation_mode != "tradingview" and len(df) >= (min_train_bars + min_eval_bars)
 
-    if use_oos:
+    if simulation_mode == "tradingview":
+        split_idx = 0
+        train_df = df
+        eval_df = df
+    elif use_oos:
         split_idx = int(len(df) * 0.60)
         split_idx = max(min_train_bars, min(split_idx, len(df) - min_eval_bars))
         train_df = df.iloc[:split_idx]
@@ -582,13 +606,22 @@ def run_skill_backtest(
     except Exception as exc:
         return {"success": False, "error": f"Strategy execution error: {exc}"}
 
-    # 4. 현실화 시뮬레이션 구동 (다음봉 체결/동적 슬리피지/청산/거래소 제약)
-    sim = RealisticSimulator(max_position=max(0.0, float(leverage)), freq=freq)
+    # 4. 시뮬레이션 구동
+    if simulation_mode == "tradingview":
+        sim = TradingViewSimulator(
+            commission_rate=0.00075,
+            max_position=max(0.0, float(leverage)),
+            starting_capital=10_000.0,
+        )
+    else:
+        sim = RealisticSimulator(max_position=max(0.0, float(leverage)), freq=freq)
     rets, n_trades, trade_results, costs, l_rets, s_rets, details = sim.run(
         eval_df,
         signal,
         return_details=True,
     )
+    sim_starting_capital = float(getattr(sim, "starting_capital", 10_000.0))
+    simulation_settings = details.get("simulation_settings", {}) if isinstance(details, dict) else {}
 
     effective_pos = details.get("position", pd.Series(0.0, index=eval_df.index, dtype=float))
     pos_sign = pd.Series(np.sign(pd.to_numeric(effective_pos, errors="coerce").fillna(0.0)).astype(int), index=eval_df.index)
@@ -675,11 +708,20 @@ def run_skill_backtest(
     # 7. 결과 조립
     return {
         "success": True,
-        "framework": "trinity-native-v3-realistic",
+        "framework": (
+            "trinity-native-v4-tradingview"
+            if simulation_mode == "tradingview"
+            else "trinity-native-v4-realistic"
+        ),
+        "simulation_mode": simulation_mode,
         "symbol": sanitize_symbol(symbol),
         "interval": interval,
         "strategy": strategy,
-        "scoring_mode": "out_of_sample" if use_oos else "full_range_fallback",
+        "scoring_mode": (
+            "tradingview_compatible_full_range"
+            if simulation_mode == "tradingview"
+            else ("out_of_sample" if use_oos else "full_range_fallback")
+        ),
         "analysis_period": {
             "start": str(eval_df.index[0]),
             "end": str(eval_df.index[-1]),
@@ -689,6 +731,7 @@ def run_skill_backtest(
         },
         "results": {
             "total_return": float(metrics.total_return * 100),
+            "gross_return": float(metrics.gross_return * 100),
             "max_drawdown": abs(float(metrics.max_drawdown * 100)),
             "sharpe_ratio": float(metrics.sharpe),
             "sortino_ratio": float(metrics.sortino),
@@ -708,16 +751,17 @@ def run_skill_backtest(
             "max_consecutive_losses": int(metrics.max_consecutive_losses),
             "buy_hold": float(metrics.buy_hold_return * 100),
             "alpha": float((metrics.total_return - metrics.buy_hold_return) * 100),
-            "total_fees": float(metrics.total_fees * 10000), 
+            "total_fees": float(metrics.total_fees * sim_starting_capital),
             "long_return": float(metrics.long_return * 100),
             "long_pf": float(metrics.long_pf),
             "short_return": float(metrics.short_return * 100),
             "short_pf": float(metrics.short_pf),
             "expected_return": float(metrics.expected_return * 100),
-            "total_pnl": float(metrics.total_return * 10000), 
+            "total_pnl": float(metrics.total_return * sim_starting_capital),
         },
+        "simulation_settings": simulation_settings,
         "trades": trades_payload,
         "markers": markers,
-        "candles": _candles_payload(eval_df) if include_candles else [],
+        "candles": _candles_payload(df) if include_candles else [],
         "equity_curve": equity_curve
     }

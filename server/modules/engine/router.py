@@ -41,6 +41,18 @@ class BacktestAnalysisRequest(BaseModel):
     results: Dict[str, Any] = Field(default_factory=dict)
 
 
+class BacktestRunRequest(BaseModel):
+    symbol: str = "BTCUSDT"
+    interval: str = "1h"
+    strategy: str = "optPredator"
+    leverage: float = 10.0
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    include_candles: bool = True
+    code: Optional[str] = None
+    simulation_mode: str = "realistic"
+
+
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -125,6 +137,7 @@ async def run_backtest_endpoint(
     end_date: Optional[str] = Query(None, description="종료일 (YYYY-MM-DD, UTC)"),
     include_candles: bool = Query(True, description="캔들 포함 여부"),
     code: Optional[str] = Query(None, description="커스텀 전략 소스 코드 (제공 시 실시간 실행)"),
+    simulation_mode: str = Query("realistic", description="백테스트 엔진 모드: realistic | tradingview"),
 ):
     try:
         return run_skill_backtest(
@@ -136,6 +149,27 @@ async def run_backtest_endpoint(
             end_date=end_date,
             include_candles=include_candles,
             code=code,
+            simulation_mode=simulation_mode,
+        )
+    except Exception as exc:
+        logger.exception("Backtest error")
+        return {"success": False, "error": str(exc)}
+
+
+@router.post("/run")
+async def run_backtest_endpoint_post(req: BacktestRunRequest):
+    """코드가 긴 경우를 위한 POST 버전 (GET URL 길이 제한 우회)"""
+    try:
+        return run_skill_backtest(
+            symbol=req.symbol,
+            interval=req.interval,
+            strategy=req.strategy,
+            leverage=req.leverage,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            include_candles=req.include_candles,
+            code=req.code,
+            simulation_mode=req.simulation_mode,
         )
     except Exception as exc:
         logger.exception("Backtest error")
